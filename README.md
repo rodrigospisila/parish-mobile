@@ -1,35 +1,63 @@
-# Parish Mobile
+# 📱 Parish Mobile - Expo Router (2025)
 
-Aplicativo mobile do sistema Parish desenvolvido com Expo e React Native.
+Aplicativo mobile do sistema Parish desenvolvido com **Expo Router** e **React Native**, seguindo as **melhores práticas de 2025**.
 
 ## 🚀 Tecnologias
 
-- Expo SDK 52
-- React Native
-- TypeScript
-- React Navigation
-- Axios
-- AsyncStorage
+- **Expo SDK 54** - Framework React Native
+- **Expo Router** - Navegação baseada em arquivos (file-based routing)
+- **TypeScript** - Tipagem estática
+- **Axios** - Cliente HTTP
+- **AsyncStorage** - Armazenamento local
 
-## 📱 Funcionalidades
+## 📁 Estrutura (Melhores Práticas 2025)
 
-- ✅ Autenticação (Login/Registro)
-- ✅ Home com acesso rápido
-- ✅ Liturgia Diária
-- 🚧 Eventos (em desenvolvimento)
-- 🚧 Escalas (em desenvolvimento)
-- 🚧 Perfil (em desenvolvimento)
+```
+app/                    # Rotas (Expo Router)
+├── (auth)/            # Grupo de autenticação
+│   ├── login.tsx
+│   └── register.tsx
+├── (tabs)/            # Grupo de tabs
+│   ├── index.tsx     # Home
+│   ├── liturgy.tsx
+│   ├── events.tsx
+│   └── profile.tsx
+└── _layout.tsx        # Layout raiz
 
-## 🛠️ Como Executar
+src/
+├── contexts/          # Contextos React
+├── hooks/             # Custom hooks
+├── services/          # Serviços de API
+├── types/             # Tipos TypeScript
+└── utils/             # Utilitários
+```
+
+## 📦 Instalação
 
 ```bash
 npm install
 npm start
 ```
 
-Escaneie o QR code com o app Expo Go para testar no dispositivo.
+## ⚙️ Configuração
 
-## 📖 Documentação Completa
+Edite `src/constants/api.ts` com o IP da sua máquina:
 
-Consulte o repositório para documentação detalhada.
+```typescript
+export const API_BASE_URL = 'http://SEU_IP:3000/api/v1';
+```
+
+## 🆕 Novidades 2025
+
+✅ **Expo Router** - File-based routing  
+✅ **Grupos de rotas** - `(auth)` e `(tabs)`  
+✅ **Estrutura `/src`** - Separação clara  
+✅ **Services Layer** - Camada de serviços  
+✅ **Custom Hooks** - Hooks reutilizáveis  
+✅ **Path Aliases** - Imports limpos com `@/`
+
+## 🔗 Repositórios
+
+- Backend: [parish-backend](https://github.com/rodrigospisila/parish-backend)
+- Web: [parish-web](https://github.com/rodrigospisila/parish-web)
 

@@ -1,24 +1,23 @@
-import React, { createContext, useState, useContext, useEffect } from 'react';
-import { authService, LoginCredentials, RegisterData } from '../services/auth';
-
-interface User {
-  id: string;
-  email: string;
-  fullName: string;
-  role: string;
-}
+import React, { createContext, useState, useEffect, ReactNode } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { authService } from '@/services/auth.service';
+import type { User, LoginRequest, RegisterRequest } from '@/types';
 
 interface AuthContextData {
   user: User | null;
   loading: boolean;
-  signIn: (credentials: LoginCredentials) => Promise<void>;
-  signUp: (data: RegisterData) => Promise<void>;
+  signIn: (credentials: LoginRequest) => Promise<void>;
+  signUp: (data: RegisterRequest) => Promise<void>;
   signOut: () => Promise<void>;
 }
 
-const AuthContext = createContext<AuthContextData>({} as AuthContextData);
+export const AuthContext = createContext<AuthContextData>({} as AuthContextData);
 
-export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+interface AuthProviderProps {
+  children: ReactNode;
+}
+
+export function AuthProvider({ children }: AuthProviderProps) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -28,33 +27,51 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   async function loadStoredData() {
     try {
-      const storedUser = await authService.getStoredUser();
-      const storedToken = await authService.getStoredToken();
+      const [storedUser, accessToken] = await AsyncStorage.multiGet([
+        'user',
+        'accessToken',
+      ]);
 
-      if (storedUser && storedToken) {
-        setUser(storedUser);
+      if (storedUser[1] && accessToken[1]) {
+        setUser(JSON.parse(storedUser[1]));
       }
     } catch (error) {
-      console.error('Erro ao carregar dados armazenados:', error);
+      console.error('Error loading stored data:', error);
     } finally {
       setLoading(false);
     }
   }
 
-  async function signIn(credentials: LoginCredentials) {
+  async function signIn(credentials: LoginRequest) {
     try {
       const response = await authService.login(credentials);
+      
+      await AsyncStorage.multiSet([
+        ['user', JSON.stringify(response.user)],
+        ['accessToken', response.accessToken],
+        ['refreshToken', response.refreshToken],
+      ]);
+
       setUser(response.user);
     } catch (error) {
+      console.error('Error signing in:', error);
       throw error;
     }
   }
 
-  async function signUp(data: RegisterData) {
+  async function signUp(data: RegisterRequest) {
     try {
       const response = await authService.register(data);
+      
+      await AsyncStorage.multiSet([
+        ['user', JSON.stringify(response.user)],
+        ['accessToken', response.accessToken],
+        ['refreshToken', response.refreshToken],
+      ]);
+
       setUser(response.user);
     } catch (error) {
+      console.error('Error signing up:', error);
       throw error;
     }
   }
@@ -62,34 +79,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   async function signOut() {
     try {
       await authService.logout();
-      setUser(null);
     } catch (error) {
-      console.error('Erro ao fazer logout:', error);
+      console.error('Error logging out:', error);
+    } finally {
+      await AsyncStorage.multiRemove(['user', 'accessToken', 'refreshToken']);
+      setUser(null);
     }
   }
 
   return (
-    <AuthContext.Provider
-      value={{
-        user,
-        loading,
-        signIn,
-        signUp,
-        signOut,
-      }}
-    >
+    <AuthContext.Provider value={{ user, loading, signIn, signUp, signOut }}>
       {children}
     </AuthContext.Provider>
   );
-};
-
-export function useAuth() {
-  const context = useContext(AuthContext);
-
-  if (!context) {
-    throw new Error('useAuth deve ser usado dentro de um AuthProvider');
-  }
-
-  return context;
 }
 

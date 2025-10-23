@@ -1,19 +1,19 @@
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-
-const API_URL = 'http://localhost:3000/api/v1';
+import { API_BASE_URL } from '@/constants/api';
 
 const api = axios.create({
-  baseURL: API_URL,
+  baseURL: API_BASE_URL,
+  timeout: 10000,
   headers: {
     'Content-Type': 'application/json',
   },
 });
 
-// Interceptor para adicionar o token em todas as requisições
+// Request interceptor to add auth token
 api.interceptors.request.use(
   async (config) => {
-    const token = await AsyncStorage.getItem('@parish:token');
+    const token = await AsyncStorage.getItem('accessToken');
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
@@ -24,15 +24,36 @@ api.interceptors.request.use(
   }
 );
 
-// Interceptor para tratar erros de autenticação
+// Response interceptor to handle 401 errors
 api.interceptors.response.use(
   (response) => response,
   async (error) => {
-    if (error.response?.status === 401) {
-      // Token expirado ou inválido
-      await AsyncStorage.multiRemove(['@parish:token', '@parish:user']);
-      // Aqui você pode redirecionar para a tela de login
+    const originalRequest = error.config;
+
+    if (error.response?.status === 401 && !originalRequest._retry) {
+      originalRequest._retry = true;
+
+      try {
+        const refreshToken = await AsyncStorage.getItem('refreshToken');
+        if (refreshToken) {
+          const response = await axios.post(`${API_BASE_URL}/auth/refresh`, {
+            refreshToken,
+          });
+
+          const { accessToken } = response.data;
+          await AsyncStorage.setItem('accessToken', accessToken);
+
+          originalRequest.headers.Authorization = `Bearer ${accessToken}`;
+          return api(originalRequest);
+        }
+      } catch (refreshError) {
+        // Refresh failed, clear tokens and redirect to login
+        await AsyncStorage.multiRemove(['accessToken', 'refreshToken', 'user']);
+        // The auth context will handle the redirect
+        return Promise.reject(refreshError);
+      }
     }
+
     return Promise.reject(error);
   }
 );
