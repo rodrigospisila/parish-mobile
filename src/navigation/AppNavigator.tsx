@@ -13,9 +13,10 @@ import RegisterScreen from '../screens/RegisterScreen';
 // Main Screens
 import HomeScreen from '../screens/HomeScreen';
 import LiturgyScreen from '../screens/LiturgyScreen';
-
-// Placeholder screens (to be implemented)
-import PlaceholderScreen from '../screens/PlaceholderScreen';
+import EventsScreen from '../screens/EventsScreen';
+import EventDetailsScreen from '../screens/EventDetailsScreen';
+import SchedulesScreen from '../screens/SchedulesScreen';
+import ProfileScreen from '../screens/ProfileScreen';
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -25,6 +26,33 @@ function AuthStack() {
     <Stack.Navigator screenOptions={{ headerShown: false }}>
       <Stack.Screen name="Login" component={LoginScreen} />
       <Stack.Screen name="Register" component={RegisterScreen} />
+    </Stack.Navigator>
+  );
+}
+
+function EventsStack() {
+  return (
+    <Stack.Navigator
+      screenOptions={{
+        headerStyle: {
+          backgroundColor: '#6B46C1',
+        },
+        headerTintColor: '#fff',
+        headerTitleStyle: {
+          fontWeight: 'bold',
+        },
+      }}
+    >
+      <Stack.Screen
+        name="EventsList"
+        component={EventsScreen}
+        options={{ title: 'Eventos' }}
+      />
+      <Stack.Screen
+        name="EventDetails"
+        component={EventDetailsScreen}
+        options={{ title: 'Detalhes do Evento' }}
+      />
     </Stack.Navigator>
   );
 }
@@ -77,15 +105,24 @@ function HomeTabs() {
       />
       <Tab.Screen
         name="Events"
-        component={PlaceholderScreen}
+        component={EventsStack}
         options={{
           title: 'Eventos',
           tabBarLabel: 'Eventos',
+          headerShown: false,
+        }}
+      />
+      <Tab.Screen
+        name="Schedules"
+        component={SchedulesScreen}
+        options={{
+          title: 'Minhas Escalas',
+          tabBarLabel: 'Escalas',
         }}
       />
       <Tab.Screen
         name="Profile"
-        component={PlaceholderScreen}
+        component={ProfileScreen}
         options={{
           title: 'Perfil',
           tabBarLabel: 'Perfil',

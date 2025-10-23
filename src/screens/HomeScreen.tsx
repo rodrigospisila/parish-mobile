@@ -12,12 +12,12 @@ export default function HomeScreen({ navigation }: any) {
   const { user } = useAuth();
 
   const menuItems = [
-    { title: 'Liturgia Diária', icon: '📖', screen: 'Liturgy', color: '#6B46C1' },
-    { title: 'Eventos', icon: '📅', screen: 'Events', color: '#10B981' },
-    { title: 'Escalas', icon: '👥', screen: 'Schedules', color: '#F59E0B' },
-    { title: 'Pedidos de Oração', icon: '🙏', screen: 'PrayerRequests', color: '#EF4444' },
-    { title: 'Intenções de Missa', icon: '⛪', screen: 'MassIntentions', color: '#8B5CF6' },
-    { title: 'Horários de Missa', icon: '🕐', screen: 'MassSchedules', color: '#3B82F6' },
+    { title: 'Liturgia Diária', icon: '📖', screen: 'Liturgy', color: '#6B46C1', enabled: true },
+    { title: 'Eventos', icon: '📅', screen: 'Events', color: '#10B981', enabled: true },
+    { title: 'Escalas', icon: '👥', screen: 'Schedules', color: '#F59E0B', enabled: true },
+    { title: 'Pedidos de Oração', icon: '🙏', screen: 'PrayerRequests', color: '#EF4444', enabled: false },
+    { title: 'Intenções de Missa', icon: '⛪', screen: 'MassIntentions', color: '#8B5CF6', enabled: false },
+    { title: 'Horários de Missa', icon: '🕐', screen: 'MassSchedules', color: '#3B82F6', enabled: false },
   ];
 
   return (
@@ -31,11 +31,19 @@ export default function HomeScreen({ navigation }: any) {
         {menuItems.map((item, index) => (
           <TouchableOpacity
             key={index}
-            style={[styles.card, { backgroundColor: item.color }]}
-            onPress={() => navigation.navigate(item.screen)}
+            style={[
+              styles.card,
+              { backgroundColor: item.color },
+              !item.enabled && styles.cardDisabled,
+            ]}
+            onPress={() => item.enabled && navigation.navigate(item.screen)}
+            disabled={!item.enabled}
           >
             <Text style={styles.cardIcon}>{item.icon}</Text>
             <Text style={styles.cardTitle}>{item.title}</Text>
+            {!item.enabled && (
+              <Text style={styles.comingSoon}>Em breve</Text>
+            )}
           </TouchableOpacity>
         ))}
       </View>
@@ -101,6 +109,15 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#fff',
     textAlign: 'center',
+  },
+  cardDisabled: {
+    opacity: 0.6,
+  },
+  comingSoon: {
+    fontSize: 10,
+    color: '#fff',
+    marginTop: 4,
+    fontStyle: 'italic',
   },
   section: {
     padding: 16,
