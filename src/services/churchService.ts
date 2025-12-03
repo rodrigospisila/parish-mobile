@@ -22,12 +22,6 @@ export interface Diocese {
 export const churchService = {
   async getDioceses(): Promise<Diocese[]> {
     try {
-      // O backend não tem um endpoint para listar tudo de uma vez,
-      // mas para simplificar a implementação do picker, vamos simular
-      // que um endpoint /church/hierarchy existe.
-      // No backend real, o endpoint seria /dioceses, /parishes, /communities
-      // e a hierarquia seria montada no frontend ou um endpoint customizado.
-
       // Mock de dados para desenvolvimento
       const mockData: Diocese[] = [
         {
