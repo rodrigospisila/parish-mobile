@@ -1,4 +1,4 @@
-'''import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { View, Text, Button, StyleSheet, ActivityIndicator, ScrollView, Alert } from 'react-native';
 import { Link, router } from 'expo-router';
 import TextInput from '../../src/components/TextInput';
@@ -180,4 +180,3 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
 });
-'''
