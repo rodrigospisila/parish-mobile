@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { View, Text, Button, StyleSheet, ActivityIndicator, ScrollView, Alert } from 'react-native';
 import { Stack, router } from 'expo-router';
-import ChurchPicker from '../src/components/ChurchPicker'; // Usando o nome ChurchPicker
+import PickerInput from '../src/components/PickerInput'; // Usando o nome ChurchPicker
 import { Diocese, Parish, Community, getDioceses } from '../src/services/churchService';
 import { useAuth } from '../src/context/AuthContext';
 import { authService } from '../src/services/authService';
@@ -101,7 +101,7 @@ export default function SelectCommunityScreen() {
       <Text style={styles.title}>Bem-vindo(a)!</Text>
       <Text style={styles.subtitle}>Para continuar, selecione sua comunidade:</Text>
 
-      <ChurchPicker
+      <PickerInput
         label="Diocese"
         selectedValue={selectedDioceseId}
         onValueChange={handleDioceseChange}
@@ -109,7 +109,7 @@ export default function SelectCommunityScreen() {
         placeholder="Selecione sua Diocese"
       />
 
-      <ChurchPicker
+      <PickerInput
         label="Paróquia"
         selectedValue={selectedParishId}
         onValueChange={handleParishChange}
@@ -118,7 +118,7 @@ export default function SelectCommunityScreen() {
         disabled={!selectedDioceseId || availableParishes.length === 0}
       />
 
-      <ChurchPicker
+      <PickerInput
         label="Comunidade"
         selectedValue={selectedCommunityId}
         onValueChange={handleCommunityChange}
