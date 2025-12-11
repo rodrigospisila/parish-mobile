@@ -1,8 +1,8 @@
 import { Stack, Link } from 'expo-router';
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, Button, Alert, ScrollView } from 'react-native';
-import TextInput from '../../../src/components/TextInput';
-import { useAuth } from '../../../src/context/AuthContext';
+import TextInput from '../../src/components/TextInput';
+import { useAuth } from '../../src/context/AuthContext';
 
 export default function RegisterScreen() {
   const { register } = useAuth();
