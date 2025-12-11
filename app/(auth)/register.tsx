@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+'''import React, { useState, useEffect, useMemo } from 'react';
 import { View, Text, Button, StyleSheet, ActivityIndicator, ScrollView, Alert } from 'react-native';
 import { Link, router } from 'expo-router';
 import TextInput from '../../src/components/TextInput';
@@ -21,9 +21,15 @@ export default function RegisterScreen() {
 
   useEffect(() => {
     const loadDioceses = async () => {
-      const data = await churchService.getDioceses();
-      setDioceses(data);
-      setIsLoading(false);
+      try {
+        const data = await churchService.getDioceses();
+        setDioceses(data);
+      } catch (error) {
+        Alert.alert('Erro', 'Não foi possível carregar os dados da Igreja.');
+        console.error(error);
+      } finally {
+        setIsLoading(false);
+      }
     };
     loadDioceses();
   }, []);
@@ -174,3 +180,4 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
 });
+'''
