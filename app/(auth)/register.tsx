@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { View, Text, Button, StyleSheet, ActivityIndicator, ScrollView, Alert } from 'react-native';
 import { Link, router } from 'expo-router';
 import TextInput from '../../src/components/TextInput';
-import PickerInput from '../../src/components/PickerInput';
+import ChurchPicker from '../../src/components/ChurchPicker';
 import { churchService, Diocese, Parish, Community } from '../../src/services/churchService';
 import { authService } from '../../src/services/authService';
 import { useAuth } from '../../src/context/AuthContext';
@@ -121,7 +121,7 @@ export default function RegisterScreen() {
         secureTextEntry
       />
 
-      <PickerInput
+      <ChurchPicker
         label="Diocese"
         selectedValue={selectedDioceseId}
         onValueChange={handleDioceseChange}
@@ -129,7 +129,7 @@ export default function RegisterScreen() {
         placeholder="Selecione sua Diocese"
       />
 
-      <PickerInput
+      <ChurchPicker
         label="Paróquia"
         selectedValue={selectedParishId}
         onValueChange={handleParishChange}
@@ -138,7 +138,7 @@ export default function RegisterScreen() {
         disabled={!selectedDioceseId}
       />
 
-      <PickerInput
+      <ChurchPicker
         label="Comunidade"
         selectedValue={selectedCommunityId}
         onValueChange={(value) => setSelectedCommunityId(typeof value === 'string' ? parseInt(value, 10) : value)}

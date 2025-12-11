@@ -2,7 +2,7 @@ import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { Picker } from '@react-native-picker/picker';
 
-interface PickerInputProps {
+interface ChurchPickerProps {
   label: string;
   selectedValue: number | string | undefined;
   onValueChange: (itemValue: any, itemIndex: number) => void;
@@ -11,7 +11,7 @@ interface PickerInputProps {
   disabled?: boolean;
 }
 
-const PickerInput: React.FC<PickerInputProps> = ({
+const ChurchPicker: React.FC<ChurchPickerProps> = ({
   label,
   selectedValue,
   onValueChange,
@@ -65,4 +65,4 @@ const styles = StyleSheet.create({
   },
 });
 
-export default PickerInput;
+export default ChurchPicker;
