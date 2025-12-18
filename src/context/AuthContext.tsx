@@ -1,5 +1,5 @@
 import { router, useSegments, useRootNavigationState } from 'expo-router';
-import React, { createContext, useContext, useEffect, useState, useRef } from 'react';
+import React, { createContext, useContext, useEffect, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { User, authService } from '../services/authService';
 
@@ -28,7 +28,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
   const segments = useSegments();
   const navigationState = useRootNavigationState();
-  const hasNavigated = useRef(false);
 
   // Carregar usuário do AsyncStorage
   useEffect(() => {
@@ -51,30 +50,36 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const loggedUser = await authService.login(data);
     setUser(loggedUser);
     await AsyncStorage.setItem('user', JSON.stringify(loggedUser));
-    hasNavigated.current = false; // Reset para permitir nova navegação
+    
+    // Navegação direta após login bem-sucedido
+    if (loggedUser.communityId) {
+      router.replace('/(tabs)');
+    } else {
+      router.replace('/select-community');
+    }
   };
 
   const register = async (data: any) => {
     const registeredUser = await authService.register(data);
     setUser(registeredUser);
     await AsyncStorage.setItem('user', JSON.stringify(registeredUser));
-    hasNavigated.current = false; // Reset para permitir nova navegação
+    
+    // Novo usuário sempre vai para seleção de comunidade
+    router.replace('/select-community');
   };
 
   const signOut = async () => {
     setUser(null);
     await AsyncStorage.removeItem('user');
-    hasNavigated.current = false; // Reset para permitir nova navegação
     router.replace('/(auth)/login');
   };
   
   const updateUser = (updatedUser: User) => {
     setUser(updatedUser);
     AsyncStorage.setItem('user', JSON.stringify(updatedUser));
-    hasNavigated.current = false; // Reset para permitir nova navegação após atualização
   };
 
-  // Lógica de redirecionamento - executa apenas uma vez por mudança de estado
+  // Lógica de redirecionamento apenas para carregamento inicial (restore session)
   useEffect(() => {
     // Aguarda o estado de navegação estar pronto
     if (!navigationState?.key) return;
@@ -82,34 +87,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const inAuthGroup = segments[0] === '(auth)';
     const inSelectCommunity = segments[0] === 'select-community';
+    const inTabsGroup = segments[0] === '(tabs)';
 
-    // Evita navegação duplicada
-    if (hasNavigated.current) return;
-
+    // Apenas redireciona em casos específicos de restauração de sessão
     if (user) {
-      // Usuário logado
+      // Usuário logado - se estiver na tela de auth, redireciona
       if (inAuthGroup) {
-        // Se estiver no grupo de autenticação, redireciona
-        hasNavigated.current = true;
-        if (!user.communityId) {
-          router.replace('/select-community');
-        } else {
+        if (user.communityId) {
           router.replace('/(tabs)');
+        } else {
+          router.replace('/select-community');
         }
-      } else if (!user.communityId && !inSelectCommunity) {
-        // Se não tiver communityId e não estiver no wizard, redireciona para o wizard
-        hasNavigated.current = true;
-        router.replace('/select-community');
       }
-      // Se já estiver nas tabs ou no select-community, não faz nada
     } else {
-      // Usuário deslogado
+      // Usuário deslogado - se não estiver na tela de auth, redireciona
       if (!inAuthGroup) {
-        hasNavigated.current = true;
         router.replace('/(auth)/login');
       }
     }
-  }, [user, isLoading, segments, navigationState?.key]);
+  }, [isLoading, navigationState?.key]); // Removido 'user' e 'segments' para evitar loops
 
   return (
     <AuthContext.Provider
