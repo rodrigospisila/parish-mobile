@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { View, Text, Button, StyleSheet, ActivityIndicator } from 'react-native';
 import { useAuth } from '../../src/context/AuthContext';
 import { getNextMass, Event } from '../../src/services/eventService';
-import { formatDateTime } from '../../src/utils/dateUtils';
+import { formatDateTimeBR } from '../../src/utils/dateUtils';
 
 export default function HomeScreen() {
   const { signOut, user } = useAuth();
@@ -38,7 +38,7 @@ export default function HomeScreen() {
     return (
       <View style={styles.massCard}>
         <Text style={styles.massTitle}>{nextMass.title}</Text>
-        <Text style={styles.massDetail}>Data: {formatDateTime(nextMass.date)}</Text>
+        <Text style={styles.massDetail}>Data: {formatDateTimeBR(nextMass.date)}</Text>
         <Text style={styles.massDetail}>Local: {nextMass.location}</Text>
         <Text style={styles.massDetail}>Tipo: {nextMass.type}</Text>
       </View>
