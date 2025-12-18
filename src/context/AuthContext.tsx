@@ -1,5 +1,5 @@
-import { router, useSegments } from 'expo-router';
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import { router, useSegments, useRootNavigationState } from 'expo-router';
+import React, { createContext, useContext, useEffect, useState, useRef } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { User, authService } from '../services/authService';
 
@@ -27,6 +27,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const segments = useSegments();
+  const navigationState = useRootNavigationState();
+  const hasNavigated = useRef(false);
 
   // Carregar usuário do AsyncStorage
   useEffect(() => {
@@ -49,50 +51,65 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const loggedUser = await authService.login(data);
     setUser(loggedUser);
     await AsyncStorage.setItem('user', JSON.stringify(loggedUser));
+    hasNavigated.current = false; // Reset para permitir nova navegação
   };
 
   const register = async (data: any) => {
     const registeredUser = await authService.register(data);
     setUser(registeredUser);
     await AsyncStorage.setItem('user', JSON.stringify(registeredUser));
+    hasNavigated.current = false; // Reset para permitir nova navegação
   };
 
   const signOut = async () => {
     setUser(null);
     await AsyncStorage.removeItem('user');
+    hasNavigated.current = false; // Reset para permitir nova navegação
     router.replace('/(auth)/login');
   };
   
   const updateUser = (updatedUser: User) => {
     setUser(updatedUser);
     AsyncStorage.setItem('user', JSON.stringify(updatedUser));
+    hasNavigated.current = false; // Reset para permitir nova navegação após atualização
   };
 
-  // Lógica de redirecionamento
+  // Lógica de redirecionamento - executa apenas uma vez por mudança de estado
   useEffect(() => {
-    if (!isLoading) {
-      const inAuthGroup = segments[0] === '(auth)';
-      const inTabsGroup = segments[0] === '(tabs)';
-      const inSelectCommunity = segments[0] === 'select-community';
+    // Aguarda o estado de navegação estar pronto
+    if (!navigationState?.key) return;
+    if (isLoading) return;
 
-      if (user) {
-        // Usuário logado
-        if (inAuthGroup) {
-          // Se estiver no grupo de autenticação, redireciona para a Home
-          router.replace('/(tabs)');
-        } else if (!user.communityId && !inSelectCommunity) {
-          // Se não tiver communityId e não estiver no wizard, redireciona para o wizard
+    const inAuthGroup = segments[0] === '(auth)';
+    const inSelectCommunity = segments[0] === 'select-community';
+
+    // Evita navegação duplicada
+    if (hasNavigated.current) return;
+
+    if (user) {
+      // Usuário logado
+      if (inAuthGroup) {
+        // Se estiver no grupo de autenticação, redireciona
+        hasNavigated.current = true;
+        if (!user.communityId) {
           router.replace('/select-community');
-        } else if (user.communityId && !inTabsGroup && !inSelectCommunity) {
-          // Se tiver communityId e não estiver nas tabs, redireciona para a Home
+        } else {
           router.replace('/(tabs)');
         }
-      } else if (!user && !inAuthGroup) {
-        // Usuário deslogado e não está no grupo de autenticação, redireciona para o Login
+      } else if (!user.communityId && !inSelectCommunity) {
+        // Se não tiver communityId e não estiver no wizard, redireciona para o wizard
+        hasNavigated.current = true;
+        router.replace('/select-community');
+      }
+      // Se já estiver nas tabs ou no select-community, não faz nada
+    } else {
+      // Usuário deslogado
+      if (!inAuthGroup) {
+        hasNavigated.current = true;
         router.replace('/(auth)/login');
       }
     }
-  }, [user, isLoading, segments]);
+  }, [user, isLoading, segments, navigationState?.key]);
 
   return (
     <AuthContext.Provider
