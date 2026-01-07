@@ -222,6 +222,8 @@ export const authService = {
 
   /**
    * Atualiza a comunidade do usuário
+   * Usa o endpoint /users/me/community que permite qualquer usuário autenticado
+   * atualizar sua própria comunidade (usado no fluxo de onboarding)
    */
   async updateCommunity(userId: string, communityId: string): Promise<User> {
     // Modo Mock
@@ -229,9 +231,9 @@ export const authService = {
       return mockUpdateCommunity(userId, communityId);
     }
 
-    // Chamada real para a API
+    // Chamada real para a API - usa endpoint específico para atualizar própria comunidade
     try {
-      const response = await api.patch<User>(`/users/${userId}`, { communityId });
+      const response = await api.patch<User>('/users/me/community', { communityId });
       
       // Atualiza o usuário no AsyncStorage
       await saveUser(response.data);
