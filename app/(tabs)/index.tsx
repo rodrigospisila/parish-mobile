@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, ActivityIndicator, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, ActivityIndicator, SafeAreaView } from 'react-native';
 import { useAuth } from '../../src/context/AuthContext';
 import { useColors } from '../../src/context/ThemeContext';
 import { getNextMass, Event } from '../../src/services/eventService';
@@ -52,19 +52,25 @@ export default function HomeScreen() {
   };
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>Bem-vindo(a), {user?.name}!</Text>
+    <SafeAreaView style={styles.safeArea}>
+      <View style={styles.container}>
+        <Text style={styles.title}>Bem-vindo(a), {user?.name}!</Text>
 
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>Próxima Missa</Text>
-        {renderNextMass()}
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Próxima Missa</Text>
+          {renderNextMass()}
+        </View>
       </View>
-    </View>
+    </SafeAreaView>
   );
 }
 
 const createStyles = (colors: ReturnType<typeof useColors>) =>
   StyleSheet.create({
+    safeArea: {
+      flex: 1,
+      backgroundColor: colors.background,
+    },
     container: {
       flex: 1,
       padding: 20,
