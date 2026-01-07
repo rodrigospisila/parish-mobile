@@ -3,6 +3,7 @@ import { useEffect } from 'react';
 import { View, ActivityIndicator, StatusBar } from 'react-native';
 import { AuthProvider, useAuth } from '../src/context/AuthContext';
 import { ThemeProvider, useTheme } from '../src/context/ThemeContext';
+import { NotificationProvider } from '../src/context/NotificationContext';
 
 // Componente interno que gerencia a navegação baseada no estado de autenticação
 function RootLayoutNav() {
@@ -61,11 +62,21 @@ function RootLayoutNav() {
   );
 }
 
+// Componente que envolve o RootLayoutNav com o NotificationProvider
+// O NotificationProvider precisa estar dentro do AuthProvider para ter acesso ao user
+function RootLayoutWithNotifications() {
+  return (
+    <NotificationProvider>
+      <RootLayoutNav />
+    </NotificationProvider>
+  );
+}
+
 export default function RootLayout() {
   return (
     <ThemeProvider>
       <AuthProvider>
-        <RootLayoutNav />
+        <RootLayoutWithNotifications />
       </AuthProvider>
     </ThemeProvider>
   );

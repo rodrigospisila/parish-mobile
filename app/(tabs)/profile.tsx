@@ -1,12 +1,24 @@
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Alert, Switch, SafeAreaView, ScrollView } from 'react-native';
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  Alert,
+  Switch,
+  SafeAreaView,
+  ScrollView,
+} from 'react-native';
 import { useAuth } from '../../src/context/AuthContext';
 import { useColors, useTheme } from '../../src/context/ThemeContext';
+import { useNotifications } from '../../src/context/NotificationContext';
 
 export default function ProfileScreen() {
   const { user, signOut } = useAuth();
   const colors = useColors();
   const { theme, setTheme, isDark } = useTheme();
+  const { settings, isPermissionGranted, scheduledCount, updateSettings, testNotification } =
+    useNotifications();
 
   const handleSignOut = () => {
     Alert.alert(
@@ -31,6 +43,63 @@ export default function ProfileScreen() {
     setTheme(value ? 'dark' : 'light');
   };
 
+  const handleNotificationToggle = async (value: boolean) => {
+    if (value && !isPermissionGranted) {
+      Alert.alert(
+        'Permissão Necessária',
+        'Para receber notificações, você precisa permitir nas configurações do dispositivo.',
+        [{ text: 'OK' }]
+      );
+      return;
+    }
+    await updateSettings({ enabled: value });
+  };
+
+  const handleEventRemindersToggle = async (value: boolean) => {
+    await updateSettings({ eventReminders: value });
+  };
+
+  const handleRosterRemindersToggle = async (value: boolean) => {
+    await updateSettings({ rosterReminders: value });
+  };
+
+  const handleReminderTimeChange = () => {
+    Alert.alert(
+      'Tempo de Antecedência',
+      'Escolha quanto tempo antes do evento você deseja ser notificado:',
+      [
+        { text: '15 minutos', onPress: () => updateSettings({ reminderTime: 15 }) },
+        { text: '30 minutos', onPress: () => updateSettings({ reminderTime: 30 }) },
+        { text: '1 hora', onPress: () => updateSettings({ reminderTime: 60 }) },
+        { text: '2 horas', onPress: () => updateSettings({ reminderTime: 120 }) },
+        { text: '1 dia', onPress: () => updateSettings({ reminderTime: 1440 }) },
+        { text: 'Cancelar', style: 'cancel' },
+      ]
+    );
+  };
+
+  const handleTestNotification = async () => {
+    if (!isPermissionGranted) {
+      Alert.alert(
+        'Permissão Necessária',
+        'Você precisa permitir notificações para testar.',
+        [{ text: 'OK' }]
+      );
+      return;
+    }
+    await testNotification();
+    Alert.alert('Notificação Enviada', 'Verifique a central de notificações do seu dispositivo.');
+  };
+
+  const formatReminderTime = (minutes: number): string => {
+    if (minutes >= 1440) {
+      return `${Math.floor(minutes / 1440)} dia(s)`;
+    } else if (minutes >= 60) {
+      return `${Math.floor(minutes / 60)} hora(s)`;
+    }
+    return `${minutes} minutos`;
+  };
+
   const styles = createStyles(colors);
 
   return (
@@ -38,9 +107,7 @@ export default function ProfileScreen() {
       <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
         <View style={styles.header}>
           <View style={styles.avatar}>
-            <Text style={styles.avatarText}>
-              {user?.name?.charAt(0).toUpperCase() || 'U'}
-            </Text>
+            <Text style={styles.avatarText}>{user?.name?.charAt(0).toUpperCase() || 'U'}</Text>
           </View>
           <Text style={styles.userName}>{user?.name || 'Usuário'}</Text>
           <Text style={styles.userEmail}>{user?.email || ''}</Text>
@@ -72,11 +139,98 @@ export default function ProfileScreen() {
         </View>
 
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Preferências</Text>
+          <Text style={styles.sectionTitle}>Notificações</Text>
 
           <View style={styles.card}>
             <View style={styles.preferenceRow}>
-              <View>
+              <View style={styles.preferenceTextContainer}>
+                <Text style={styles.preferenceLabel}>Notificações</Text>
+                <Text style={styles.preferenceDescription}>
+                  {isPermissionGranted
+                    ? settings.enabled
+                      ? `${scheduledCount} notificações agendadas`
+                      : 'Desativadas'
+                    : 'Permissão não concedida'}
+                </Text>
+              </View>
+              <Switch
+                value={settings.enabled && isPermissionGranted}
+                onValueChange={handleNotificationToggle}
+                trackColor={{ false: colors.border, true: colors.primary }}
+                thumbColor={settings.enabled ? colors.textInverse : colors.card}
+              />
+            </View>
+
+            {settings.enabled && isPermissionGranted && (
+              <>
+                <View style={styles.divider} />
+
+                <View style={styles.preferenceRow}>
+                  <View style={styles.preferenceTextContainer}>
+                    <Text style={styles.preferenceLabel}>Lembretes de Eventos</Text>
+                    <Text style={styles.preferenceDescription}>
+                      Receber lembretes antes dos eventos
+                    </Text>
+                  </View>
+                  <Switch
+                    value={settings.eventReminders}
+                    onValueChange={handleEventRemindersToggle}
+                    trackColor={{ false: colors.border, true: colors.primary }}
+                    thumbColor={settings.eventReminders ? colors.textInverse : colors.card}
+                  />
+                </View>
+
+                <View style={styles.divider} />
+
+                <View style={styles.preferenceRow}>
+                  <View style={styles.preferenceTextContainer}>
+                    <Text style={styles.preferenceLabel}>Lembretes de Escalas</Text>
+                    <Text style={styles.preferenceDescription}>
+                      Receber lembretes quando estiver escalado
+                    </Text>
+                  </View>
+                  <Switch
+                    value={settings.rosterReminders}
+                    onValueChange={handleRosterRemindersToggle}
+                    trackColor={{ false: colors.border, true: colors.primary }}
+                    thumbColor={settings.rosterReminders ? colors.textInverse : colors.card}
+                  />
+                </View>
+
+                <View style={styles.divider} />
+
+                <TouchableOpacity style={styles.preferenceRow} onPress={handleReminderTimeChange}>
+                  <View style={styles.preferenceTextContainer}>
+                    <Text style={styles.preferenceLabel}>Tempo de Antecedência</Text>
+                    <Text style={styles.preferenceDescription}>
+                      Notificar {formatReminderTime(settings.reminderTime)} antes
+                    </Text>
+                  </View>
+                  <Text style={styles.chevron}>›</Text>
+                </TouchableOpacity>
+
+                <View style={styles.divider} />
+
+                <TouchableOpacity style={styles.preferenceRow} onPress={handleTestNotification}>
+                  <View style={styles.preferenceTextContainer}>
+                    <Text style={styles.preferenceLabel}>Testar Notificação</Text>
+                    <Text style={styles.preferenceDescription}>
+                      Enviar uma notificação de teste
+                    </Text>
+                  </View>
+                  <Text style={styles.chevron}>›</Text>
+                </TouchableOpacity>
+              </>
+            )}
+          </View>
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Aparência</Text>
+
+          <View style={styles.card}>
+            <View style={styles.preferenceRow}>
+              <View style={styles.preferenceTextContainer}>
                 <Text style={styles.preferenceLabel}>Modo Escuro</Text>
                 <Text style={styles.preferenceDescription}>
                   {theme === 'system' ? 'Seguindo o sistema' : isDark ? 'Ativado' : 'Desativado'}
@@ -92,19 +246,14 @@ export default function ProfileScreen() {
 
             <View style={styles.divider} />
 
-            <TouchableOpacity
-              style={styles.preferenceRow}
-              onPress={() => setTheme('system')}
-            >
-              <View>
+            <TouchableOpacity style={styles.preferenceRow} onPress={() => setTheme('system')}>
+              <View style={styles.preferenceTextContainer}>
                 <Text style={styles.preferenceLabel}>Usar tema do sistema</Text>
                 <Text style={styles.preferenceDescription}>
                   Alternar automaticamente entre claro e escuro
                 </Text>
               </View>
-              {theme === 'system' && (
-                <Text style={styles.checkmark}>✓</Text>
-              )}
+              {theme === 'system' && <Text style={styles.checkmark}>✓</Text>}
             </TouchableOpacity>
           </View>
         </View>
@@ -112,6 +261,10 @@ export default function ProfileScreen() {
         <TouchableOpacity style={styles.signOutButton} onPress={handleSignOut}>
           <Text style={styles.signOutText}>Sair da Conta</Text>
         </TouchableOpacity>
+
+        <View style={styles.versionContainer}>
+          <Text style={styles.versionText}>Parish App v1.0.0</Text>
+        </View>
       </ScrollView>
     </SafeAreaView>
   );
@@ -199,6 +352,10 @@ const createStyles = (colors: ReturnType<typeof useColors>) =>
       alignItems: 'center',
       padding: 16,
     },
+    preferenceTextContainer: {
+      flex: 1,
+      marginRight: 10,
+    },
     preferenceLabel: {
       fontSize: 16,
       color: colors.text,
@@ -213,9 +370,12 @@ const createStyles = (colors: ReturnType<typeof useColors>) =>
       color: colors.primary,
       fontWeight: 'bold',
     },
+    chevron: {
+      fontSize: 20,
+      color: colors.textTertiary,
+    },
     signOutButton: {
       marginTop: 30,
-      marginBottom: 30,
       marginHorizontal: 16,
       backgroundColor: colors.error,
       padding: 16,
@@ -226,5 +386,14 @@ const createStyles = (colors: ReturnType<typeof useColors>) =>
       color: '#fff',
       fontSize: 16,
       fontWeight: '600',
+    },
+    versionContainer: {
+      alignItems: 'center',
+      paddingVertical: 20,
+      marginBottom: 20,
+    },
+    versionText: {
+      fontSize: 12,
+      color: colors.textTertiary,
     },
   });
