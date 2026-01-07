@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import { Calendar, DateData, LocaleConfig } from 'react-native-calendars';
 import { useAuth } from '../../src/context/AuthContext';
+import { useColors, useTheme } from '../../src/context/ThemeContext';
 import { getCommunityEvents, Event } from '../../src/services/eventService';
 import { formatToBrazilianDate } from '../../src/utils/dateUtils';
 
@@ -44,15 +45,10 @@ const eventTypeLabels: { [key: string]: string } = {
   ATIVIDADE: 'Atividade',
 };
 
-// Mapeamento de tipos de evento para cores
-const eventTypeColors: { [key: string]: string } = {
-  MISSA: '#E74C3C',
-  REUNIAO: '#3498DB',
-  ATIVIDADE: '#27AE60',
-};
-
 export default function CalendarScreen() {
   const { user } = useAuth();
+  const colors = useColors();
+  const { isDark } = useTheme();
   const [events, setEvents] = useState<Event[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [selectedDate, setSelectedDate] = useState<string>(new Date().toISOString().split('T')[0]);
@@ -60,6 +56,16 @@ export default function CalendarScreen() {
   const [isModalVisible, setIsModalVisible] = useState(false);
 
   const communityId = user?.communityId;
+
+  // Mapeamento de tipos de evento para cores (usando cores do tema)
+  const eventTypeColors = useMemo(
+    () => ({
+      MISSA: colors.eventMissa,
+      REUNIAO: colors.eventReuniao,
+      ATIVIDADE: colors.eventAtividade,
+    }),
+    [colors]
+  );
 
   // 1. Carregar Eventos
   useEffect(() => {
@@ -91,22 +97,22 @@ export default function CalendarScreen() {
       const date = event.date.split('T')[0];
       marked[date] = {
         marked: true,
-        dotColor: eventTypeColors[event.type] || '#00adf5',
+        dotColor: eventTypeColors[event.type as keyof typeof eventTypeColors] || colors.highlight,
         selected: date === selectedDate,
-        selectedColor: date === selectedDate ? '#00adf5' : undefined,
+        selectedColor: date === selectedDate ? colors.highlight : undefined,
       };
     });
 
     // Garante que a data selecionada esteja marcada
     if (!marked[selectedDate]) {
-      marked[selectedDate] = { selected: true, selectedColor: '#00adf5' };
+      marked[selectedDate] = { selected: true, selectedColor: colors.highlight };
     } else {
       marked[selectedDate].selected = true;
-      marked[selectedDate].selectedColor = '#00adf5';
+      marked[selectedDate].selectedColor = colors.highlight;
     }
 
     return marked;
-  }, [events, selectedDate]);
+  }, [events, selectedDate, colors, eventTypeColors]);
 
   // 3. Filtrar eventos para a data selecionada
   const eventsForSelectedDate = useMemo(() => {
@@ -129,6 +135,33 @@ export default function CalendarScreen() {
     setSelectedEvent(null);
   };
 
+  const styles = createStyles(colors);
+
+  // Tema do calendário baseado no modo escuro/claro
+  const calendarTheme = useMemo(
+    () => ({
+      backgroundColor: colors.surface,
+      calendarBackground: colors.surface,
+      textSectionTitleColor: colors.textSecondary,
+      selectedDayBackgroundColor: colors.highlight,
+      selectedDayTextColor: colors.textInverse,
+      todayTextColor: colors.highlight,
+      dayTextColor: colors.text,
+      textDisabledColor: colors.disabled,
+      dotColor: colors.highlight,
+      selectedDotColor: colors.textInverse,
+      arrowColor: colors.primary,
+      monthTextColor: colors.text,
+      textDayFontWeight: '300' as const,
+      textMonthFontWeight: 'bold' as const,
+      textDayHeaderFontWeight: '500' as const,
+      textDayFontSize: 16,
+      textMonthFontSize: 18,
+      textDayHeaderFontSize: 14,
+    }),
+    [colors]
+  );
+
   if (!communityId) {
     return (
       <View style={styles.centered}>
@@ -140,8 +173,8 @@ export default function CalendarScreen() {
   if (isLoading) {
     return (
       <View style={styles.centered}>
-        <ActivityIndicator size="large" color="#00adf5" />
-        <Text style={{ marginTop: 10 }}>Carregando Calendário...</Text>
+        <ActivityIndicator size="large" color={colors.primary} />
+        <Text style={styles.loadingText}>Carregando Calendário...</Text>
       </View>
     );
   }
@@ -149,20 +182,11 @@ export default function CalendarScreen() {
   return (
     <View style={styles.container}>
       <Calendar
+        key={isDark ? 'dark' : 'light'}
         onDayPress={onDayPress}
         markedDates={markedDates}
         markingType={'dot'}
-        theme={{
-          todayTextColor: '#00adf5',
-          selectedDayBackgroundColor: '#00adf5',
-          dotColor: '#00adf5',
-          textDayFontWeight: '300',
-          textMonthFontWeight: 'bold',
-          textDayHeaderFontWeight: '500',
-          textDayFontSize: 16,
-          textMonthFontSize: 18,
-          textDayHeaderFontSize: 16,
-        }}
+        theme={calendarTheme}
       />
 
       <View style={styles.eventsContainer}>
@@ -181,7 +205,11 @@ export default function CalendarScreen() {
                 <View
                   style={[
                     styles.eventTypeIndicator,
-                    { backgroundColor: eventTypeColors[event.type] || '#00adf5' },
+                    {
+                      backgroundColor:
+                        eventTypeColors[event.type as keyof typeof eventTypeColors] ||
+                        colors.highlight,
+                    },
                   ]}
                 />
                 <Text style={styles.eventTime}>
@@ -215,7 +243,11 @@ export default function CalendarScreen() {
                   <View
                     style={[
                       styles.modalTypeTag,
-                      { backgroundColor: eventTypeColors[selectedEvent.type] || '#00adf5' },
+                      {
+                        backgroundColor:
+                          eventTypeColors[selectedEvent.type as keyof typeof eventTypeColors] ||
+                          colors.highlight,
+                      },
                     ]}
                   >
                     <Text style={styles.modalTypeText}>
@@ -249,7 +281,7 @@ export default function CalendarScreen() {
                   </View>
                 )}
 
-                {/* Placeholder para Escalas de Serviço (será implementado no próximo passo) */}
+                {/* Placeholder para Escalas de Serviço */}
                 <View style={styles.serviceRosterPlaceholder}>
                   <Text style={styles.serviceRosterTitle}>📋 Escalas de Serviço</Text>
                   <Text style={styles.serviceRosterText}>
@@ -269,169 +301,177 @@ export default function CalendarScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#fff',
-  },
-  centered: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  message: {
-    fontSize: 16,
-    color: '#666',
-  },
-  eventsContainer: {
-    flex: 1,
-    padding: 15,
-    borderTopWidth: 1,
-    borderTopColor: '#eee',
-  },
-  eventsTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    marginBottom: 10,
-  },
-  eventsList: {
-    flex: 1,
-  },
-  eventItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 10,
-    padding: 12,
-    backgroundColor: '#f9f9f9',
-    borderRadius: 8,
-  },
-  eventTypeIndicator: {
-    width: 4,
-    height: '100%',
-    borderRadius: 2,
-    marginRight: 10,
-    minHeight: 40,
-  },
-  eventTime: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#00adf5',
-    marginRight: 12,
-    minWidth: 50,
-  },
-  eventDetails: {
-    flex: 1,
-  },
-  eventTitle: {
-    fontSize: 16,
-    fontWeight: '500',
-  },
-  eventLocation: {
-    fontSize: 14,
-    color: '#666',
-  },
-  chevron: {
-    fontSize: 24,
-    color: '#ccc',
-    marginLeft: 10,
-  },
-  noEvents: {
-    fontSize: 16,
-    color: '#999',
-    textAlign: 'center',
-    marginTop: 20,
-  },
-  // Modal Styles
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'flex-end',
-  },
-  modalContent: {
-    backgroundColor: '#fff',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    padding: 20,
-    maxHeight: '80%',
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 15,
-  },
-  modalTypeTag: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 15,
-  },
-  modalTypeText: {
-    color: '#fff',
-    fontWeight: '600',
-    fontSize: 12,
-  },
-  closeButton: {
-    padding: 5,
-  },
-  closeButtonText: {
-    fontSize: 20,
-    color: '#999',
-  },
-  modalTitle: {
-    fontSize: 22,
-    fontWeight: 'bold',
-    marginBottom: 20,
-    color: '#333',
-  },
-  modalInfoRow: {
-    marginBottom: 15,
-  },
-  modalLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#666',
-    marginBottom: 4,
-  },
-  modalValue: {
-    fontSize: 16,
-    color: '#333',
-  },
-  modalDescriptionContainer: {
-    marginBottom: 15,
-  },
-  modalDescription: {
-    fontSize: 16,
-    color: '#333',
-    lineHeight: 22,
-  },
-  serviceRosterPlaceholder: {
-    backgroundColor: '#f0f8ff',
-    padding: 15,
-    borderRadius: 10,
-    marginTop: 10,
-    marginBottom: 20,
-    borderWidth: 1,
-    borderColor: '#cce5ff',
-  },
-  serviceRosterTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#004085',
-    marginBottom: 5,
-  },
-  serviceRosterText: {
-    fontSize: 14,
-    color: '#004085',
-  },
-  modalCloseButton: {
-    backgroundColor: '#007AFF',
-    padding: 15,
-    borderRadius: 10,
-    alignItems: 'center',
-  },
-  modalCloseButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-});
+const createStyles = (colors: ReturnType<typeof useColors>) =>
+  StyleSheet.create({
+    container: {
+      flex: 1,
+      backgroundColor: colors.background,
+    },
+    centered: {
+      flex: 1,
+      justifyContent: 'center',
+      alignItems: 'center',
+      backgroundColor: colors.background,
+    },
+    message: {
+      fontSize: 16,
+      color: colors.textSecondary,
+    },
+    loadingText: {
+      marginTop: 10,
+      color: colors.textSecondary,
+    },
+    eventsContainer: {
+      flex: 1,
+      padding: 15,
+      borderTopWidth: 1,
+      borderTopColor: colors.border,
+    },
+    eventsTitle: {
+      fontSize: 18,
+      fontWeight: 'bold',
+      marginBottom: 10,
+      color: colors.text,
+    },
+    eventsList: {
+      flex: 1,
+    },
+    eventItem: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginBottom: 10,
+      padding: 12,
+      backgroundColor: colors.card,
+      borderRadius: 8,
+    },
+    eventTypeIndicator: {
+      width: 4,
+      height: '100%',
+      borderRadius: 2,
+      marginRight: 10,
+      minHeight: 40,
+    },
+    eventTime: {
+      fontSize: 16,
+      fontWeight: 'bold',
+      color: colors.highlight,
+      marginRight: 12,
+      minWidth: 50,
+    },
+    eventDetails: {
+      flex: 1,
+    },
+    eventTitle: {
+      fontSize: 16,
+      fontWeight: '500',
+      color: colors.text,
+    },
+    eventLocation: {
+      fontSize: 14,
+      color: colors.textSecondary,
+    },
+    chevron: {
+      fontSize: 24,
+      color: colors.textTertiary,
+      marginLeft: 10,
+    },
+    noEvents: {
+      fontSize: 16,
+      color: colors.textTertiary,
+      textAlign: 'center',
+      marginTop: 20,
+    },
+    // Modal Styles
+    modalOverlay: {
+      flex: 1,
+      backgroundColor: colors.overlay,
+      justifyContent: 'flex-end',
+    },
+    modalContent: {
+      backgroundColor: colors.modalBackground,
+      borderTopLeftRadius: 20,
+      borderTopRightRadius: 20,
+      padding: 20,
+      maxHeight: '80%',
+    },
+    modalHeader: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: 15,
+    },
+    modalTypeTag: {
+      paddingHorizontal: 12,
+      paddingVertical: 6,
+      borderRadius: 15,
+    },
+    modalTypeText: {
+      color: '#fff',
+      fontWeight: '600',
+      fontSize: 12,
+    },
+    closeButton: {
+      padding: 5,
+    },
+    closeButtonText: {
+      fontSize: 20,
+      color: colors.textTertiary,
+    },
+    modalTitle: {
+      fontSize: 22,
+      fontWeight: 'bold',
+      marginBottom: 20,
+      color: colors.text,
+    },
+    modalInfoRow: {
+      marginBottom: 15,
+    },
+    modalLabel: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: colors.textSecondary,
+      marginBottom: 4,
+    },
+    modalValue: {
+      fontSize: 16,
+      color: colors.text,
+    },
+    modalDescriptionContainer: {
+      marginBottom: 15,
+    },
+    modalDescription: {
+      fontSize: 16,
+      color: colors.text,
+      lineHeight: 22,
+    },
+    serviceRosterPlaceholder: {
+      backgroundColor: colors.highlightLight,
+      padding: 15,
+      borderRadius: 10,
+      marginTop: 10,
+      marginBottom: 20,
+      borderWidth: 1,
+      borderColor: colors.highlight,
+    },
+    serviceRosterTitle: {
+      fontSize: 16,
+      fontWeight: '600',
+      color: colors.text,
+      marginBottom: 5,
+    },
+    serviceRosterText: {
+      fontSize: 14,
+      color: colors.textSecondary,
+    },
+    modalCloseButton: {
+      backgroundColor: colors.primary,
+      padding: 15,
+      borderRadius: 10,
+      alignItems: 'center',
+    },
+    modalCloseButtonText: {
+      color: '#fff',
+      fontSize: 16,
+      fontWeight: '600',
+    },
+  });
