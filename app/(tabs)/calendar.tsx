@@ -91,7 +91,7 @@ export default function CalendarScreen() {
     }
 
     return marked;
-  }, [events, selectedDate, colors, eventTypeColors]);
+  }, [events, selectedDate, colors]);
 
   // 3. Filtrar eventos para a data selecionada
   const eventsForSelectedDate = useMemo(() => {
