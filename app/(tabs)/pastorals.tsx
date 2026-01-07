@@ -9,6 +9,7 @@ import {
   Modal,
   ScrollView,
   FlatList,
+  SafeAreaView,
 } from 'react-native';
 import { useAuth } from '../../src/context/AuthContext';
 import { useColors } from '../../src/context/ThemeContext';
@@ -129,102 +130,112 @@ export default function PastoralsScreen() {
 
   if (!communityId) {
     return (
-      <View style={styles.centered}>
-        <Text style={styles.message}>Selecione sua comunidade para ver as pastorais.</Text>
-      </View>
+      <SafeAreaView style={styles.safeArea}>
+        <View style={styles.centered}>
+          <Text style={styles.message}>Selecione sua comunidade para ver as pastorais.</Text>
+        </View>
+      </SafeAreaView>
     );
   }
 
   if (isLoading) {
     return (
-      <View style={styles.centered}>
-        <ActivityIndicator size="large" color={colors.primary} />
-        <Text style={styles.loadingText}>Carregando Pastorais...</Text>
-      </View>
+      <SafeAreaView style={styles.safeArea}>
+        <View style={styles.centered}>
+          <ActivityIndicator size="large" color={colors.primary} />
+          <Text style={styles.loadingText}>Carregando Pastorais...</Text>
+        </View>
+      </SafeAreaView>
     );
   }
 
   return (
-    <View style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.title}>Pastorais</Text>
-        <Text style={styles.subtitle}>
-          {pastorals.length} {pastorals.length === 1 ? 'pastoral' : 'pastorais'} na sua comunidade
-        </Text>
-      </View>
-
-      <FlatList
-        data={pastorals}
-        keyExtractor={(item) => item.id}
-        renderItem={renderPastoralCard}
-        contentContainerStyle={styles.listContent}
-        showsVerticalScrollIndicator={false}
-        ListEmptyComponent={
-          <View style={styles.emptyState}>
-            <Text style={styles.emptyStateText}>Nenhuma pastoral cadastrada.</Text>
-          </View>
-        }
-      />
-
-      {/* Modal de Detalhes da Pastoral */}
-      <Modal
-        visible={isModalVisible}
-        animationType="slide"
-        transparent={true}
-        onRequestClose={closePastoralDetails}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <ScrollView showsVerticalScrollIndicator={false}>
-              {selectedPastoral && (
-                <>
-                  <View style={styles.modalHeader}>
-                    <View style={styles.modalTitleContainer}>
-                      <Text style={styles.modalTitle}>{selectedPastoral.name}</Text>
-                    </View>
-                    <TouchableOpacity onPress={closePastoralDetails} style={styles.closeButton}>
-                      <Text style={styles.closeButtonText}>✕</Text>
-                    </TouchableOpacity>
-                  </View>
-
-                  {selectedPastoral.description && (
-                    <View style={styles.modalSection}>
-                      <Text style={styles.modalSectionTitle}>📝 Sobre</Text>
-                      <Text style={styles.modalDescription}>{selectedPastoral.description}</Text>
-                    </View>
-                  )}
-
-                  {selectedPastoral.coordinator && (
-                    <View style={styles.modalSection}>
-                      <Text style={styles.modalSectionTitle}>👤 Coordenação</Text>
-                      {renderMemberItem(selectedPastoral.coordinator, true)}
-                    </View>
-                  )}
-
-                  <View style={styles.modalSection}>
-                    <Text style={styles.modalSectionTitle}>
-                      👥 Membros ({selectedPastoral.members.length})
-                    </Text>
-                    {selectedPastoral.members
-                      .filter((m) => m.id !== selectedPastoral.coordinator?.id)
-                      .map((member) => renderMemberItem(member))}
-                  </View>
-
-                  <TouchableOpacity style={styles.modalCloseButton} onPress={closePastoralDetails}>
-                    <Text style={styles.modalCloseButtonText}>Fechar</Text>
-                  </TouchableOpacity>
-                </>
-              )}
-            </ScrollView>
-          </View>
+    <SafeAreaView style={styles.safeArea}>
+      <View style={styles.container}>
+        <View style={styles.header}>
+          <Text style={styles.title}>Pastorais</Text>
+          <Text style={styles.subtitle}>
+            {pastorals.length} {pastorals.length === 1 ? 'pastoral' : 'pastorais'} na sua comunidade
+          </Text>
         </View>
-      </Modal>
-    </View>
+
+        <FlatList
+          data={pastorals}
+          keyExtractor={(item) => item.id}
+          renderItem={renderPastoralCard}
+          contentContainerStyle={styles.listContent}
+          showsVerticalScrollIndicator={false}
+          ListEmptyComponent={
+            <View style={styles.emptyState}>
+              <Text style={styles.emptyStateText}>Nenhuma pastoral cadastrada.</Text>
+            </View>
+          }
+        />
+
+        {/* Modal de Detalhes da Pastoral */}
+        <Modal
+          visible={isModalVisible}
+          animationType="slide"
+          transparent={true}
+          onRequestClose={closePastoralDetails}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+              <ScrollView showsVerticalScrollIndicator={false}>
+                {selectedPastoral && (
+                  <>
+                    <View style={styles.modalHeader}>
+                      <View style={styles.modalTitleContainer}>
+                        <Text style={styles.modalTitle}>{selectedPastoral.name}</Text>
+                      </View>
+                      <TouchableOpacity onPress={closePastoralDetails} style={styles.closeButton}>
+                        <Text style={styles.closeButtonText}>✕</Text>
+                      </TouchableOpacity>
+                    </View>
+
+                    {selectedPastoral.description && (
+                      <View style={styles.modalSection}>
+                        <Text style={styles.modalSectionTitle}>📝 Sobre</Text>
+                        <Text style={styles.modalDescription}>{selectedPastoral.description}</Text>
+                      </View>
+                    )}
+
+                    {selectedPastoral.coordinator && (
+                      <View style={styles.modalSection}>
+                        <Text style={styles.modalSectionTitle}>👤 Coordenação</Text>
+                        {renderMemberItem(selectedPastoral.coordinator, true)}
+                      </View>
+                    )}
+
+                    <View style={styles.modalSection}>
+                      <Text style={styles.modalSectionTitle}>
+                        👥 Membros ({selectedPastoral.members.length})
+                      </Text>
+                      {selectedPastoral.members
+                        .filter((m) => m.id !== selectedPastoral.coordinator?.id)
+                        .map((member) => renderMemberItem(member))}
+                    </View>
+
+                    <TouchableOpacity style={styles.modalCloseButton} onPress={closePastoralDetails}>
+                      <Text style={styles.modalCloseButtonText}>Fechar</Text>
+                    </TouchableOpacity>
+                  </>
+                )}
+              </ScrollView>
+            </View>
+          </View>
+        </Modal>
+      </View>
+    </SafeAreaView>
   );
 }
 
 const createStyles = (colors: ReturnType<typeof useColors>) =>
   StyleSheet.create({
+    safeArea: {
+      flex: 1,
+      backgroundColor: colors.background,
+    },
     container: {
       flex: 1,
       backgroundColor: colors.background,

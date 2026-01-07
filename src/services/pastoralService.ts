@@ -108,7 +108,9 @@ export const getPastorals = async (communityId: string): Promise<Pastoral[]> => 
 
   return new Promise((resolve) => {
     setTimeout(() => {
-      const pastorals = mockPastorals.filter((p) => p.communityId === communityId);
+      // Mock: Retorna pastorais para qualquer communityId (simulando que todas as comunidades têm as mesmas pastorais)
+      // Em produção, o filtro seria aplicado corretamente pelo backend
+      const pastorals = mockPastorals.map((p) => ({ ...p, communityId }));
       resolve(pastorals);
     }, 200);
   });

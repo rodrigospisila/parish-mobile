@@ -8,6 +8,7 @@ import {
   TouchableOpacity,
   Modal,
   ScrollView,
+  SafeAreaView,
 } from 'react-native';
 import { Calendar, DateData, LocaleConfig } from 'react-native-calendars';
 import { useAuth } from '../../src/context/AuthContext';
@@ -171,174 +172,184 @@ export default function CalendarScreen() {
 
   if (!communityId) {
     return (
-      <View style={styles.centered}>
-        <Text style={styles.message}>Selecione sua comunidade para ver o calendário.</Text>
-      </View>
+      <SafeAreaView style={styles.safeArea}>
+        <View style={styles.centered}>
+          <Text style={styles.message}>Selecione sua comunidade para ver o calendário.</Text>
+        </View>
+      </SafeAreaView>
     );
   }
 
   if (isLoading) {
     return (
-      <View style={styles.centered}>
-        <ActivityIndicator size="large" color={colors.primary} />
-        <Text style={styles.loadingText}>Carregando Calendário...</Text>
-      </View>
+      <SafeAreaView style={styles.safeArea}>
+        <View style={styles.centered}>
+          <ActivityIndicator size="large" color={colors.primary} />
+          <Text style={styles.loadingText}>Carregando Calendário...</Text>
+        </View>
+      </SafeAreaView>
     );
   }
 
   return (
-    <View style={styles.container}>
-      <Calendar
-        key={isDark ? 'dark' : 'light'}
-        onDayPress={onDayPress}
-        markedDates={markedDates}
-        markingType={'dot'}
-        theme={calendarTheme}
-      />
+    <SafeAreaView style={styles.safeArea}>
+      <View style={styles.container}>
+        <Calendar
+          key={isDark ? 'dark' : 'light'}
+          onDayPress={onDayPress}
+          markedDates={markedDates}
+          markingType={'dot'}
+          theme={calendarTheme}
+        />
 
-      <View style={styles.eventsContainer}>
-        <Text style={styles.eventsTitle}>
-          Eventos em {formatToBrazilianDate(selectedDate, 'dd/MM/yyyy')}
-        </Text>
-        <ScrollView style={styles.eventsList}>
-          {eventsForSelectedDate.length > 0 ? (
-            eventsForSelectedDate.map((event) => (
-              <TouchableOpacity
-                key={event.id}
-                style={styles.eventItem}
-                onPress={() => openEventDetails(event)}
-                activeOpacity={0.7}
-              >
-                <View
-                  style={[
-                    styles.eventTypeIndicator,
-                    { backgroundColor: eventTypeColors[event.type as keyof typeof eventTypeColors] || colors.highlight },
-                  ]}
-                />
-                <Text style={styles.eventTime}>{formatToBrazilianDate(event.date, 'HH:mm')}</Text>
-                <View style={styles.eventDetails}>
-                  <Text style={styles.eventTitle}>{event.title}</Text>
-                  <Text style={styles.eventLocation}>{event.location}</Text>
-                </View>
-                <Text style={styles.chevron}>›</Text>
-              </TouchableOpacity>
-            ))
-          ) : (
-            <Text style={styles.noEvents}>Nenhum evento agendado para esta data.</Text>
-          )}
-        </ScrollView>
-      </View>
-
-      {/* Modal de Detalhes do Evento */}
-      <Modal
-        visible={isModalVisible}
-        animationType="slide"
-        transparent={true}
-        onRequestClose={closeEventDetails}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <ScrollView showsVerticalScrollIndicator={false}>
-              {selectedEvent && (
-                <>
-                  <View style={styles.modalHeader}>
-                    <View
-                      style={[
-                        styles.modalTypeTag,
-                        { backgroundColor: eventTypeColors[selectedEvent.type as keyof typeof eventTypeColors] || colors.highlight },
-                      ]}
-                    >
-                      <Text style={styles.modalTypeText}>
-                        {eventTypeLabels[selectedEvent.type] || selectedEvent.type}
-                      </Text>
-                    </View>
-                    <TouchableOpacity onPress={closeEventDetails} style={styles.closeButton}>
-                      <Text style={styles.closeButtonText}>✕</Text>
-                    </TouchableOpacity>
+        <View style={styles.eventsContainer}>
+          <Text style={styles.eventsTitle}>
+            Eventos em {formatToBrazilianDate(selectedDate, 'dd/MM/yyyy')}
+          </Text>
+          <ScrollView style={styles.eventsList}>
+            {eventsForSelectedDate.length > 0 ? (
+              eventsForSelectedDate.map((event) => (
+                <TouchableOpacity
+                  key={event.id}
+                  style={styles.eventItem}
+                  onPress={() => openEventDetails(event)}
+                  activeOpacity={0.7}
+                >
+                  <View
+                    style={[
+                      styles.eventTypeIndicator,
+                      { backgroundColor: eventTypeColors[event.type as keyof typeof eventTypeColors] || colors.highlight },
+                    ]}
+                  />
+                  <Text style={styles.eventTime}>{formatToBrazilianDate(event.date, 'HH:mm')}</Text>
+                  <View style={styles.eventDetails}>
+                    <Text style={styles.eventTitle}>{event.title}</Text>
+                    <Text style={styles.eventLocation}>{event.location}</Text>
                   </View>
+                  <Text style={styles.chevron}>›</Text>
+                </TouchableOpacity>
+              ))
+            ) : (
+              <Text style={styles.noEvents}>Nenhum evento agendado para esta data.</Text>
+            )}
+          </ScrollView>
+        </View>
 
-                  <Text style={styles.modalTitle}>{selectedEvent.title}</Text>
-
-                  <View style={styles.modalInfoRow}>
-                    <Text style={styles.modalLabel}>📅 Data e Hora:</Text>
-                    <Text style={styles.modalValue}>
-                      {formatToBrazilianDate(selectedEvent.date, 'dd/MM/yyyy')} às{' '}
-                      {formatToBrazilianDate(selectedEvent.date, 'HH:mm')}
-                    </Text>
-                  </View>
-
-                  <View style={styles.modalInfoRow}>
-                    <Text style={styles.modalLabel}>📍 Local:</Text>
-                    <Text style={styles.modalValue}>{selectedEvent.location}</Text>
-                  </View>
-
-                  {selectedEvent.description && (
-                    <View style={styles.modalDescriptionContainer}>
-                      <Text style={styles.modalLabel}>📝 Descrição:</Text>
-                      <Text style={styles.modalDescription}>{selectedEvent.description}</Text>
-                    </View>
-                  )}
-
-                  {/* Escalas de Serviço */}
-                  <View style={styles.serviceRosterSection}>
-                    <Text style={styles.serviceRosterSectionTitle}>📋 Escalas de Serviço</Text>
-                    
-                    {isLoadingRosters ? (
-                      <View style={styles.rostersLoading}>
-                        <ActivityIndicator size="small" color={colors.primary} />
-                        <Text style={styles.rostersLoadingText}>Carregando escalas...</Text>
-                      </View>
-                    ) : serviceRosters.length > 0 ? (
-                      serviceRosters.map((roster) => (
-                        <View key={roster.id} style={styles.rosterCard}>
-                          <View style={styles.rosterHeader}>
-                            <Text style={styles.rosterPastoralName}>{roster.pastoralName}</Text>
-                          </View>
-                          <Text style={styles.rosterResponsibilities}>{roster.responsibilities}</Text>
-                          <View style={styles.rosterMembers}>
-                            <Text style={styles.rosterMembersLabel}>Escalados:</Text>
-                            {roster.membersOnDuty.map((member, index) => (
-                              <View key={member.id} style={styles.memberItem}>
-                                <View style={styles.memberAvatar}>
-                                  <Text style={styles.memberAvatarText}>
-                                    {member.name.charAt(0).toUpperCase()}
-                                  </Text>
-                                </View>
-                                <View style={styles.memberInfo}>
-                                  <Text style={styles.memberName}>{member.name}</Text>
-                                  {member.role && (
-                                    <Text style={styles.memberRole}>{member.role}</Text>
-                                  )}
-                                </View>
-                              </View>
-                            ))}
-                          </View>
-                        </View>
-                      ))
-                    ) : (
-                      <View style={styles.noRosters}>
-                        <Text style={styles.noRostersText}>
-                          Nenhuma escala de serviço cadastrada para este evento.
+        {/* Modal de Detalhes do Evento */}
+        <Modal
+          visible={isModalVisible}
+          animationType="slide"
+          transparent={true}
+          onRequestClose={closeEventDetails}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+              <ScrollView showsVerticalScrollIndicator={false}>
+                {selectedEvent && (
+                  <>
+                    <View style={styles.modalHeader}>
+                      <View
+                        style={[
+                          styles.modalTypeTag,
+                          { backgroundColor: eventTypeColors[selectedEvent.type as keyof typeof eventTypeColors] || colors.highlight },
+                        ]}
+                      >
+                        <Text style={styles.modalTypeText}>
+                          {eventTypeLabels[selectedEvent.type] || selectedEvent.type}
                         </Text>
                       </View>
-                    )}
-                  </View>
+                      <TouchableOpacity onPress={closeEventDetails} style={styles.closeButton}>
+                        <Text style={styles.closeButtonText}>✕</Text>
+                      </TouchableOpacity>
+                    </View>
 
-                  <TouchableOpacity style={styles.modalCloseButton} onPress={closeEventDetails}>
-                    <Text style={styles.modalCloseButtonText}>Fechar</Text>
-                  </TouchableOpacity>
-                </>
-              )}
-            </ScrollView>
+                    <Text style={styles.modalTitle}>{selectedEvent.title}</Text>
+
+                    <View style={styles.modalInfoRow}>
+                      <Text style={styles.modalLabel}>📅 Data e Hora:</Text>
+                      <Text style={styles.modalValue}>
+                        {formatToBrazilianDate(selectedEvent.date, 'dd/MM/yyyy')} às{' '}
+                        {formatToBrazilianDate(selectedEvent.date, 'HH:mm')}
+                      </Text>
+                    </View>
+
+                    <View style={styles.modalInfoRow}>
+                      <Text style={styles.modalLabel}>📍 Local:</Text>
+                      <Text style={styles.modalValue}>{selectedEvent.location}</Text>
+                    </View>
+
+                    {selectedEvent.description && (
+                      <View style={styles.modalDescriptionContainer}>
+                        <Text style={styles.modalLabel}>📝 Descrição:</Text>
+                        <Text style={styles.modalDescription}>{selectedEvent.description}</Text>
+                      </View>
+                    )}
+
+                    {/* Escalas de Serviço */}
+                    <View style={styles.serviceRosterSection}>
+                      <Text style={styles.serviceRosterSectionTitle}>📋 Escalas de Serviço</Text>
+                      
+                      {isLoadingRosters ? (
+                        <View style={styles.rostersLoading}>
+                          <ActivityIndicator size="small" color={colors.primary} />
+                          <Text style={styles.rostersLoadingText}>Carregando escalas...</Text>
+                        </View>
+                      ) : serviceRosters.length > 0 ? (
+                        serviceRosters.map((roster) => (
+                          <View key={roster.id} style={styles.rosterCard}>
+                            <View style={styles.rosterHeader}>
+                              <Text style={styles.rosterPastoralName}>{roster.pastoralName}</Text>
+                            </View>
+                            <Text style={styles.rosterResponsibilities}>{roster.responsibilities}</Text>
+                            <View style={styles.rosterMembers}>
+                              <Text style={styles.rosterMembersLabel}>Escalados:</Text>
+                              {roster.membersOnDuty.map((member) => (
+                                <View key={member.id} style={styles.memberItem}>
+                                  <View style={styles.memberAvatar}>
+                                    <Text style={styles.memberAvatarText}>
+                                      {member.name.charAt(0).toUpperCase()}
+                                    </Text>
+                                  </View>
+                                  <View style={styles.memberInfo}>
+                                    <Text style={styles.memberName}>{member.name}</Text>
+                                    {member.role && (
+                                      <Text style={styles.memberRole}>{member.role}</Text>
+                                    )}
+                                  </View>
+                                </View>
+                              ))}
+                            </View>
+                          </View>
+                        ))
+                      ) : (
+                        <View style={styles.noRosters}>
+                          <Text style={styles.noRostersText}>
+                            Nenhuma escala de serviço cadastrada para este evento.
+                          </Text>
+                        </View>
+                      )}
+                    </View>
+
+                    <TouchableOpacity style={styles.modalCloseButton} onPress={closeEventDetails}>
+                      <Text style={styles.modalCloseButtonText}>Fechar</Text>
+                    </TouchableOpacity>
+                  </>
+                )}
+              </ScrollView>
+            </View>
           </View>
-        </View>
-      </Modal>
-    </View>
+        </Modal>
+      </View>
+    </SafeAreaView>
   );
 }
 
 const createStyles = (colors: ReturnType<typeof useColors>) =>
   StyleSheet.create({
+    safeArea: {
+      flex: 1,
+      backgroundColor: colors.background,
+    },
     container: {
       flex: 1,
       backgroundColor: colors.background,

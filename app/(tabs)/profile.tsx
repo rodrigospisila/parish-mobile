@@ -1,8 +1,7 @@
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Alert, Switch } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Alert, Switch, SafeAreaView, ScrollView } from 'react-native';
 import { useAuth } from '../../src/context/AuthContext';
 import { useColors, useTheme } from '../../src/context/ThemeContext';
-import { Stack } from 'expo-router';
 
 export default function ProfileScreen() {
   const { user, signOut } = useAuth();
@@ -35,94 +34,97 @@ export default function ProfileScreen() {
   const styles = createStyles(colors);
 
   return (
-    <View style={styles.container}>
-      <Stack.Screen options={{ title: 'Meu Perfil', headerShown: true }} />
-
-      <View style={styles.header}>
-        <View style={styles.avatar}>
-          <Text style={styles.avatarText}>
-            {user?.name?.charAt(0).toUpperCase() || 'U'}
-          </Text>
+    <SafeAreaView style={styles.safeArea}>
+      <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
+        <View style={styles.header}>
+          <View style={styles.avatar}>
+            <Text style={styles.avatarText}>
+              {user?.name?.charAt(0).toUpperCase() || 'U'}
+            </Text>
+          </View>
+          <Text style={styles.userName}>{user?.name || 'Usuário'}</Text>
+          <Text style={styles.userEmail}>{user?.email || ''}</Text>
         </View>
-        <Text style={styles.userName}>{user?.name || 'Usuário'}</Text>
-        <Text style={styles.userEmail}>{user?.email || ''}</Text>
-      </View>
 
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Informações</Text>
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Informações</Text>
 
-        <View style={styles.card}>
-          <View style={styles.infoRow}>
-            <Text style={styles.infoLabel}>Nome</Text>
-            <Text style={styles.infoValue}>{user?.name || 'Não informado'}</Text>
-          </View>
-
-          <View style={styles.divider} />
-
-          <View style={styles.infoRow}>
-            <Text style={styles.infoLabel}>E-mail</Text>
-            <Text style={styles.infoValue}>{user?.email || 'Não informado'}</Text>
-          </View>
-
-          <View style={styles.divider} />
-
-          <View style={styles.infoRow}>
-            <Text style={styles.infoLabel}>Comunidade</Text>
-            <Text style={styles.infoValue}>{user?.communityId || 'Nenhuma'}</Text>
-          </View>
-        </View>
-      </View>
-
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Preferências</Text>
-
-        <View style={styles.card}>
-          <View style={styles.preferenceRow}>
-            <View>
-              <Text style={styles.preferenceLabel}>Modo Escuro</Text>
-              <Text style={styles.preferenceDescription}>
-                {theme === 'system' ? 'Seguindo o sistema' : isDark ? 'Ativado' : 'Desativado'}
-              </Text>
+          <View style={styles.card}>
+            <View style={styles.infoRow}>
+              <Text style={styles.infoLabel}>Nome</Text>
+              <Text style={styles.infoValue}>{user?.name || 'Não informado'}</Text>
             </View>
-            <Switch
-              value={isDark}
-              onValueChange={handleThemeChange}
-              trackColor={{ false: colors.border, true: colors.primary }}
-              thumbColor={isDark ? colors.textInverse : colors.card}
-            />
-          </View>
 
-          <View style={styles.divider} />
+            <View style={styles.divider} />
 
-          <TouchableOpacity
-            style={styles.preferenceRow}
-            onPress={() => setTheme('system')}
-          >
-            <View>
-              <Text style={styles.preferenceLabel}>Usar tema do sistema</Text>
-              <Text style={styles.preferenceDescription}>
-                Alternar automaticamente entre claro e escuro
-              </Text>
+            <View style={styles.infoRow}>
+              <Text style={styles.infoLabel}>E-mail</Text>
+              <Text style={styles.infoValue}>{user?.email || 'Não informado'}</Text>
             </View>
-            {theme === 'system' && (
-              <Text style={styles.checkmark}>✓</Text>
-            )}
-          </TouchableOpacity>
-        </View>
-      </View>
 
-      <TouchableOpacity style={styles.signOutButton} onPress={handleSignOut}>
-        <Text style={styles.signOutText}>Sair da Conta</Text>
-      </TouchableOpacity>
-    </View>
+            <View style={styles.divider} />
+
+            <View style={styles.infoRow}>
+              <Text style={styles.infoLabel}>Comunidade</Text>
+              <Text style={styles.infoValue}>{user?.communityId || 'Nenhuma'}</Text>
+            </View>
+          </View>
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Preferências</Text>
+
+          <View style={styles.card}>
+            <View style={styles.preferenceRow}>
+              <View>
+                <Text style={styles.preferenceLabel}>Modo Escuro</Text>
+                <Text style={styles.preferenceDescription}>
+                  {theme === 'system' ? 'Seguindo o sistema' : isDark ? 'Ativado' : 'Desativado'}
+                </Text>
+              </View>
+              <Switch
+                value={isDark}
+                onValueChange={handleThemeChange}
+                trackColor={{ false: colors.border, true: colors.primary }}
+                thumbColor={isDark ? colors.textInverse : colors.card}
+              />
+            </View>
+
+            <View style={styles.divider} />
+
+            <TouchableOpacity
+              style={styles.preferenceRow}
+              onPress={() => setTheme('system')}
+            >
+              <View>
+                <Text style={styles.preferenceLabel}>Usar tema do sistema</Text>
+                <Text style={styles.preferenceDescription}>
+                  Alternar automaticamente entre claro e escuro
+                </Text>
+              </View>
+              {theme === 'system' && (
+                <Text style={styles.checkmark}>✓</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        <TouchableOpacity style={styles.signOutButton} onPress={handleSignOut}>
+          <Text style={styles.signOutText}>Sair da Conta</Text>
+        </TouchableOpacity>
+      </ScrollView>
+    </SafeAreaView>
   );
 }
 
 const createStyles = (colors: ReturnType<typeof useColors>) =>
   StyleSheet.create({
-    container: {
+    safeArea: {
       flex: 1,
       backgroundColor: colors.background,
+    },
+    scrollView: {
+      flex: 1,
     },
     header: {
       alignItems: 'center',
@@ -213,6 +215,7 @@ const createStyles = (colors: ReturnType<typeof useColors>) =>
     },
     signOutButton: {
       marginTop: 30,
+      marginBottom: 30,
       marginHorizontal: 16,
       backgroundColor: colors.error,
       padding: 16,
