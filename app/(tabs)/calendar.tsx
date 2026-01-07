@@ -13,8 +13,7 @@ import {
 import { Calendar, DateData, LocaleConfig } from 'react-native-calendars';
 import { useAuth } from '../../src/context/AuthContext';
 import { useColors, useTheme } from '../../src/context/ThemeContext';
-import { getCommunityEvents, Event } from '../../src/services/eventService';
-import { ServiceRoster, getServiceRostersByEventId } from '../../src/services/pastoralService';
+import { getCommunityEvents, Event, getEventTypeLabel, getEventTypeColor, getEventWithRosters, ServiceRoster } from '../../src/services/eventService';
 import { formatToBrazilianDate } from '../../src/utils/dateUtils';
 
 // Configuração do Locale para Português
@@ -30,12 +29,7 @@ LocaleConfig.locales['br'] = {
 };
 LocaleConfig.defaultLocale = 'br';
 
-// Mapeamento de tipos de evento para labels amigáveis
-const eventTypeLabels: { [key: string]: string } = {
-  MISSA: 'Missa',
-  REUNIAO: 'Reunião',
-  ATIVIDADE: 'Atividade',
-};
+// Importamos getEventTypeLabel e getEventTypeColor do eventService
 
 export default function CalendarScreen() {
   const { user } = useAuth();
@@ -51,15 +45,7 @@ export default function CalendarScreen() {
 
   const communityId = user?.communityId;
 
-  // Mapeamento de tipos de evento para cores
-  const eventTypeColors = useMemo(
-    () => ({
-      MISSA: colors.eventMissa,
-      REUNIAO: colors.eventReuniao,
-      ATIVIDADE: colors.eventAtividade,
-    }),
-    [colors]
-  );
+
 
   // 1. Carregar Eventos
   useEffect(() => {
@@ -88,10 +74,10 @@ export default function CalendarScreen() {
   const markedDates = useMemo(() => {
     const marked: { [key: string]: any } = {};
     events.forEach((event) => {
-      const date = event.date.split('T')[0];
+      const date = event.startDate.split('T')[0];
       marked[date] = {
         marked: true,
-        dotColor: eventTypeColors[event.type as keyof typeof eventTypeColors] || colors.highlight,
+        dotColor: getEventTypeColor(event.type),
         selected: date === selectedDate,
         selectedColor: date === selectedDate ? colors.highlight : undefined,
       };
@@ -110,8 +96,8 @@ export default function CalendarScreen() {
   // 3. Filtrar eventos para a data selecionada
   const eventsForSelectedDate = useMemo(() => {
     return events
-      .filter((event) => event.date.split('T')[0] === selectedDate)
-      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+      .filter((event) => event.startDate.split('T')[0] === selectedDate)
+      .sort((a, b) => new Date(a.startDate).getTime() - new Date(b.startDate).getTime());
   }, [events, selectedDate]);
 
   const onDayPress = (day: DateData) => {
@@ -124,16 +110,14 @@ export default function CalendarScreen() {
     setServiceRosters([]);
     
     // Carregar escalas de serviço
-    if (event.hasServiceRosters) {
-      setIsLoadingRosters(true);
-      try {
-        const rosters = await getServiceRostersByEventId(event.id);
-        setServiceRosters(rosters);
-      } catch (error) {
-        console.error('Erro ao carregar escalas:', error);
-      } finally {
-        setIsLoadingRosters(false);
-      }
+    setIsLoadingRosters(true);
+    try {
+      const eventWithRosters = await getEventWithRosters(event);
+      setServiceRosters(eventWithRosters.serviceRosters);
+    } catch (error) {
+      console.error('Erro ao carregar escalas:', error);
+    } finally {
+      setIsLoadingRosters(false);
     }
   };
 
@@ -218,10 +202,10 @@ export default function CalendarScreen() {
                   <View
                     style={[
                       styles.eventTypeIndicator,
-                      { backgroundColor: eventTypeColors[event.type as keyof typeof eventTypeColors] || colors.highlight },
+                      { backgroundColor: getEventTypeColor(event.type) },
                     ]}
                   />
-                  <Text style={styles.eventTime}>{formatToBrazilianDate(event.date, 'HH:mm')}</Text>
+                  <Text style={styles.eventTime}>{formatToBrazilianDate(event.startDate, 'HH:mm')}</Text>
                   <View style={styles.eventDetails}>
                     <Text style={styles.eventTitle}>{event.title}</Text>
                     <Text style={styles.eventLocation}>{event.location}</Text>
@@ -251,11 +235,11 @@ export default function CalendarScreen() {
                       <View
                         style={[
                           styles.modalTypeTag,
-                          { backgroundColor: eventTypeColors[selectedEvent.type as keyof typeof eventTypeColors] || colors.highlight },
+                          { backgroundColor: getEventTypeColor(selectedEvent.type) },
                         ]}
                       >
                         <Text style={styles.modalTypeText}>
-                          {eventTypeLabels[selectedEvent.type] || selectedEvent.type}
+                          {getEventTypeLabel(selectedEvent.type)}
                         </Text>
                       </View>
                       <TouchableOpacity onPress={closeEventDetails} style={styles.closeButton}>
@@ -268,14 +252,14 @@ export default function CalendarScreen() {
                     <View style={styles.modalInfoRow}>
                       <Text style={styles.modalLabel}>📅 Data e Hora:</Text>
                       <Text style={styles.modalValue}>
-                        {formatToBrazilianDate(selectedEvent.date, 'dd/MM/yyyy')} às{' '}
-                        {formatToBrazilianDate(selectedEvent.date, 'HH:mm')}
+                        {formatToBrazilianDate(selectedEvent.startDate, 'dd/MM/yyyy')} às{' '}
+                        {formatToBrazilianDate(selectedEvent.startDate, 'HH:mm')}
                       </Text>
                     </View>
 
                     <View style={styles.modalInfoRow}>
                       <Text style={styles.modalLabel}>📍 Local:</Text>
-                      <Text style={styles.modalValue}>{selectedEvent.location}</Text>
+                      <Text style={styles.modalValue}>{selectedEvent.location || 'A definir'}</Text>
                     </View>
 
                     {selectedEvent.description && (

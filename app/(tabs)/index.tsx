@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, ActivityIndicator, SafeAreaView } from 'react-native';
 import { useAuth } from '../../src/context/AuthContext';
 import { useColors } from '../../src/context/ThemeContext';
-import { getNextMass, Event } from '../../src/services/eventService';
+import { getNextMass, Event, getEventTypeLabel, getEventTypeColor } from '../../src/services/eventService';
 import { formatDateTimeBR } from '../../src/utils/dateUtils';
 
 export default function HomeScreen() {
@@ -16,7 +16,7 @@ export default function HomeScreen() {
       const loadNextMass = async () => {
         setIsLoading(true);
         try {
-          const mass = await getNextMass(user.communityId);
+          const mass = await getNextMass(user.communityId!);
           setNextMass(mass);
         } catch (error) {
           console.error('Erro ao carregar próxima missa:', error);
@@ -39,13 +39,16 @@ export default function HomeScreen() {
       return <Text style={styles.infoText}>Nenhuma missa programada para sua comunidade.</Text>;
     }
 
+    const eventTypeColor = getEventTypeColor(nextMass.type);
+    const eventTypeLabel = getEventTypeLabel(nextMass.type);
+
     return (
       <View style={styles.massCard}>
         <Text style={styles.massTitle}>{nextMass.title}</Text>
-        <Text style={styles.massDetail}>Data: {formatDateTimeBR(nextMass.date)}</Text>
-        <Text style={styles.massDetail}>Local: {nextMass.location}</Text>
-        <View style={styles.typeBadge}>
-          <Text style={styles.typeBadgeText}>{nextMass.type}</Text>
+        <Text style={styles.massDetail}>Data: {formatDateTimeBR(nextMass.startDate)}</Text>
+        <Text style={styles.massDetail}>Local: {nextMass.location || 'A definir'}</Text>
+        <View style={[styles.typeBadge, { backgroundColor: eventTypeColor }]}>
+          <Text style={styles.typeBadgeText}>{eventTypeLabel}</Text>
         </View>
       </View>
     );
@@ -120,14 +123,13 @@ const createStyles = (colors: ReturnType<typeof useColors>) =>
     },
     typeBadge: {
       alignSelf: 'flex-start',
-      backgroundColor: colors.eventMissa,
       paddingHorizontal: 10,
       paddingVertical: 4,
       borderRadius: 12,
       marginTop: 8,
     },
     typeBadgeText: {
-      color: colors.textInverse,
+      color: '#FFFFFF',
       fontSize: 12,
       fontWeight: '600',
     },
