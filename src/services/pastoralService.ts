@@ -1,18 +1,82 @@
-import api from '../config/api';
+import api, { USE_MOCK } from '../config/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+// ============================================
+// INTERFACES
+// ============================================
+
 /**
- * Representa um membro de uma pastoral
+ * Representa um membro de uma pastoral (do backend)
+ */
+export interface PastoralMember {
+  id: string;
+  userId: string;
+  communityPastoralId: string;
+  pastoralGroupId?: string;
+  role: 'COORDINATOR' | 'MEMBER';
+  joinedAt: string;
+  isActive: boolean;
+  user?: {
+    id: string;
+    name: string;
+    email: string;
+    phone?: string;
+  };
+}
+
+/**
+ * Representa um membro simplificado (para exibição)
  */
 export interface Member {
   id: string;
   name: string;
   phone?: string;
-  role?: string; // Ex: "Coordenador", "Ministro", "Voluntário"
+  role?: string;
+}
+
+/**
+ * Representa uma pastoral global (template)
+ */
+export interface GlobalPastoral {
+  id: string;
+  name: string;
+  description?: string;
+  isActive: boolean;
+  createdAt: string;
 }
 
 /**
  * Representa uma pastoral da comunidade
+ */
+export interface CommunityPastoral {
+  id: string;
+  communityId: string;
+  globalPastoralId: string;
+  isActive: boolean;
+  createdAt: string;
+  globalPastoral?: GlobalPastoral;
+  members?: PastoralMember[];
+  groups?: PastoralGroup[];
+  community?: {
+    id: string;
+    name: string;
+  };
+}
+
+/**
+ * Representa um grupo dentro de uma pastoral
+ */
+export interface PastoralGroup {
+  id: string;
+  name: string;
+  description?: string;
+  communityPastoralId: string;
+  createdAt: string;
+  members?: PastoralMember[];
+}
+
+/**
+ * Interface simplificada de Pastoral para exibição no app
  */
 export interface Pastoral {
   id: string;
@@ -21,6 +85,7 @@ export interface Pastoral {
   communityId: string;
   coordinator?: Member;
   members: Member[];
+  groups?: PastoralGroup[];
 }
 
 /**
@@ -31,7 +96,7 @@ export interface ServiceRoster {
   eventId: string;
   pastoralId: string;
   pastoralName: string;
-  responsibilities: string; // Ex: "Leitura", "Canto", "Acolhida"
+  responsibilities: string;
   membersOnDuty: Member[];
 }
 
@@ -120,7 +185,39 @@ const mockPastorals: Pastoral[] = [
 const ROSTER_CONFIRMATIONS_KEY = '@parish:roster_confirmations';
 
 // ============================================
-// FUNÇÕES DE CONFIRMAÇÃO
+// FUNÇÕES AUXILIARES
+// ============================================
+
+/**
+ * Converte um PastoralMember para Member simplificado
+ */
+const convertToMember = (pm: PastoralMember): Member => ({
+  id: pm.id,
+  name: pm.user?.name || 'Membro',
+  phone: pm.user?.phone,
+  role: pm.role === 'COORDINATOR' ? 'Coordenador(a)' : 'Membro',
+});
+
+/**
+ * Converte uma CommunityPastoral para Pastoral simplificada
+ */
+const convertToPastoral = (cp: CommunityPastoral): Pastoral => {
+  const members = cp.members?.map(convertToMember) || [];
+  const coordinator = members.find(m => m.role === 'Coordenador(a)');
+  
+  return {
+    id: cp.id,
+    name: cp.globalPastoral?.name || 'Pastoral',
+    description: cp.globalPastoral?.description,
+    communityId: cp.communityId,
+    coordinator,
+    members,
+    groups: cp.groups,
+  };
+};
+
+// ============================================
+// FUNÇÕES DE CONFIRMAÇÃO (LOCAL)
 // ============================================
 
 /**
@@ -151,15 +248,14 @@ const saveConfirmations = async (
 
 /**
  * Confirma presença em uma escala
- * @param rosterId ID da escala
- * @returns A escala atualizada ou null em caso de erro
  */
 export const confirmRosterPresence = async (rosterId: string): Promise<boolean> => {
   try {
-    // Em um cenário real:
-    // const response = await api.post(`/rosters/${rosterId}/confirm`);
-    // return response.data;
-
+    if (!USE_MOCK) {
+      // API real - quando o endpoint existir
+      // await api.post(`/schedules/${rosterId}/check-in`);
+    }
+    
     const confirmations = await loadConfirmations();
     confirmations[rosterId] = {
       status: 'confirmed',
@@ -175,16 +271,14 @@ export const confirmRosterPresence = async (rosterId: string): Promise<boolean> 
 
 /**
  * Declina presença em uma escala
- * @param rosterId ID da escala
- * @param reason Motivo opcional da recusa
- * @returns true se sucesso, false caso contrário
  */
 export const declineRosterPresence = async (rosterId: string, reason?: string): Promise<boolean> => {
   try {
-    // Em um cenário real:
-    // const response = await api.post(`/rosters/${rosterId}/decline`, { reason });
-    // return response.data;
-
+    if (!USE_MOCK) {
+      // API real - quando o endpoint existir
+      // await api.post(`/schedules/${rosterId}/decline`, { reason });
+    }
+    
     const confirmations = await loadConfirmations();
     confirmations[rosterId] = {
       status: 'declined',
@@ -199,9 +293,7 @@ export const declineRosterPresence = async (rosterId: string, reason?: string): 
 };
 
 /**
- * Reseta o status de confirmação de uma escala para pendente
- * @param rosterId ID da escala
- * @returns true se sucesso, false caso contrário
+ * Reseta o status de confirmação de uma escala
  */
 export const resetRosterConfirmation = async (rosterId: string): Promise<boolean> => {
   try {
@@ -216,216 +308,366 @@ export const resetRosterConfirmation = async (rosterId: string): Promise<boolean
 };
 
 // ============================================
-// FUNÇÕES DO SERVIÇO
+// FUNÇÕES DE PASTORAIS GLOBAIS
+// ============================================
+
+/**
+ * Busca todas as pastorais globais (templates)
+ */
+export const getGlobalPastorals = async (): Promise<GlobalPastoral[]> => {
+  if (USE_MOCK) {
+    return new Promise((resolve) => {
+      setTimeout(() => {
+        resolve([
+          { id: 'gp1', name: 'Pastoral da Liturgia', description: 'Organização das celebrações litúrgicas', isActive: true, createdAt: new Date().toISOString() },
+          { id: 'gp2', name: 'Pastoral do Canto', description: 'Animação musical das celebrações', isActive: true, createdAt: new Date().toISOString() },
+          { id: 'gp3', name: 'Pastoral da Acolhida', description: 'Recepção e acolhimento dos fiéis', isActive: true, createdAt: new Date().toISOString() },
+          { id: 'gp4', name: 'Ministros da Eucaristia', description: 'Distribuição da Sagrada Comunhão', isActive: true, createdAt: new Date().toISOString() },
+          { id: 'gp5', name: 'Pastoral da Catequese', description: 'Formação catequética', isActive: true, createdAt: new Date().toISOString() },
+        ]);
+      }, 200);
+    });
+  }
+
+  const response = await api.get('/pastorals/global');
+  return response.data;
+};
+
+// ============================================
+// FUNÇÕES DE PASTORAIS DA COMUNIDADE
 // ============================================
 
 /**
  * Busca todas as pastorais de uma comunidade
  */
 export const getPastorals = async (communityId: string): Promise<Pastoral[]> => {
-  // Em um cenário real:
-  // const response = await api.get(`/pastorals?communityId=${communityId}`);
-  // return response.data;
+  if (USE_MOCK) {
+    return new Promise((resolve) => {
+      setTimeout(() => {
+        const pastorals = mockPastorals.map((p) => ({ ...p, communityId }));
+        resolve(pastorals);
+      }, 200);
+    });
+  }
 
-  return new Promise((resolve) => {
-    setTimeout(() => {
-      // Mock: Retorna pastorais para qualquer communityId (simulando que todas as comunidades têm as mesmas pastorais)
-      // Em produção, o filtro seria aplicado corretamente pelo backend
-      const pastorals = mockPastorals.map((p) => ({ ...p, communityId }));
-      resolve(pastorals);
-    }, 200);
-  });
+  try {
+    const response = await api.get('/pastorals/community', {
+      params: { communityId },
+    });
+    
+    const communityPastorals: CommunityPastoral[] = response.data;
+    return communityPastorals.map(convertToPastoral);
+  } catch (error) {
+    console.error('Erro ao buscar pastorais:', error);
+    return [];
+  }
 };
 
 /**
  * Busca uma pastoral específica pelo ID
  */
 export const getPastoralById = async (pastoralId: string): Promise<Pastoral | null> => {
-  // Em um cenário real:
-  // const response = await api.get(`/pastorals/${pastoralId}`);
-  // return response.data;
+  if (USE_MOCK) {
+    return new Promise((resolve) => {
+      setTimeout(() => {
+        const pastoral = mockPastorals.find((p) => p.id === pastoralId);
+        resolve(pastoral || null);
+      }, 100);
+    });
+  }
 
-  return new Promise((resolve) => {
-    setTimeout(() => {
-      const pastoral = mockPastorals.find((p) => p.id === pastoralId);
-      resolve(pastoral || null);
-    }, 100);
-  });
+  try {
+    const response = await api.get(`/pastorals/community/${pastoralId}`);
+    return convertToPastoral(response.data);
+  } catch (error) {
+    console.error('Erro ao buscar pastoral:', error);
+    return null;
+  }
 };
+
+// ============================================
+// FUNÇÕES DE MEMBROS
+// ============================================
+
+/**
+ * Busca os membros de uma pastoral
+ */
+export const getPastoralMembers = async (pastoralId: string): Promise<Member[]> => {
+  if (USE_MOCK) {
+    return new Promise((resolve) => {
+      setTimeout(() => {
+        const pastoral = mockPastorals.find((p) => p.id === pastoralId);
+        resolve(pastoral?.members || []);
+      }, 100);
+    });
+  }
+
+  try {
+    const response = await api.get('/pastorals/members', {
+      params: { communityPastoralId: pastoralId },
+    });
+    
+    const members: PastoralMember[] = response.data;
+    return members.map(convertToMember);
+  } catch (error) {
+    console.error('Erro ao buscar membros:', error);
+    return [];
+  }
+};
+
+// ============================================
+// FUNÇÕES DE GRUPOS
+// ============================================
+
+/**
+ * Busca os grupos de uma pastoral
+ */
+export const getPastoralGroups = async (communityPastoralId: string): Promise<PastoralGroup[]> => {
+  if (USE_MOCK) {
+    return new Promise((resolve) => {
+      setTimeout(() => {
+        resolve([]);
+      }, 100);
+    });
+  }
+
+  try {
+    const response = await api.get('/pastorals/groups', {
+      params: { communityPastoralId },
+    });
+    return response.data;
+  } catch (error) {
+    console.error('Erro ao buscar grupos:', error);
+    return [];
+  }
+};
+
+// ============================================
+// FUNÇÕES DE ESCALAS DE SERVIÇO
+// ============================================
 
 /**
  * Busca as escalas de serviço para um evento específico
  */
 export const getServiceRostersByEventId = async (eventId: string): Promise<ServiceRoster[]> => {
-  // Em um cenário real:
-  // const response = await api.get(`/service-rosters?eventId=${eventId}`);
-  // return response.data;
+  if (USE_MOCK) {
+    return new Promise((resolve) => {
+      setTimeout(() => {
+        const mockRosters: ServiceRoster[] = [];
 
-  // Mock: Gera escalas baseadas no eventId
-  return new Promise((resolve) => {
-    setTimeout(() => {
-      // Simula diferentes escalas para diferentes eventos
-      const mockRosters: ServiceRoster[] = [];
+        if (eventId === '1') {
+          mockRosters.push(
+            {
+              id: 'sr1',
+              eventId: '1',
+              pastoralId: 'p1',
+              pastoralName: 'Pastoral da Liturgia',
+              responsibilities: '1ª Leitura, 2ª Leitura, Salmo',
+              membersOnDuty: [mockMembers[1], mockMembers[2]],
+            },
+            {
+              id: 'sr2',
+              eventId: '1',
+              pastoralId: 'p2',
+              pastoralName: 'Pastoral do Canto',
+              responsibilities: 'Animação musical',
+              membersOnDuty: [mockMembers[5], mockMembers[6]],
+            },
+            {
+              id: 'sr3',
+              eventId: '1',
+              pastoralId: 'p3',
+              pastoralName: 'Pastoral da Acolhida',
+              responsibilities: 'Recepção e entrega de folhetos',
+              membersOnDuty: [mockMembers[9], mockMembers[4]],
+            },
+            {
+              id: 'sr4',
+              eventId: '1',
+              pastoralId: 'p4',
+              pastoralName: 'Ministros da Eucaristia',
+              responsibilities: 'Distribuição da Comunhão',
+              membersOnDuty: [mockMembers[1], mockMembers[3]],
+            }
+          );
+        }
 
-      // Evento 1 (Missa) - tem várias pastorais escaladas
-      if (eventId === '1') {
-        mockRosters.push(
-          {
-            id: 'sr1',
-            eventId: '1',
+        if (eventId === '2') {
+          mockRosters.push({
+            id: 'sr5',
+            eventId: '2',
             pastoralId: 'p1',
             pastoralName: 'Pastoral da Liturgia',
-            responsibilities: '1ª Leitura, 2ª Leitura, Salmo',
-            membersOnDuty: [mockMembers[1], mockMembers[2]],
+            responsibilities: 'Organização da pauta',
+            membersOnDuty: [mockMembers[0]],
+          });
+        }
+
+        if (eventId === '3') {
+          mockRosters.push({
+            id: 'sr6',
+            eventId: '3',
+            pastoralId: 'p5',
+            pastoralName: 'Pastoral da Catequese',
+            responsibilities: 'Encontro semanal - Tema: Batismo',
+            membersOnDuty: [mockMembers[2], mockMembers[4], mockMembers[6]],
+          });
+        }
+
+        resolve(mockRosters);
+      }, 200);
+    });
+  }
+
+  // API real - escalas vêm junto com o evento
+  // Por enquanto retorna vazio, pois o backend retorna as escalas no próprio evento
+  return [];
+};
+
+// ============================================
+// FUNÇÕES DE ESCALAS DO USUÁRIO
+// ============================================
+
+/**
+ * Busca as próximas escalas do usuário logado
+ */
+export const getUserUpcomingRosters = async (userId: string): Promise<UserRoster[]> => {
+  const confirmations = await loadConfirmations();
+  
+  if (USE_MOCK) {
+    return new Promise((resolve) => {
+      setTimeout(() => {
+        const now = new Date();
+        const mockUserRosters: UserRoster[] = [
+          {
+            id: 'ur1',
+            eventId: '1',
+            eventTitle: 'Santa Missa Dominical',
+            eventDate: new Date(now.getTime() + 2 * 24 * 60 * 60 * 1000).toISOString(),
+            eventLocation: 'Igreja Matriz',
+            eventType: 'MASS',
+            pastoralName: 'Pastoral da Liturgia',
+            responsibilities: '1ª Leitura',
+            confirmationStatus: confirmations['ur1']?.status || 'pending',
+            confirmedAt: confirmations['ur1']?.confirmedAt,
           },
           {
-            id: 'sr2',
-            eventId: '1',
-            pastoralId: 'p2',
-            pastoralName: 'Pastoral do Canto',
-            responsibilities: 'Animação musical',
-            membersOnDuty: [mockMembers[5], mockMembers[6]],
+            id: 'ur2',
+            eventId: '2',
+            eventTitle: 'Reunião da Pastoral',
+            eventDate: new Date(now.getTime() + 5 * 24 * 60 * 60 * 1000).toISOString(),
+            eventLocation: 'Salão Paroquial',
+            eventType: 'PASTORAL_MEETING',
+            pastoralName: 'Pastoral da Liturgia',
+            responsibilities: 'Participação',
+            confirmationStatus: confirmations['ur2']?.status || 'pending',
+            confirmedAt: confirmations['ur2']?.confirmedAt,
           },
           {
-            id: 'sr3',
-            eventId: '1',
-            pastoralId: 'p3',
-            pastoralName: 'Pastoral da Acolhida',
-            responsibilities: 'Recepção e entrega de folhetos',
-            membersOnDuty: [mockMembers[9], mockMembers[4]],
-          },
-          {
-            id: 'sr4',
-            eventId: '1',
-            pastoralId: 'p4',
+            id: 'ur3',
+            eventId: '3',
+            eventTitle: 'Missa da Festa do Padroeiro',
+            eventDate: new Date(now.getTime() + 10 * 24 * 60 * 60 * 1000).toISOString(),
+            eventLocation: 'Igreja Matriz',
+            eventType: 'MASS',
             pastoralName: 'Ministros da Eucaristia',
             responsibilities: 'Distribuição da Comunhão',
-            membersOnDuty: [mockMembers[1], mockMembers[3]],
-          }
-        );
-      }
+            confirmationStatus: confirmations['ur3']?.status || 'pending',
+            confirmedAt: confirmations['ur3']?.confirmedAt,
+          },
+        ];
 
-      // Evento 2 (Reunião) - apenas uma pastoral
-      if (eventId === '2') {
-        mockRosters.push({
-          id: 'sr5',
-          eventId: '2',
-          pastoralId: 'p1',
-          pastoralName: 'Pastoral da Liturgia',
-          responsibilities: 'Organização da pauta',
-          membersOnDuty: [mockMembers[0]],
-        });
-      }
+        resolve(mockUserRosters);
+      }, 300);
+    });
+  }
 
-      // Evento 3 (Catequese) - pastoral da catequese
-      if (eventId === '3') {
-        mockRosters.push({
-          id: 'sr6',
-          eventId: '3',
-          pastoralId: 'p5',
-          pastoralName: 'Pastoral da Catequese',
-          responsibilities: 'Encontro semanal - Tema: Batismo',
-          membersOnDuty: [mockMembers[2], mockMembers[4], mockMembers[6]],
-        });
-      }
-
-      resolve(mockRosters);
-    }, 200);
-  });
+  try {
+    // API real - buscar escalas do usuário
+    const response = await api.get('/schedules/user', {
+      params: { userId },
+    });
+    
+    // Mapear resposta da API para UserRoster
+    return response.data.map((schedule: any) => ({
+      id: schedule.id,
+      eventId: schedule.eventId,
+      eventTitle: schedule.event?.title || 'Evento',
+      eventDate: schedule.event?.startDate || schedule.date,
+      eventLocation: schedule.event?.location || 'A definir',
+      eventType: schedule.event?.type || 'OTHER',
+      pastoralName: schedule.communityPastoral?.globalPastoral?.name || 'Pastoral',
+      responsibilities: schedule.role || 'Participação',
+      confirmationStatus: confirmations[schedule.id]?.status || (schedule.checkedIn ? 'confirmed' : 'pending'),
+      confirmedAt: confirmations[schedule.id]?.confirmedAt || schedule.checkedInAt,
+    }));
+  } catch (error) {
+    console.error('Erro ao buscar escalas do usuário:', error);
+    return [];
+  }
 };
 
 /**
- * Busca os membros de uma pastoral específica
+ * Busca o histórico de escalas do usuário
  */
-export const getPastoralMembers = async (pastoralId: string): Promise<Member[]> => {
-  // Em um cenário real:
-  // const response = await api.get(`/pastorals/${pastoralId}/members`);
-  // return response.data;
-
-  return new Promise((resolve) => {
-    setTimeout(() => {
-      const pastoral = mockPastorals.find((p) => p.id === pastoralId);
-      resolve(pastoral ? pastoral.members : []);
-    }, 100);
-  });
-};
-
-/**
- * Busca as próximas escalas de um usuário específico
- * @param userId ID do usuário
- * @param communityId ID da comunidade
- * @returns Lista de escalas futuras do usuário
- */
-export const getUserUpcomingRosters = async (
-  userId: number,
-  communityId: string
-): Promise<UserRoster[]> => {
-  // Em um cenário real:
-  // const response = await api.get(`/users/${userId}/rosters?communityId=${communityId}`);
-  // return response.data;
-
-  // Carrega confirmações salvas
+export const getUserRosterHistory = async (userId: string): Promise<UserRoster[]> => {
   const confirmations = await loadConfirmations();
+  
+  if (USE_MOCK) {
+    return new Promise((resolve) => {
+      setTimeout(() => {
+        const now = new Date();
+        const mockHistory: UserRoster[] = [
+          {
+            id: 'urh1',
+            eventId: '10',
+            eventTitle: 'Santa Missa Dominical',
+            eventDate: new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString(),
+            eventLocation: 'Igreja Matriz',
+            eventType: 'MASS',
+            pastoralName: 'Pastoral da Liturgia',
+            responsibilities: '2ª Leitura',
+            confirmationStatus: 'confirmed',
+            confirmedAt: new Date(now.getTime() - 8 * 24 * 60 * 60 * 1000).toISOString(),
+          },
+          {
+            id: 'urh2',
+            eventId: '11',
+            eventTitle: 'Reunião Mensal',
+            eventDate: new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000).toISOString(),
+            eventLocation: 'Salão Paroquial',
+            eventType: 'PASTORAL_MEETING',
+            pastoralName: 'Pastoral da Liturgia',
+            responsibilities: 'Participação',
+            confirmationStatus: 'confirmed',
+            confirmedAt: new Date(now.getTime() - 15 * 24 * 60 * 60 * 1000).toISOString(),
+          },
+        ];
 
-  return new Promise((resolve) => {
-    setTimeout(() => {
-      // Mock: Simula escalas futuras do usuário
-      const now = new Date();
-      const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000);
-      const nextWeek = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
-      const nextMonth = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+        resolve(mockHistory);
+      }, 300);
+    });
+  }
 
-      // Datas específicas
-      const missaDate = new Date(tomorrow);
-      missaDate.setHours(17, 30, 0, 0);
-
-      const missaDate2 = new Date(nextWeek);
-      missaDate2.setHours(10, 0, 0, 0);
-
-      const reuniaoDate = new Date(nextMonth);
-      reuniaoDate.setHours(19, 0, 0, 0);
-
-      // Mock de escalas do usuário com status de confirmação
-      const mockUserRosters: UserRoster[] = [
-        {
-          id: 'ur1',
-          eventId: '1',
-          eventTitle: 'Santa Missa Dominical',
-          eventDate: missaDate.toISOString(),
-          eventLocation: 'Igreja Matriz',
-          eventType: 'MISSA',
-          pastoralName: 'Pastoral da Liturgia',
-          responsibilities: '1ª Leitura',
-          confirmationStatus: confirmations['ur1']?.status || 'pending',
-          confirmedAt: confirmations['ur1']?.confirmedAt,
-        },
-        {
-          id: 'ur2',
-          eventId: '4',
-          eventTitle: 'Missa das 10h',
-          eventDate: missaDate2.toISOString(),
-          eventLocation: 'Igreja Matriz',
-          eventType: 'MISSA',
-          pastoralName: 'Ministros da Eucaristia',
-          responsibilities: 'Distribuição da Comunhão',
-          confirmationStatus: confirmations['ur2']?.status || 'pending',
-          confirmedAt: confirmations['ur2']?.confirmedAt,
-        },
-        {
-          id: 'ur3',
-          eventId: '5',
-          eventTitle: 'Reunião Mensal da Pastoral',
-          eventDate: reuniaoDate.toISOString(),
-          eventLocation: 'Salão Paroquial',
-          eventType: 'REUNIAO',
-          pastoralName: 'Pastoral da Liturgia',
-          responsibilities: 'Participação obrigatória',
-          confirmationStatus: confirmations['ur3']?.status || 'pending',
-          confirmedAt: confirmations['ur3']?.confirmedAt,
-        },
-      ];
-
-      resolve(mockUserRosters);
-    }, 300);
-  });
+  try {
+    const response = await api.get('/schedules/user/history', {
+      params: { userId },
+    });
+    
+    return response.data.map((schedule: any) => ({
+      id: schedule.id,
+      eventId: schedule.eventId,
+      eventTitle: schedule.event?.title || 'Evento',
+      eventDate: schedule.event?.startDate || schedule.date,
+      eventLocation: schedule.event?.location || 'A definir',
+      eventType: schedule.event?.type || 'OTHER',
+      pastoralName: schedule.communityPastoral?.globalPastoral?.name || 'Pastoral',
+      responsibilities: schedule.role || 'Participação',
+      confirmationStatus: schedule.checkedIn ? 'confirmed' : 'declined',
+      confirmedAt: schedule.checkedInAt,
+    }));
+  } catch (error) {
+    console.error('Erro ao buscar histórico de escalas:', error);
+    return [];
+  }
 };
