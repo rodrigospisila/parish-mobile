@@ -252,8 +252,8 @@ const saveConfirmations = async (
 export const confirmRosterPresence = async (rosterId: string): Promise<boolean> => {
   try {
     if (!USE_MOCK) {
-      // API real - fazer check-in na escala
-      await api.patch(`/schedules/assignments/${rosterId}/checkin`);
+      // API real - confirmar participação na escala
+      await api.patch(`/schedules/assignments/${rosterId}/confirm`);
     }
     
     const confirmations = await loadConfirmations();
@@ -275,9 +275,8 @@ export const confirmRosterPresence = async (rosterId: string): Promise<boolean> 
 export const declineRosterPresence = async (rosterId: string, reason?: string): Promise<boolean> => {
   try {
     if (!USE_MOCK) {
-      // API real - desfazer check-in (o backend não tem endpoint de decline, usamos undo-checkin)
-      // Nota: Em produção, pode ser necessário criar um endpoint específico para decline
-      await api.patch(`/schedules/assignments/${rosterId}/undo-checkin`);
+      // API real - recusar participação na escala
+      await api.patch(`/schedules/assignments/${rosterId}/decline`);
     }
     
     const confirmations = await loadConfirmations();
@@ -584,32 +583,42 @@ export const getUserUpcomingRosters = async (userId: string): Promise<UserRoster
   }
 
   try {
-    // API real - buscar atribuições do usuário (memberId = id do membro na pastoral)
-    // O backend usa /schedules/assignments/all?memberId=xxx
-    const response = await api.get('/schedules/assignments/all', {
-      params: { memberId: userId },
-    });
+    // API real - usar novo endpoint que identifica o membro pelo usuário logado
+    const response = await api.get('/schedules/my-assignments');
     
-    // Filtrar apenas escalas futuras
-    const now = new Date();
-    const futureAssignments = response.data.filter((assignment: any) => {
-      const scheduleDate = new Date(assignment.schedule?.date || assignment.schedule?.event?.startDate);
-      return scheduleDate >= now;
-    });
+    // Se não tem membro vinculado, retorna vazio
+    if (response.data.message || !response.data.upcoming) {
+      console.log('Usuário não possui membro vinculado:', response.data.message);
+      return [];
+    }
     
     // Mapear resposta da API para UserRoster
-    return futureAssignments.map((assignment: any) => ({
-      id: assignment.id,
-      eventId: assignment.schedule?.eventId || '',
-      eventTitle: assignment.schedule?.event?.title || assignment.schedule?.title || 'Evento',
-      eventDate: assignment.schedule?.date || assignment.schedule?.event?.startDate,
-      eventLocation: assignment.schedule?.event?.location || 'A definir',
-      eventType: assignment.schedule?.event?.type || 'OTHER',
-      pastoralName: 'Pastoral', // TODO: Adicionar pastoral no backend
-      responsibilities: assignment.role || 'Participação',
-      confirmationStatus: confirmations[assignment.id]?.status || (assignment.checkedIn ? 'confirmed' : 'pending'),
-      confirmedAt: confirmations[assignment.id]?.confirmedAt || assignment.checkedInAt,
-    }));
+    return response.data.upcoming.map((assignment: any) => {
+      // Determinar status baseado no campo status do backend
+      let confirmationStatus: RosterConfirmationStatus = 'pending';
+      if (assignment.status === 'CONFIRMED' || assignment.checkedIn) {
+        confirmationStatus = 'confirmed';
+      } else if (assignment.status === 'DECLINED') {
+        confirmationStatus = 'declined';
+      }
+      // Sobrescrever com confirmação local se existir
+      if (confirmations[assignment.id]?.status) {
+        confirmationStatus = confirmations[assignment.id].status;
+      }
+      
+      return {
+        id: assignment.id,
+        eventId: assignment.schedule?.event?.id || '',
+        eventTitle: assignment.schedule?.event?.title || assignment.schedule?.title || 'Evento',
+        eventDate: assignment.schedule?.date,
+        eventLocation: assignment.schedule?.event?.location || 'A definir',
+        eventType: assignment.schedule?.event?.type || 'OTHER',
+        pastoralName: assignment.schedule?.event?.community?.name || 'Comunidade',
+        responsibilities: assignment.role || 'Participação',
+        confirmationStatus,
+        confirmedAt: confirmations[assignment.id]?.confirmedAt || assignment.checkedInAt,
+      };
+    });
   } catch (error) {
     console.error('Erro ao buscar escalas do usuário:', error);
     return [];
