@@ -13,23 +13,14 @@ import { Calendar, DateData, LocaleConfig } from 'react-native-calendars';
 import { useAuth } from '../../src/context/AuthContext';
 import { useColors, useTheme } from '../../src/context/ThemeContext';
 import { getCommunityEvents, Event } from '../../src/services/eventService';
+import { ServiceRoster, getServiceRostersByEventId } from '../../src/services/pastoralService';
 import { formatToBrazilianDate } from '../../src/utils/dateUtils';
 
 // Configuração do Locale para Português
 LocaleConfig.locales['br'] = {
   monthNames: [
-    'Janeiro',
-    'Fevereiro',
-    'Março',
-    'Abril',
-    'Maio',
-    'Junho',
-    'Julho',
-    'Agosto',
-    'Setembro',
-    'Outubro',
-    'Novembro',
-    'Dezembro',
+    'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
+    'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro',
   ],
   monthNamesShort: ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'],
   dayNames: ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'],
@@ -54,10 +45,12 @@ export default function CalendarScreen() {
   const [selectedDate, setSelectedDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
   const [isModalVisible, setIsModalVisible] = useState(false);
+  const [serviceRosters, setServiceRosters] = useState<ServiceRoster[]>([]);
+  const [isLoadingRosters, setIsLoadingRosters] = useState(false);
 
   const communityId = user?.communityId;
 
-  // Mapeamento de tipos de evento para cores (usando cores do tema)
+  // Mapeamento de tipos de evento para cores
   const eventTypeColors = useMemo(
     () => ({
       MISSA: colors.eventMissa,
@@ -90,7 +83,7 @@ export default function CalendarScreen() {
     loadEvents();
   }, [communityId]);
 
-  // 2. Mapear Eventos para o formato MarkedDates do react-native-calendars
+  // 2. Mapear Eventos para o formato MarkedDates
   const markedDates = useMemo(() => {
     const marked: { [key: string]: any } = {};
     events.forEach((event) => {
@@ -103,7 +96,6 @@ export default function CalendarScreen() {
       };
     });
 
-    // Garante que a data selecionada esteja marcada
     if (!marked[selectedDate]) {
       marked[selectedDate] = { selected: true, selectedColor: colors.highlight };
     } else {
@@ -125,19 +117,34 @@ export default function CalendarScreen() {
     setSelectedDate(day.dateString);
   };
 
-  const openEventDetails = (event: Event) => {
+  const openEventDetails = async (event: Event) => {
     setSelectedEvent(event);
     setIsModalVisible(true);
+    setServiceRosters([]);
+    
+    // Carregar escalas de serviço
+    if (event.hasServiceRosters) {
+      setIsLoadingRosters(true);
+      try {
+        const rosters = await getServiceRostersByEventId(event.id);
+        setServiceRosters(rosters);
+      } catch (error) {
+        console.error('Erro ao carregar escalas:', error);
+      } finally {
+        setIsLoadingRosters(false);
+      }
+    }
   };
 
   const closeEventDetails = () => {
     setIsModalVisible(false);
     setSelectedEvent(null);
+    setServiceRosters([]);
   };
 
   const styles = createStyles(colors);
 
-  // Tema do calendário baseado no modo escuro/claro
+  // Tema do calendário
   const calendarTheme = useMemo(
     () => ({
       backgroundColor: colors.surface,
@@ -205,16 +212,10 @@ export default function CalendarScreen() {
                 <View
                   style={[
                     styles.eventTypeIndicator,
-                    {
-                      backgroundColor:
-                        eventTypeColors[event.type as keyof typeof eventTypeColors] ||
-                        colors.highlight,
-                    },
+                    { backgroundColor: eventTypeColors[event.type as keyof typeof eventTypeColors] || colors.highlight },
                   ]}
                 />
-                <Text style={styles.eventTime}>
-                  {formatToBrazilianDate(event.date, 'HH:mm')}
-                </Text>
+                <Text style={styles.eventTime}>{formatToBrazilianDate(event.date, 'HH:mm')}</Text>
                 <View style={styles.eventDetails}>
                   <Text style={styles.eventTitle}>{event.title}</Text>
                   <Text style={styles.eventLocation}>{event.location}</Text>
@@ -237,63 +238,98 @@ export default function CalendarScreen() {
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
-            {selectedEvent && (
-              <>
-                <View style={styles.modalHeader}>
-                  <View
-                    style={[
-                      styles.modalTypeTag,
-                      {
-                        backgroundColor:
-                          eventTypeColors[selectedEvent.type as keyof typeof eventTypeColors] ||
-                          colors.highlight,
-                      },
-                    ]}
-                  >
-                    <Text style={styles.modalTypeText}>
-                      {eventTypeLabels[selectedEvent.type] || selectedEvent.type}
+            <ScrollView showsVerticalScrollIndicator={false}>
+              {selectedEvent && (
+                <>
+                  <View style={styles.modalHeader}>
+                    <View
+                      style={[
+                        styles.modalTypeTag,
+                        { backgroundColor: eventTypeColors[selectedEvent.type as keyof typeof eventTypeColors] || colors.highlight },
+                      ]}
+                    >
+                      <Text style={styles.modalTypeText}>
+                        {eventTypeLabels[selectedEvent.type] || selectedEvent.type}
+                      </Text>
+                    </View>
+                    <TouchableOpacity onPress={closeEventDetails} style={styles.closeButton}>
+                      <Text style={styles.closeButtonText}>✕</Text>
+                    </TouchableOpacity>
+                  </View>
+
+                  <Text style={styles.modalTitle}>{selectedEvent.title}</Text>
+
+                  <View style={styles.modalInfoRow}>
+                    <Text style={styles.modalLabel}>📅 Data e Hora:</Text>
+                    <Text style={styles.modalValue}>
+                      {formatToBrazilianDate(selectedEvent.date, 'dd/MM/yyyy')} às{' '}
+                      {formatToBrazilianDate(selectedEvent.date, 'HH:mm')}
                     </Text>
                   </View>
-                  <TouchableOpacity onPress={closeEventDetails} style={styles.closeButton}>
-                    <Text style={styles.closeButtonText}>✕</Text>
-                  </TouchableOpacity>
-                </View>
 
-                <Text style={styles.modalTitle}>{selectedEvent.title}</Text>
-
-                <View style={styles.modalInfoRow}>
-                  <Text style={styles.modalLabel}>📅 Data e Hora:</Text>
-                  <Text style={styles.modalValue}>
-                    {formatToBrazilianDate(selectedEvent.date, 'dd/MM/yyyy')} às{' '}
-                    {formatToBrazilianDate(selectedEvent.date, 'HH:mm')}
-                  </Text>
-                </View>
-
-                <View style={styles.modalInfoRow}>
-                  <Text style={styles.modalLabel}>📍 Local:</Text>
-                  <Text style={styles.modalValue}>{selectedEvent.location}</Text>
-                </View>
-
-                {selectedEvent.description && (
-                  <View style={styles.modalDescriptionContainer}>
-                    <Text style={styles.modalLabel}>📝 Descrição:</Text>
-                    <Text style={styles.modalDescription}>{selectedEvent.description}</Text>
+                  <View style={styles.modalInfoRow}>
+                    <Text style={styles.modalLabel}>📍 Local:</Text>
+                    <Text style={styles.modalValue}>{selectedEvent.location}</Text>
                   </View>
-                )}
 
-                {/* Placeholder para Escalas de Serviço */}
-                <View style={styles.serviceRosterPlaceholder}>
-                  <Text style={styles.serviceRosterTitle}>📋 Escalas de Serviço</Text>
-                  <Text style={styles.serviceRosterText}>
-                    Em breve: visualize as pastorais e membros escalados para este evento.
-                  </Text>
-                </View>
+                  {selectedEvent.description && (
+                    <View style={styles.modalDescriptionContainer}>
+                      <Text style={styles.modalLabel}>📝 Descrição:</Text>
+                      <Text style={styles.modalDescription}>{selectedEvent.description}</Text>
+                    </View>
+                  )}
 
-                <TouchableOpacity style={styles.modalCloseButton} onPress={closeEventDetails}>
-                  <Text style={styles.modalCloseButtonText}>Fechar</Text>
-                </TouchableOpacity>
-              </>
-            )}
+                  {/* Escalas de Serviço */}
+                  <View style={styles.serviceRosterSection}>
+                    <Text style={styles.serviceRosterSectionTitle}>📋 Escalas de Serviço</Text>
+                    
+                    {isLoadingRosters ? (
+                      <View style={styles.rostersLoading}>
+                        <ActivityIndicator size="small" color={colors.primary} />
+                        <Text style={styles.rostersLoadingText}>Carregando escalas...</Text>
+                      </View>
+                    ) : serviceRosters.length > 0 ? (
+                      serviceRosters.map((roster) => (
+                        <View key={roster.id} style={styles.rosterCard}>
+                          <View style={styles.rosterHeader}>
+                            <Text style={styles.rosterPastoralName}>{roster.pastoralName}</Text>
+                          </View>
+                          <Text style={styles.rosterResponsibilities}>{roster.responsibilities}</Text>
+                          <View style={styles.rosterMembers}>
+                            <Text style={styles.rosterMembersLabel}>Escalados:</Text>
+                            {roster.membersOnDuty.map((member, index) => (
+                              <View key={member.id} style={styles.memberItem}>
+                                <View style={styles.memberAvatar}>
+                                  <Text style={styles.memberAvatarText}>
+                                    {member.name.charAt(0).toUpperCase()}
+                                  </Text>
+                                </View>
+                                <View style={styles.memberInfo}>
+                                  <Text style={styles.memberName}>{member.name}</Text>
+                                  {member.role && (
+                                    <Text style={styles.memberRole}>{member.role}</Text>
+                                  )}
+                                </View>
+                              </View>
+                            ))}
+                          </View>
+                        </View>
+                      ))
+                    ) : (
+                      <View style={styles.noRosters}>
+                        <Text style={styles.noRostersText}>
+                          Nenhuma escala de serviço cadastrada para este evento.
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+
+                  <TouchableOpacity style={styles.modalCloseButton} onPress={closeEventDetails}>
+                    <Text style={styles.modalCloseButtonText}>Fechar</Text>
+                  </TouchableOpacity>
+                </>
+              )}
+            </ScrollView>
           </View>
         </View>
       </Modal>
@@ -392,7 +428,7 @@ const createStyles = (colors: ReturnType<typeof useColors>) =>
       borderTopLeftRadius: 20,
       borderTopRightRadius: 20,
       padding: 20,
-      maxHeight: '80%',
+      maxHeight: '85%',
     },
     modalHeader: {
       flexDirection: 'row',
@@ -444,30 +480,110 @@ const createStyles = (colors: ReturnType<typeof useColors>) =>
       color: colors.text,
       lineHeight: 22,
     },
-    serviceRosterPlaceholder: {
+    // Service Roster Styles
+    serviceRosterSection: {
+      marginTop: 10,
+      marginBottom: 20,
+    },
+    serviceRosterSectionTitle: {
+      fontSize: 18,
+      fontWeight: 'bold',
+      color: colors.text,
+      marginBottom: 15,
+    },
+    rostersLoading: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      padding: 20,
+    },
+    rostersLoadingText: {
+      marginLeft: 10,
+      color: colors.textSecondary,
+    },
+    rosterCard: {
+      backgroundColor: colors.card,
+      borderRadius: 12,
+      padding: 15,
+      marginBottom: 12,
+      borderLeftWidth: 4,
+      borderLeftColor: colors.primary,
+    },
+    rosterHeader: {
+      marginBottom: 8,
+    },
+    rosterPastoralName: {
+      fontSize: 16,
+      fontWeight: 'bold',
+      color: colors.text,
+    },
+    rosterResponsibilities: {
+      fontSize: 14,
+      color: colors.textSecondary,
+      marginBottom: 12,
+      fontStyle: 'italic',
+    },
+    rosterMembers: {
+      borderTopWidth: 1,
+      borderTopColor: colors.border,
+      paddingTop: 10,
+    },
+    rosterMembersLabel: {
+      fontSize: 12,
+      fontWeight: '600',
+      color: colors.textTertiary,
+      marginBottom: 8,
+      textTransform: 'uppercase',
+    },
+    memberItem: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginBottom: 8,
+    },
+    memberAvatar: {
+      width: 32,
+      height: 32,
+      borderRadius: 16,
+      backgroundColor: colors.primary,
+      justifyContent: 'center',
+      alignItems: 'center',
+      marginRight: 10,
+    },
+    memberAvatarText: {
+      color: '#fff',
+      fontWeight: 'bold',
+      fontSize: 14,
+    },
+    memberInfo: {
+      flex: 1,
+    },
+    memberName: {
+      fontSize: 14,
+      color: colors.text,
+      fontWeight: '500',
+    },
+    memberRole: {
+      fontSize: 12,
+      color: colors.textTertiary,
+    },
+    noRosters: {
       backgroundColor: colors.highlightLight,
       padding: 15,
       borderRadius: 10,
-      marginTop: 10,
-      marginBottom: 20,
       borderWidth: 1,
       borderColor: colors.highlight,
     },
-    serviceRosterTitle: {
-      fontSize: 16,
-      fontWeight: '600',
-      color: colors.text,
-      marginBottom: 5,
-    },
-    serviceRosterText: {
+    noRostersText: {
       fontSize: 14,
       color: colors.textSecondary,
+      textAlign: 'center',
     },
     modalCloseButton: {
       backgroundColor: colors.primary,
       padding: 15,
       borderRadius: 10,
       alignItems: 'center',
+      marginTop: 10,
     },
     modalCloseButtonText: {
       color: '#fff',
