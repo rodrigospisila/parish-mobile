@@ -226,3 +226,88 @@ export const getPastoralMembers = async (pastoralId: string): Promise<Member[]> 
     }, 100);
   });
 };
+
+/**
+ * Interface para escala do usuário com informações do evento
+ */
+export interface UserRoster {
+  id: string;
+  eventId: string;
+  eventTitle: string;
+  eventDate: string;
+  eventLocation: string;
+  eventType: string;
+  pastoralName: string;
+  responsibilities: string;
+}
+
+/**
+ * Busca as próximas escalas de um usuário específico
+ * @param userId ID do usuário
+ * @param communityId ID da comunidade
+ * @returns Lista de escalas futuras do usuário
+ */
+export const getUserUpcomingRosters = async (
+  userId: number,
+  communityId: string
+): Promise<UserRoster[]> => {
+  // Em um cenário real:
+  // const response = await api.get(`/users/${userId}/rosters?communityId=${communityId}`);
+  // return response.data;
+
+  return new Promise((resolve) => {
+    setTimeout(() => {
+      // Mock: Simula escalas futuras do usuário
+      const now = new Date();
+      const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+      const nextWeek = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+      const nextMonth = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+
+      // Datas específicas
+      const missaDate = new Date(tomorrow);
+      missaDate.setHours(17, 30, 0, 0);
+
+      const missaDate2 = new Date(nextWeek);
+      missaDate2.setHours(10, 0, 0, 0);
+
+      const reuniaoDate = new Date(nextMonth);
+      reuniaoDate.setHours(19, 0, 0, 0);
+
+      // Mock de escalas do usuário
+      const mockUserRosters: UserRoster[] = [
+        {
+          id: 'ur1',
+          eventId: '1',
+          eventTitle: 'Santa Missa Dominical',
+          eventDate: missaDate.toISOString(),
+          eventLocation: 'Igreja Matriz',
+          eventType: 'MISSA',
+          pastoralName: 'Pastoral da Liturgia',
+          responsibilities: '1ª Leitura',
+        },
+        {
+          id: 'ur2',
+          eventId: '4',
+          eventTitle: 'Missa das 10h',
+          eventDate: missaDate2.toISOString(),
+          eventLocation: 'Igreja Matriz',
+          eventType: 'MISSA',
+          pastoralName: 'Ministros da Eucaristia',
+          responsibilities: 'Distribuição da Comunhão',
+        },
+        {
+          id: 'ur3',
+          eventId: '5',
+          eventTitle: 'Reunião Mensal da Pastoral',
+          eventDate: reuniaoDate.toISOString(),
+          eventLocation: 'Salão Paroquial',
+          eventType: 'REUNIAO',
+          pastoralName: 'Pastoral da Liturgia',
+          responsibilities: 'Participação obrigatória',
+        },
+      ];
+
+      resolve(mockUserRosters);
+    }, 300);
+  });
+};
