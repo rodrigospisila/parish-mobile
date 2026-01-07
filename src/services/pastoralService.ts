@@ -1,4 +1,5 @@
 import api from '../config/api';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 /**
  * Representa um membro de uma pastoral
@@ -32,6 +33,27 @@ export interface ServiceRoster {
   pastoralName: string;
   responsibilities: string; // Ex: "Leitura", "Canto", "Acolhida"
   membersOnDuty: Member[];
+}
+
+/**
+ * Status de confirmação de presença na escala
+ */
+export type RosterConfirmationStatus = 'pending' | 'confirmed' | 'declined';
+
+/**
+ * Interface para escala do usuário com informações do evento
+ */
+export interface UserRoster {
+  id: string;
+  eventId: string;
+  eventTitle: string;
+  eventDate: string;
+  eventLocation: string;
+  eventType: string;
+  pastoralName: string;
+  responsibilities: string;
+  confirmationStatus: RosterConfirmationStatus;
+  confirmedAt?: string;
 }
 
 // ============================================
@@ -93,6 +115,105 @@ const mockPastorals: Pastoral[] = [
     members: [mockMembers[2], mockMembers[4], mockMembers[6], mockMembers[8]],
   },
 ];
+
+// Chave para armazenar confirmações no AsyncStorage
+const ROSTER_CONFIRMATIONS_KEY = '@parish:roster_confirmations';
+
+// ============================================
+// FUNÇÕES DE CONFIRMAÇÃO
+// ============================================
+
+/**
+ * Carrega as confirmações salvas do AsyncStorage
+ */
+const loadConfirmations = async (): Promise<Record<string, { status: RosterConfirmationStatus; confirmedAt?: string }>> => {
+  try {
+    const data = await AsyncStorage.getItem(ROSTER_CONFIRMATIONS_KEY);
+    return data ? JSON.parse(data) : {};
+  } catch (error) {
+    console.error('Erro ao carregar confirmações:', error);
+    return {};
+  }
+};
+
+/**
+ * Salva as confirmações no AsyncStorage
+ */
+const saveConfirmations = async (
+  confirmations: Record<string, { status: RosterConfirmationStatus; confirmedAt?: string }>
+): Promise<void> => {
+  try {
+    await AsyncStorage.setItem(ROSTER_CONFIRMATIONS_KEY, JSON.stringify(confirmations));
+  } catch (error) {
+    console.error('Erro ao salvar confirmações:', error);
+  }
+};
+
+/**
+ * Confirma presença em uma escala
+ * @param rosterId ID da escala
+ * @returns A escala atualizada ou null em caso de erro
+ */
+export const confirmRosterPresence = async (rosterId: string): Promise<boolean> => {
+  try {
+    // Em um cenário real:
+    // const response = await api.post(`/rosters/${rosterId}/confirm`);
+    // return response.data;
+
+    const confirmations = await loadConfirmations();
+    confirmations[rosterId] = {
+      status: 'confirmed',
+      confirmedAt: new Date().toISOString(),
+    };
+    await saveConfirmations(confirmations);
+    return true;
+  } catch (error) {
+    console.error('Erro ao confirmar presença:', error);
+    return false;
+  }
+};
+
+/**
+ * Declina presença em uma escala
+ * @param rosterId ID da escala
+ * @param reason Motivo opcional da recusa
+ * @returns true se sucesso, false caso contrário
+ */
+export const declineRosterPresence = async (rosterId: string, reason?: string): Promise<boolean> => {
+  try {
+    // Em um cenário real:
+    // const response = await api.post(`/rosters/${rosterId}/decline`, { reason });
+    // return response.data;
+
+    const confirmations = await loadConfirmations();
+    confirmations[rosterId] = {
+      status: 'declined',
+      confirmedAt: new Date().toISOString(),
+    };
+    await saveConfirmations(confirmations);
+    return true;
+  } catch (error) {
+    console.error('Erro ao declinar presença:', error);
+    return false;
+  }
+};
+
+/**
+ * Reseta o status de confirmação de uma escala para pendente
+ * @param rosterId ID da escala
+ * @returns true se sucesso, false caso contrário
+ */
+export const resetRosterConfirmation = async (rosterId: string): Promise<boolean> => {
+  try {
+    const confirmations = await loadConfirmations();
+    delete confirmations[rosterId];
+    await saveConfirmations(confirmations);
+    return true;
+  } catch (error) {
+    console.error('Erro ao resetar confirmação:', error);
+    return false;
+  }
+};
 
 // ============================================
 // FUNÇÕES DO SERVIÇO
@@ -230,20 +351,6 @@ export const getPastoralMembers = async (pastoralId: string): Promise<Member[]> 
 };
 
 /**
- * Interface para escala do usuário com informações do evento
- */
-export interface UserRoster {
-  id: string;
-  eventId: string;
-  eventTitle: string;
-  eventDate: string;
-  eventLocation: string;
-  eventType: string;
-  pastoralName: string;
-  responsibilities: string;
-}
-
-/**
  * Busca as próximas escalas de um usuário específico
  * @param userId ID do usuário
  * @param communityId ID da comunidade
@@ -256,6 +363,9 @@ export const getUserUpcomingRosters = async (
   // Em um cenário real:
   // const response = await api.get(`/users/${userId}/rosters?communityId=${communityId}`);
   // return response.data;
+
+  // Carrega confirmações salvas
+  const confirmations = await loadConfirmations();
 
   return new Promise((resolve) => {
     setTimeout(() => {
@@ -275,7 +385,7 @@ export const getUserUpcomingRosters = async (
       const reuniaoDate = new Date(nextMonth);
       reuniaoDate.setHours(19, 0, 0, 0);
 
-      // Mock de escalas do usuário
+      // Mock de escalas do usuário com status de confirmação
       const mockUserRosters: UserRoster[] = [
         {
           id: 'ur1',
@@ -286,6 +396,8 @@ export const getUserUpcomingRosters = async (
           eventType: 'MISSA',
           pastoralName: 'Pastoral da Liturgia',
           responsibilities: '1ª Leitura',
+          confirmationStatus: confirmations['ur1']?.status || 'pending',
+          confirmedAt: confirmations['ur1']?.confirmedAt,
         },
         {
           id: 'ur2',
@@ -296,6 +408,8 @@ export const getUserUpcomingRosters = async (
           eventType: 'MISSA',
           pastoralName: 'Ministros da Eucaristia',
           responsibilities: 'Distribuição da Comunhão',
+          confirmationStatus: confirmations['ur2']?.status || 'pending',
+          confirmedAt: confirmations['ur2']?.confirmedAt,
         },
         {
           id: 'ur3',
@@ -306,6 +420,8 @@ export const getUserUpcomingRosters = async (
           eventType: 'REUNIAO',
           pastoralName: 'Pastoral da Liturgia',
           responsibilities: 'Participação obrigatória',
+          confirmationStatus: confirmations['ur3']?.status || 'pending',
+          confirmedAt: confirmations['ur3']?.confirmedAt,
         },
       ];
 

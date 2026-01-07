@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -13,7 +13,13 @@ import {
 import { useAuth } from '../../src/context/AuthContext';
 import { useColors, useTheme } from '../../src/context/ThemeContext';
 import { useNotifications } from '../../src/context/NotificationContext';
-import { UserRoster, getUserUpcomingRosters } from '../../src/services/pastoralService';
+import {
+  UserRoster,
+  getUserUpcomingRosters,
+  confirmRosterPresence,
+  declineRosterPresence,
+  RosterConfirmationStatus,
+} from '../../src/services/pastoralService';
 import { formatToBrazilianDate } from '../../src/utils/dateUtils';
 
 export default function ProfileScreen() {
@@ -25,28 +31,89 @@ export default function ProfileScreen() {
 
   const [userRosters, setUserRosters] = useState<UserRoster[]>([]);
   const [isLoadingRosters, setIsLoadingRosters] = useState(true);
+  const [processingRosterId, setProcessingRosterId] = useState<string | null>(null);
 
   // Carregar escalas do usuário
-  useEffect(() => {
-    const loadUserRosters = async () => {
-      if (!user?.id || !user?.communityId) {
-        setIsLoadingRosters(false);
-        return;
-      }
+  const loadUserRosters = useCallback(async () => {
+    if (!user?.id || !user?.communityId) {
+      setIsLoadingRosters(false);
+      return;
+    }
 
-      setIsLoadingRosters(true);
-      try {
-        const rosters = await getUserUpcomingRosters(user.id, user.communityId);
-        setUserRosters(rosters);
-      } catch (error) {
-        console.error('Erro ao carregar escalas:', error);
-      } finally {
-        setIsLoadingRosters(false);
-      }
-    };
-
-    loadUserRosters();
+    setIsLoadingRosters(true);
+    try {
+      const rosters = await getUserUpcomingRosters(user.id, user.communityId);
+      setUserRosters(rosters);
+    } catch (error) {
+      console.error('Erro ao carregar escalas:', error);
+    } finally {
+      setIsLoadingRosters(false);
+    }
   }, [user?.id, user?.communityId]);
+
+  useEffect(() => {
+    loadUserRosters();
+  }, [loadUserRosters]);
+
+  const handleConfirmPresence = async (roster: UserRoster) => {
+    setProcessingRosterId(roster.id);
+    try {
+      const success = await confirmRosterPresence(roster.id);
+      if (success) {
+        // Atualiza o estado local
+        setUserRosters((prev) =>
+          prev.map((r) =>
+            r.id === roster.id
+              ? { ...r, confirmationStatus: 'confirmed' as RosterConfirmationStatus, confirmedAt: new Date().toISOString() }
+              : r
+          )
+        );
+        Alert.alert('Presença Confirmada', `Você confirmou presença em "${roster.eventTitle}".`);
+      } else {
+        Alert.alert('Erro', 'Não foi possível confirmar sua presença. Tente novamente.');
+      }
+    } catch (error) {
+      Alert.alert('Erro', 'Ocorreu um erro ao confirmar presença.');
+    } finally {
+      setProcessingRosterId(null);
+    }
+  };
+
+  const handleDeclinePresence = (roster: UserRoster) => {
+    Alert.alert(
+      'Declinar Presença',
+      `Tem certeza que deseja declinar sua presença em "${roster.eventTitle}"?\n\nO coordenador da pastoral será notificado.`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Declinar',
+          style: 'destructive',
+          onPress: async () => {
+            setProcessingRosterId(roster.id);
+            try {
+              const success = await declineRosterPresence(roster.id);
+              if (success) {
+                setUserRosters((prev) =>
+                  prev.map((r) =>
+                    r.id === roster.id
+                      ? { ...r, confirmationStatus: 'declined' as RosterConfirmationStatus, confirmedAt: new Date().toISOString() }
+                      : r
+                  )
+                );
+                Alert.alert('Presença Declinada', 'O coordenador foi notificado sobre sua ausência.');
+              } else {
+                Alert.alert('Erro', 'Não foi possível declinar sua presença. Tente novamente.');
+              }
+            } catch (error) {
+              Alert.alert('Erro', 'Ocorreu um erro ao declinar presença.');
+            } finally {
+              setProcessingRosterId(null);
+            }
+          },
+        },
+      ]
+    );
+  };
 
   const handleSignOut = () => {
     Alert.alert(
@@ -135,30 +202,112 @@ export default function ProfileScreen() {
     ATIVIDADE: colors.eventAtividade,
   };
 
+  // Cores para status de confirmação
+  const getStatusColor = (status: RosterConfirmationStatus) => {
+    switch (status) {
+      case 'confirmed':
+        return colors.success;
+      case 'declined':
+        return colors.error;
+      default:
+        return colors.warning;
+    }
+  };
+
+  const getStatusText = (status: RosterConfirmationStatus) => {
+    switch (status) {
+      case 'confirmed':
+        return 'Confirmado';
+      case 'declined':
+        return 'Declinado';
+      default:
+        return 'Pendente';
+    }
+  };
+
   const styles = createStyles(colors);
 
-  const renderRosterCard = (roster: UserRoster) => (
-    <View key={roster.id} style={styles.rosterCard}>
-      <View
-        style={[
-          styles.rosterTypeIndicator,
-          { backgroundColor: eventTypeColors[roster.eventType] || colors.primary },
-        ]}
-      />
-      <View style={styles.rosterContent}>
-        <Text style={styles.rosterEventTitle}>{roster.eventTitle}</Text>
-        <Text style={styles.rosterDate}>
-          {formatToBrazilianDate(roster.eventDate, 'dd/MM/yyyy')} às{' '}
-          {formatToBrazilianDate(roster.eventDate, 'HH:mm')}
-        </Text>
-        <Text style={styles.rosterLocation}>{roster.eventLocation}</Text>
-        <View style={styles.rosterPastoralContainer}>
-          <Text style={styles.rosterPastoralName}>{roster.pastoralName}</Text>
-          <Text style={styles.rosterResponsibilities}>{roster.responsibilities}</Text>
+  const renderRosterCard = (roster: UserRoster) => {
+    const isProcessing = processingRosterId === roster.id;
+    const statusColor = getStatusColor(roster.confirmationStatus);
+
+    return (
+      <View key={roster.id} style={styles.rosterCard}>
+        <View
+          style={[
+            styles.rosterTypeIndicator,
+            { backgroundColor: eventTypeColors[roster.eventType] || colors.primary },
+          ]}
+        />
+        <View style={styles.rosterContent}>
+          {/* Header com título e status */}
+          <View style={styles.rosterHeader}>
+            <Text style={styles.rosterEventTitle} numberOfLines={1}>
+              {roster.eventTitle}
+            </Text>
+            <View style={[styles.statusBadge, { backgroundColor: statusColor + '20' }]}>
+              <View style={[styles.statusDot, { backgroundColor: statusColor }]} />
+              <Text style={[styles.statusText, { color: statusColor }]}>
+                {getStatusText(roster.confirmationStatus)}
+              </Text>
+            </View>
+          </View>
+
+          <Text style={styles.rosterDate}>
+            {formatToBrazilianDate(roster.eventDate, 'dd/MM/yyyy')} às{' '}
+            {formatToBrazilianDate(roster.eventDate, 'HH:mm')}
+          </Text>
+          <Text style={styles.rosterLocation}>{roster.eventLocation}</Text>
+
+          <View style={styles.rosterPastoralContainer}>
+            <Text style={styles.rosterPastoralName}>{roster.pastoralName}</Text>
+            <Text style={styles.rosterResponsibilities}>{roster.responsibilities}</Text>
+          </View>
+
+          {/* Botões de ação */}
+          {roster.confirmationStatus === 'pending' && (
+            <View style={styles.actionButtons}>
+              <TouchableOpacity
+                style={[styles.actionButton, styles.confirmButton]}
+                onPress={() => handleConfirmPresence(roster)}
+                disabled={isProcessing}
+              >
+                {isProcessing ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <Text style={styles.confirmButtonText}>Confirmar</Text>
+                )}
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.actionButton, styles.declineButton]}
+                onPress={() => handleDeclinePresence(roster)}
+                disabled={isProcessing}
+              >
+                <Text style={styles.declineButtonText}>Declinar</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {/* Mensagem de status confirmado/declinado */}
+          {roster.confirmationStatus === 'confirmed' && (
+            <View style={styles.confirmedMessage}>
+              <Text style={styles.confirmedMessageText}>
+                ✓ Presença confirmada
+              </Text>
+            </View>
+          )}
+
+          {roster.confirmationStatus === 'declined' && (
+            <View style={styles.declinedMessage}>
+              <Text style={styles.declinedMessageText}>
+                ✗ Presença declinada
+              </Text>
+            </View>
+          )}
         </View>
       </View>
-    </View>
-  );
+    );
+  };
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -173,7 +322,12 @@ export default function ProfileScreen() {
 
         {/* Seção Minha Escala */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Minha Escala</Text>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Minha Escala</Text>
+            <TouchableOpacity onPress={loadUserRosters} disabled={isLoadingRosters}>
+              <Text style={styles.refreshText}>Atualizar</Text>
+            </TouchableOpacity>
+          </View>
 
           {isLoadingRosters ? (
             <View style={styles.loadingContainer}>
@@ -394,13 +548,23 @@ const createStyles = (colors: ReturnType<typeof useColors>) =>
       marginTop: 20,
       paddingHorizontal: 16,
     },
+    sectionHeader: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: 8,
+      marginLeft: 4,
+    },
     sectionTitle: {
       fontSize: 14,
       fontWeight: '600',
       color: colors.textSecondary,
-      marginBottom: 8,
-      marginLeft: 4,
       textTransform: 'uppercase',
+    },
+    refreshText: {
+      fontSize: 14,
+      color: colors.primary,
+      fontWeight: '500',
     },
     card: {
       backgroundColor: colors.card,
@@ -505,11 +669,35 @@ const createStyles = (colors: ReturnType<typeof useColors>) =>
       flex: 1,
       padding: 15,
     },
+    rosterHeader: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: 4,
+    },
     rosterEventTitle: {
       fontSize: 16,
       fontWeight: 'bold',
       color: colors.text,
-      marginBottom: 4,
+      flex: 1,
+      marginRight: 8,
+    },
+    statusBadge: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingHorizontal: 8,
+      paddingVertical: 4,
+      borderRadius: 12,
+    },
+    statusDot: {
+      width: 6,
+      height: 6,
+      borderRadius: 3,
+      marginRight: 4,
+    },
+    statusText: {
+      fontSize: 11,
+      fontWeight: '600',
     },
     rosterDate: {
       fontSize: 14,
@@ -528,6 +716,7 @@ const createStyles = (colors: ReturnType<typeof useColors>) =>
       padding: 10,
       borderLeftWidth: 3,
       borderLeftColor: colors.primary,
+      marginBottom: 12,
     },
     rosterPastoralName: {
       fontSize: 13,
@@ -539,6 +728,57 @@ const createStyles = (colors: ReturnType<typeof useColors>) =>
       color: colors.textSecondary,
       marginTop: 2,
       fontStyle: 'italic',
+    },
+    actionButtons: {
+      flexDirection: 'row',
+      gap: 10,
+    },
+    actionButton: {
+      flex: 1,
+      paddingVertical: 10,
+      borderRadius: 8,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    confirmButton: {
+      backgroundColor: colors.success,
+    },
+    confirmButtonText: {
+      color: '#fff',
+      fontWeight: '600',
+      fontSize: 14,
+    },
+    declineButton: {
+      backgroundColor: 'transparent',
+      borderWidth: 1,
+      borderColor: colors.error,
+    },
+    declineButtonText: {
+      color: colors.error,
+      fontWeight: '600',
+      fontSize: 14,
+    },
+    confirmedMessage: {
+      backgroundColor: colors.success + '15',
+      borderRadius: 8,
+      padding: 10,
+      alignItems: 'center',
+    },
+    confirmedMessageText: {
+      color: colors.success,
+      fontWeight: '500',
+      fontSize: 13,
+    },
+    declinedMessage: {
+      backgroundColor: colors.error + '15',
+      borderRadius: 8,
+      padding: 10,
+      alignItems: 'center',
+    },
+    declinedMessageText: {
+      color: colors.error,
+      fontWeight: '500',
+      fontSize: 13,
     },
     emptyRostersCard: {
       backgroundColor: colors.card,
