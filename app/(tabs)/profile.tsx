@@ -35,21 +35,21 @@ export default function ProfileScreen() {
 
   // Carregar escalas do usuário
   const loadUserRosters = useCallback(async () => {
-    if (!user?.id || !user?.communityId) {
+    if (!user?.id) {
       setIsLoadingRosters(false);
       return;
     }
 
     setIsLoadingRosters(true);
     try {
-      const rosters = await getUserUpcomingRosters(user.id, user.communityId);
+      const rosters = await getUserUpcomingRosters(user.id);
       setUserRosters(rosters);
     } catch (error) {
       console.error('Erro ao carregar escalas:', error);
     } finally {
       setIsLoadingRosters(false);
     }
-  }, [user?.id, user?.communityId]);
+  }, [user?.id]);
 
   useEffect(() => {
     loadUserRosters();

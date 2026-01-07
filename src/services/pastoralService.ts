@@ -252,8 +252,8 @@ const saveConfirmations = async (
 export const confirmRosterPresence = async (rosterId: string): Promise<boolean> => {
   try {
     if (!USE_MOCK) {
-      // API real - quando o endpoint existir
-      // await api.post(`/schedules/${rosterId}/check-in`);
+      // API real - fazer check-in na escala
+      await api.patch(`/schedules/assignments/${rosterId}/checkin`);
     }
     
     const confirmations = await loadConfirmations();
@@ -275,8 +275,9 @@ export const confirmRosterPresence = async (rosterId: string): Promise<boolean> 
 export const declineRosterPresence = async (rosterId: string, reason?: string): Promise<boolean> => {
   try {
     if (!USE_MOCK) {
-      // API real - quando o endpoint existir
-      // await api.post(`/schedules/${rosterId}/decline`, { reason });
+      // API real - desfazer check-in (o backend não tem endpoint de decline, usamos undo-checkin)
+      // Nota: Em produção, pode ser necessário criar um endpoint específico para decline
+      await api.patch(`/schedules/assignments/${rosterId}/undo-checkin`);
     }
     
     const confirmations = await loadConfirmations();
@@ -583,23 +584,31 @@ export const getUserUpcomingRosters = async (userId: string): Promise<UserRoster
   }
 
   try {
-    // API real - buscar escalas do usuário
-    const response = await api.get('/schedules/user', {
-      params: { userId },
+    // API real - buscar atribuições do usuário (memberId = id do membro na pastoral)
+    // O backend usa /schedules/assignments/all?memberId=xxx
+    const response = await api.get('/schedules/assignments/all', {
+      params: { memberId: userId },
+    });
+    
+    // Filtrar apenas escalas futuras
+    const now = new Date();
+    const futureAssignments = response.data.filter((assignment: any) => {
+      const scheduleDate = new Date(assignment.schedule?.date || assignment.schedule?.event?.startDate);
+      return scheduleDate >= now;
     });
     
     // Mapear resposta da API para UserRoster
-    return response.data.map((schedule: any) => ({
-      id: schedule.id,
-      eventId: schedule.eventId,
-      eventTitle: schedule.event?.title || 'Evento',
-      eventDate: schedule.event?.startDate || schedule.date,
-      eventLocation: schedule.event?.location || 'A definir',
-      eventType: schedule.event?.type || 'OTHER',
-      pastoralName: schedule.communityPastoral?.globalPastoral?.name || 'Pastoral',
-      responsibilities: schedule.role || 'Participação',
-      confirmationStatus: confirmations[schedule.id]?.status || (schedule.checkedIn ? 'confirmed' : 'pending'),
-      confirmedAt: confirmations[schedule.id]?.confirmedAt || schedule.checkedInAt,
+    return futureAssignments.map((assignment: any) => ({
+      id: assignment.id,
+      eventId: assignment.schedule?.eventId || '',
+      eventTitle: assignment.schedule?.event?.title || assignment.schedule?.title || 'Evento',
+      eventDate: assignment.schedule?.date || assignment.schedule?.event?.startDate,
+      eventLocation: assignment.schedule?.event?.location || 'A definir',
+      eventType: assignment.schedule?.event?.type || 'OTHER',
+      pastoralName: 'Pastoral', // TODO: Adicionar pastoral no backend
+      responsibilities: assignment.role || 'Participação',
+      confirmationStatus: confirmations[assignment.id]?.status || (assignment.checkedIn ? 'confirmed' : 'pending'),
+      confirmedAt: confirmations[assignment.id]?.confirmedAt || assignment.checkedInAt,
     }));
   } catch (error) {
     console.error('Erro ao buscar escalas do usuário:', error);
