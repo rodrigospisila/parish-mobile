@@ -13,10 +13,9 @@ import PickerInput from '../src/components/PickerInput';
 import { Diocese, getDioceses } from '../src/services/churchService';
 import { useAuth } from '../src/context/AuthContext';
 import { useColors } from '../src/context/ThemeContext';
-import { authService } from '../src/services/authService';
 
 export default function SelectCommunityScreen() {
-  const { user, updateUser } = useAuth();
+  const { user, updateCommunity } = useAuth();
   const colors = useColors();
   const [dioceses, setDioceses] = useState<Diocese[]>([]);
   const [selectedDioceseId, setSelectedDioceseId] = useState<string | undefined>(undefined);
@@ -80,13 +79,12 @@ export default function SelectCommunityScreen() {
 
     setIsSubmitting(true);
     try {
-      // 1. Chamar o serviço para atualizar o communityId no backend
-      await authService.updateCommunity(user.id, selectedCommunityId);
-
-      // 2. Atualizar o contexto localmente - a navegação será feita automaticamente pelo _layout.tsx
-      updateUser({ ...user, communityId: selectedCommunityId });
-    } catch (error) {
-      Alert.alert('Erro', 'Não foi possível salvar sua comunidade. Tente novamente.');
+      // Usar a função updateCommunity do AuthContext
+      // Ela atualiza no backend e no contexto local automaticamente
+      // A navegação será feita automaticamente pelo _layout.tsx
+      await updateCommunity(selectedCommunityId);
+    } catch (error: any) {
+      Alert.alert('Erro', error.message || 'Não foi possível salvar sua comunidade. Tente novamente.');
       console.error(error);
       setIsSubmitting(false);
     }

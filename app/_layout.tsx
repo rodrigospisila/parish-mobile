@@ -7,7 +7,7 @@ import { NotificationProvider } from '../src/context/NotificationContext';
 
 // Componente interno que gerencia a navegação baseada no estado de autenticação
 function RootLayoutNav() {
-  const { user, isLoading } = useAuth();
+  const { user, isLoading, isAuthenticated, hasCommunity } = useAuth();
   const { colors, isDark } = useTheme();
   const segments = useSegments();
   const router = useRouter();
@@ -18,7 +18,7 @@ function RootLayoutNav() {
     const inAuthGroup = segments[0] === '(auth)';
     const inSelectCommunity = segments[0] === 'select-community';
 
-    if (!user) {
+    if (!isAuthenticated) {
       // Usuário não autenticado - deve estar em (auth)
       if (!inAuthGroup) {
         router.replace('/(auth)/login');
@@ -26,19 +26,22 @@ function RootLayoutNav() {
     } else {
       // Usuário autenticado
       if (inAuthGroup) {
-        // Se está em auth, redireciona baseado no communityId
-        if (user.communityId) {
+        // Se está em auth, redireciona baseado no hasCommunity
+        if (hasCommunity) {
           router.replace('/(tabs)');
         } else {
           router.replace('/select-community');
         }
-      } else if (!user.communityId && !inSelectCommunity) {
+      } else if (!hasCommunity && !inSelectCommunity) {
         // Se não tem communityId e não está no wizard, vai para o wizard
         router.replace('/select-community');
+      } else if (hasCommunity && inSelectCommunity) {
+        // Se tem communityId e está no wizard, vai para as tabs
+        router.replace('/(tabs)');
       }
-      // Se já está nas tabs ou no select-community com communityId, não faz nada
+      // Se já está nas tabs com communityId, não faz nada
     }
-  }, [user, isLoading, segments]);
+  }, [isAuthenticated, hasCommunity, isLoading, segments]);
 
   // Mostra loading enquanto carrega o estado de autenticação
   if (isLoading) {
