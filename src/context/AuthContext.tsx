@@ -1,16 +1,18 @@
-import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
-import { 
-  User, 
-  AuthResponse, 
-  LoginData, 
-  RegisterData, 
-  authService 
+import React, { createContext, useContext, useEffect, useRef, useState, useCallback } from 'react';
+import { AppState, AppStateStatus } from 'react-native';
+import {
+  User,
+  AuthResponse,
+  LoginData,
+  RegisterData,
+  authService
 } from '../services/authService';
-import { 
-  getStoredUser, 
-  getAccessToken, 
-  clearTokens, 
-  saveUser 
+import {
+  getStoredUser,
+  getAccessToken,
+  clearTokens,
+  saveUser,
+  onAuthFailure
 } from '../config/api';
 
 // ============================================
@@ -35,7 +37,7 @@ interface AuthContextType {
   /** Atualiza dados do usuário no contexto */
   updateUser: (user: User) => Promise<void>;
   /** Atualiza a comunidade do usuário */
-  updateCommunity: (communityId: string) => Promise<void>;
+  updateCommunity: (communityId: string, consentGiven?: boolean) => Promise<void>;
   /** Recarrega os dados do usuário da API */
   refreshUser: () => Promise<void>;
 }
@@ -71,6 +73,7 @@ interface AuthProviderProps {
 export function AuthProvider({ children }: AuthProviderProps) {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const appState = useRef<AppStateStatus>(AppState.currentState);
 
   // ============================================
   // EFEITOS
@@ -106,6 +109,39 @@ export function AuthProvider({ children }: AuthProviderProps) {
     };
 
     loadStoredAuth();
+  }, []);
+
+  /**
+   * Sessão expirada de vez (refresh token rejeitado pelo servidor):
+   * zera o usuário em memória — o layout raiz redireciona para o login.
+   * Sem isso o app ficava "logado" com o storage limpo, falhando em loop.
+   */
+  useEffect(() => {
+    const unsubscribe = onAuthFailure(() => setUser(null));
+    return unsubscribe;
+  }, []);
+
+  /**
+   * Atualiza dados do usuário sempre que o app volta ao foreground,
+   * assim mudanças feitas no painel web (ex: novo role de coordenador)
+   * aparecem sem precisar fazer logout/login.
+   */
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (nextState: AppStateStatus) => {
+      const wasBackground = appState.current === 'background' || appState.current === 'inactive';
+      const isActive = nextState === 'active';
+      appState.current = nextState;
+
+      if (wasBackground && isActive) {
+        getAccessToken().then((token) => {
+          if (token) {
+            authService.getCurrentUser().then(setUser).catch(() => {});
+          }
+        });
+      }
+    });
+
+    return () => subscription.remove();
   }, []);
 
   // ============================================
@@ -162,13 +198,13 @@ export function AuthProvider({ children }: AuthProviderProps) {
   /**
    * Atualiza a comunidade do usuário
    */
-  const updateCommunity = useCallback(async (communityId: string): Promise<void> => {
+  const updateCommunity = useCallback(async (communityId: string, consentGiven?: boolean): Promise<void> => {
     if (!user) {
       throw new Error('Usuário não autenticado');
     }
 
     try {
-      const updatedUser = await authService.updateCommunity(user.id, communityId);
+      const updatedUser = await authService.updateCommunity(user.id, communityId, consentGiven);
       setUser(updatedUser);
     } catch (error) {
       // Re-throw para que o componente possa tratar

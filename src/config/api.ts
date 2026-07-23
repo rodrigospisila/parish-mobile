@@ -8,7 +8,11 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 // URL do backend NestJS
 // Em desenvolvimento: ajustar para o IP da máquina ou usar localhost com proxy
 // Em produção: usar a URL do servidor
-const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000/api/v1';
+//
+// SEGURANÇA: dados mock NUNCA são usados em produção. USE_MOCK só pode ser
+// ativado em build de desenvolvimento (__DEV__), mesmo que a env esteja setada.
+export const USE_MOCK = __DEV__ && process.env.EXPO_PUBLIC_USE_MOCK === 'true';
+const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3003/api/v1';
 
 // Chaves do AsyncStorage
 export const STORAGE_KEYS = {
@@ -111,6 +115,34 @@ export const getStoredUser = async (): Promise<any | null> => {
 };
 
 // ============================================
+// SESSÃO EXPIRADA (refresh token definitivamente inválido)
+// ============================================
+
+type AuthFailureListener = () => void;
+const authFailureListeners = new Set<AuthFailureListener>();
+
+/**
+ * Registra um ouvinte para quando a sessão morre de vez (refresh token
+ * rejeitado pelo servidor). O AuthContext usa isso para zerar o usuário em
+ * memória e mandar o app de volta à tela de login — sem isso o estado fica
+ * "logado" com o storage limpo e todas as requisições falham em loop.
+ */
+export const onAuthFailure = (listener: AuthFailureListener): (() => void) => {
+  authFailureListeners.add(listener);
+  return () => authFailureListeners.delete(listener);
+};
+
+const emitAuthFailure = () => {
+  authFailureListeners.forEach((listener) => {
+    try {
+      listener();
+    } catch {
+      // ouvinte não pode quebrar o interceptor
+    }
+  });
+};
+
+// ============================================
 // INTERCEPTOR DE REQUEST
 // ============================================
 
@@ -138,7 +170,13 @@ const processQueue = (error: any, token: string | null = null) => {
 api.interceptors.request.use(
   async (config: InternalAxiosRequestConfig) => {
     // Não adicionar token em rotas públicas
-    const publicRoutes = ['/auth/login', '/auth/register', '/auth/refresh'];
+    const publicRoutes = [
+      '/auth/login',
+      '/auth/register',
+      '/auth/refresh',
+      '/auth/forgot-password',
+      '/auth/reset-password',
+    ];
     const isPublicRoute = publicRoutes.some((route) => config.url?.includes(route));
 
     if (!isPublicRoute) {
@@ -180,6 +218,7 @@ api.interceptors.response.use(
       // Se for a rota de refresh, não tenta novamente
       if (originalRequest.url?.includes('/auth/refresh')) {
         await clearTokens();
+        emitAuthFailure();
         return Promise.reject(error);
       }
 
@@ -224,9 +263,15 @@ api.interceptors.response.use(
         originalRequest.headers.Authorization = `Bearer ${newAccessToken}`;
         return api(originalRequest);
       } catch (refreshError) {
-        // Se o refresh falhar, limpa os tokens e processa a fila com erro
         processQueue(refreshError, null);
-        await clearTokens();
+        // Só desloga se o SERVIDOR rejeitou o refresh (token inválido/expirado).
+        // Falha de REDE (offline, backend fora do ar) mantém a sessão — o app
+        // continua com o cache offline e tenta de novo quando reconectar.
+        const isServerRejection = axios.isAxiosError(refreshError) && !!refreshError.response;
+        if (isServerRejection || !axios.isAxiosError(refreshError)) {
+          await clearTokens();
+          emitAuthFailure();
+        }
         return Promise.reject(refreshError);
       } finally {
         isRefreshing = false;

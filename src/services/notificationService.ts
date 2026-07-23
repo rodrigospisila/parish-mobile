@@ -4,6 +4,7 @@ import Constants from 'expo-constants';
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Event } from './eventService';
+import { MassSchedule, eventTypeLabels } from '../types';
 
 // Chaves para AsyncStorage
 const NOTIFICATION_SETTINGS_KEY = '@parish_notification_settings';
@@ -42,6 +43,52 @@ interface ScheduledNotification {
   eventId: string;
   scheduledTime: string;
 }
+
+const massScheduleTypeLabels: Record<string, string> = {
+  MASS: 'Missa',
+  CONFESSION: 'Confissao',
+  ADORATION: 'Adoracao',
+  ROSARY: 'Terco',
+};
+
+const weekdayLabels = [
+  'Domingo',
+  'Segunda',
+  'Terca',
+  'Quarta',
+  'Quinta',
+  'Sexta',
+  'Sabado',
+];
+
+const parseTime = (time: string) => {
+  const [hourStr, minuteStr] = time.split(':');
+  const hour = Number(hourStr);
+  const minute = Number(minuteStr);
+  return { hour, minute };
+};
+
+const computeReminderTime = (
+  dayOfWeek: number,
+  hour: number,
+  minute: number,
+  minutesBefore: number,
+) => {
+  const totalMinutes = dayOfWeek * 1440 + hour * 60 + minute;
+  let reminderMinutes = totalMinutes - minutesBefore;
+  const weekMinutes = 7 * 1440;
+
+  while (reminderMinutes < 0) {
+    reminderMinutes += weekMinutes;
+  }
+
+  const reminderDay = Math.floor(reminderMinutes / 1440) % 7;
+  const timeMinutes = reminderMinutes % 1440;
+  const reminderHour = Math.floor(timeMinutes / 60);
+  const reminderMinute = timeMinutes % 60;
+
+  return { reminderDay, reminderHour, reminderMinute };
+};
 
 /**
  * Solicita permissão para enviar notificações
@@ -158,7 +205,7 @@ export const scheduleEventNotification = async (
       return null;
     }
 
-    const eventDate = new Date(event.date);
+    const eventDate = new Date(event.startDate);
     const notificationDate = new Date(eventDate.getTime() - minutesBefore * 60 * 1000);
 
     // Não agendar se a data já passou
@@ -167,12 +214,6 @@ export const scheduleEventNotification = async (
     }
 
     // Mapeia tipo de evento para texto amigável
-    const eventTypeLabels: { [key: string]: string } = {
-      MISSA: 'Missa',
-      REUNIAO: 'Reunião',
-      ATIVIDADE: 'Atividade',
-    };
-
     const eventTypeLabel = eventTypeLabels[event.type] || event.type;
     const timeLabel = minutesBefore >= 60 
       ? `${Math.floor(minutesBefore / 60)} hora(s)` 
@@ -207,6 +248,90 @@ export const scheduleEventNotification = async (
 };
 
 /**
+ * Agenda notificacao local recorrente para um horario fixo de missa
+ */
+export const scheduleMassScheduleNotification = async (
+  schedule: MassSchedule,
+  minutesBefore: number = 60
+): Promise<string | null> => {
+  try {
+    const settings = await loadNotificationSettings();
+
+    if (!settings.enabled || !settings.eventReminders) {
+      return null;
+    }
+
+    const { hour, minute } = parseTime(schedule.time);
+    if (Number.isNaN(hour) || Number.isNaN(minute)) {
+      return null;
+    }
+
+    const typeLabel = massScheduleTypeLabels[schedule.type] || schedule.type;
+    const timeLabel = minutesBefore >= 60
+      ? `${Math.floor(minutesBefore / 60)} hora(s)`
+      : `${minutesBefore} minutos`;
+
+    if (schedule.isSpecial && schedule.specialDate) {
+      const specialDate = new Date(schedule.specialDate);
+      const notificationDate = new Date(specialDate);
+      notificationDate.setHours(hour, minute, 0, 0);
+      const reminderDate = new Date(notificationDate.getTime() - minutesBefore * 60 * 1000);
+
+      if (reminderDate <= new Date()) {
+        return null;
+      }
+
+      const bodyLabel = schedule.specialDate.split('T')[0];
+      return await Notifications.scheduleNotificationAsync({
+        content: {
+          title: `${typeLabel} especial em ${timeLabel}`,
+          body: schedule.notes
+            ? `${bodyLabel} ${schedule.time} - ${schedule.notes}`
+            : `${bodyLabel} ${schedule.time}`,
+          data: { massScheduleId: schedule.id, type: 'mass_schedule_reminder' },
+          sound: true,
+        },
+        trigger: {
+          type: Notifications.SchedulableTriggerInputTypes.DATE,
+          date: reminderDate,
+          channelId: 'events',
+        },
+      });
+    }
+
+    const { reminderDay, reminderHour, reminderMinute } = computeReminderTime(
+      schedule.dayOfWeek,
+      hour,
+      minute,
+      minutesBefore,
+    );
+
+    const weekdayLabel = weekdayLabels[schedule.dayOfWeek] || 'Dia';
+    return await Notifications.scheduleNotificationAsync({
+      content: {
+        title: `${typeLabel} em ${timeLabel}`,
+        body: schedule.notes
+          ? `${weekdayLabel} ${schedule.time} - ${schedule.notes}`
+          : `${weekdayLabel} ${schedule.time}`,
+        data: { massScheduleId: schedule.id, type: 'mass_schedule_reminder' },
+        sound: true,
+      },
+      trigger: {
+        type: Notifications.SchedulableTriggerInputTypes.CALENDAR,
+        weekday: reminderDay + 1,
+        hour: reminderHour,
+        minute: reminderMinute,
+        repeats: true,
+        channelId: 'events',
+      },
+    });
+  } catch (error) {
+    console.error('Erro ao agendar notificacao de missa fixa:', error);
+    return null;
+  }
+};
+
+/**
  * Agenda notificação de lembrete de escala
  */
 export const scheduleRosterNotification = async (
@@ -222,7 +347,7 @@ export const scheduleRosterNotification = async (
       return null;
     }
 
-    const eventDate = new Date(event.date);
+    const eventDate = new Date(event.startDate);
     const notificationDate = new Date(eventDate.getTime() - minutesBefore * 60 * 1000);
 
     if (notificationDate <= new Date()) {
@@ -350,5 +475,22 @@ export const scheduleNotificationsForEvents = async (events: Event[]): Promise<v
 
   for (const event of events) {
     await scheduleEventNotification(event, settings.reminderTime);
+  }
+};
+
+/**
+ * Agenda notificacoes para horarios fixos favoritados
+ */
+export const scheduleNotificationsForMassSchedules = async (
+  schedules: MassSchedule[]
+): Promise<void> => {
+  const settings = await loadNotificationSettings();
+
+  if (!settings.enabled || !settings.eventReminders) {
+    return;
+  }
+
+  for (const schedule of schedules) {
+    await scheduleMassScheduleNotification(schedule, settings.reminderTime);
   }
 };

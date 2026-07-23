@@ -7,11 +7,15 @@ import {
   loadNotificationSettings,
   saveNotificationSettings,
   scheduleNotificationsForEvents,
+  scheduleNotificationsForMassSchedules,
   cancelAllNotifications,
   getScheduledNotifications,
   sendTestNotification,
+  getPushToken,
 } from '../services/notificationService';
-import { getCommunityEvents } from '../services/eventService';
+import { getFavoriteEvents } from '../services/eventService';
+import { getFavoriteMassSchedules } from '../services/massScheduleService';
+import { authService } from '../services/authService';
 import { useAuth } from './AuthContext';
 
 interface NotificationContextData {
@@ -20,6 +24,7 @@ interface NotificationContextData {
   scheduledCount: number;
   updateSettings: (newSettings: Partial<NotificationSettings>) => Promise<void>;
   refreshScheduledNotifications: () => Promise<void>;
+  rescheduleEventNotifications: () => Promise<void>;
   testNotification: () => Promise<void>;
 }
 
@@ -41,8 +46,9 @@ export function NotificationProvider({ children }: NotificationProviderProps) {
   const [isPermissionGranted, setIsPermissionGranted] = useState(false);
   const [scheduledCount, setScheduledCount] = useState(0);
 
-  const notificationListener = useRef<Notifications.EventSubscription>();
-  const responseListener = useRef<Notifications.EventSubscription>();
+  const notificationListener = useRef<Notifications.EventSubscription | null>(null);
+  const responseListener = useRef<Notifications.EventSubscription | null>(null);
+  const pushTokenListener = useRef<Notifications.EventSubscription | null>(null);
 
   // Inicialização
   useEffect(() => {
@@ -70,53 +76,78 @@ export function NotificationProvider({ children }: NotificationProviderProps) {
     // Listener para quando o usuário interage com a notificação
     responseListener.current = Notifications.addNotificationResponseReceivedListener((response) => {
       const data = response.notification.request.content.data;
-      
-      if (data?.eventId) {
+
+      if (data?.scheduleId) {
+        // Recusa/substituicao/cancelamento de escala: leva direto para a operacao da escala
+        router.push({
+          pathname: '/coordination/[scheduleId]',
+          params: { scheduleId: String(data.scheduleId) },
+        });
+      } else if (data?.eventId) {
         // Navegar para o calendário quando clicar na notificação
         router.push('/(tabs)/calendar');
       }
     });
 
+    // Token de push pode rotacionar (reinstalacao, troca de credenciais do dispositivo etc.)
+    pushTokenListener.current = Notifications.addPushTokenListener(() => {
+      registerPushTokenWithBackend();
+    });
+
     return () => {
-      if (notificationListener.current) {
-        Notifications.removeNotificationSubscription(notificationListener.current);
-      }
-      if (responseListener.current) {
-        Notifications.removeNotificationSubscription(responseListener.current);
-      }
+      notificationListener.current?.remove();
+      responseListener.current?.remove();
+      pushTokenListener.current?.remove();
     };
   }, []);
 
-  // Reagendar notificações quando o usuário ou configurações mudam
+  // Envia o token de push atual do dispositivo para o backend (best-effort)
+  const registerPushTokenWithBackend = async () => {
+    if (!user?.id) {
+      return;
+    }
+
+    const token = await getPushToken();
+    if (token) {
+      await authService.registerPushToken(token);
+    }
+  };
+
+  // Registra o push token assim que ha permissao concedida e usuario logado
   useEffect(() => {
-    const scheduleNotifications = async () => {
-      if (!user?.communityId || !settings.enabled) {
-        return;
-      }
+    if (isPermissionGranted && user?.id) {
+      registerPushTokenWithBackend();
+    }
+  }, [isPermissionGranted, user?.id]);
 
-      try {
-        // Cancelar notificações antigas
-        await cancelAllNotifications();
+  // Reagendar notificações quando o usuário ou configurações mudam
+  const rescheduleEventNotifications = async () => {
+    if (!user?.communityId || !settings.enabled || !isPermissionGranted) {
+      return;
+    }
 
-        // Buscar eventos futuros
-        const events = await getCommunityEvents(user.communityId);
-        
-        // Filtrar apenas eventos futuros
-        const futureEvents = events.filter((event) => new Date(event.date) > new Date());
+    try {
+      await cancelAllNotifications();
 
-        // Agendar novas notificações
-        await scheduleNotificationsForEvents(futureEvents);
+      const [favorites, favoriteMassSchedules] = await Promise.all([
+        getFavoriteEvents(),
+        getFavoriteMassSchedules(),
+      ]);
+      const futureEvents = favorites.filter((event) => new Date(event.startDate) > new Date());
 
-        // Atualizar contagem
-        const scheduled = await getScheduledNotifications();
-        setScheduledCount(scheduled.length);
-      } catch (error) {
-        console.error('Erro ao agendar notificações:', error);
-      }
-    };
+      await scheduleNotificationsForEvents(futureEvents);
+      await scheduleNotificationsForMassSchedules(favoriteMassSchedules);
 
+      const scheduled = await getScheduledNotifications();
+      setScheduledCount(scheduled.length);
+    } catch (error) {
+      console.error('Erro ao agendar notificacoes:', error);
+    }
+  };
+
+  useEffect(() => {
     if (isPermissionGranted && settings.enabled) {
-      scheduleNotifications();
+      rescheduleEventNotifications();
     }
   }, [user?.communityId, settings.enabled, settings.eventReminders, settings.reminderTime, isPermissionGranted]);
 
@@ -149,6 +180,7 @@ export function NotificationProvider({ children }: NotificationProviderProps) {
         scheduledCount,
         updateSettings,
         refreshScheduledNotifications,
+        rescheduleEventNotifications,
         testNotification,
       }}
     >

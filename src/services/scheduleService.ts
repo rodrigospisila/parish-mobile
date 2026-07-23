@@ -23,12 +23,14 @@ export interface Schedule {
   description?: string;
   date: string;
   event: ScheduleEvent;
+  status?: 'OPEN' | 'CLOSED' | 'COMPLETED' | 'CANCELLED';
 }
 
 export interface MyAssignment {
   id: string;
   role: string;
   status: AssignmentStatus;
+  communityPastoralId?: string;
   checkedIn: boolean;
   checkedInAt?: string;
   schedule: Schedule;

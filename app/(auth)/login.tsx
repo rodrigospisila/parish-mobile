@@ -96,9 +96,15 @@ export default function LoginScreen() {
             )}
           </TouchableOpacity>
 
+          <View style={[styles.footer, { marginTop: 16 }]}>
+            <Link href="/(auth)/forgot-password" style={styles.link}>
+              Esqueci minha senha
+            </Link>
+          </View>
+
           <View style={styles.footer}>
             <Text style={styles.footerText}>Ainda não tem conta? </Text>
-            <Link href="/(auth)/register" style={styles.link}>
+            <Link href="/(auth)/phone-verify" style={styles.link}>
               Registre-se
             </Link>
           </View>

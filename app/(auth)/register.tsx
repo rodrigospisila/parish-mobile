@@ -1,4 +1,4 @@
-import { Stack, Link } from 'expo-router';
+import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useState } from 'react';
 import {
   View,
@@ -15,9 +15,20 @@ import {
 import { useAuth } from '../../src/context/AuthContext';
 import { useColors } from '../../src/context/ThemeContext';
 
+function maskPhone(digits: string): string {
+  if (digits.length !== 11) return digits;
+  return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7)}`;
+}
+
 export default function RegisterScreen() {
   const { register } = useAuth();
   const colors = useColors();
+  const router = useRouter();
+  const { phone, verifiedPhoneToken } = useLocalSearchParams<{
+    phone: string;
+    verifiedPhoneToken: string;
+  }>();
+
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -31,7 +42,7 @@ export default function RegisterScreen() {
 
     setLoading(true);
     try {
-      await register({ name, email, password });
+      await register({ name, email, password, phone, verifiedPhoneToken });
     } catch (error) {
       Alert.alert(
         'Erro no Registro',
@@ -57,10 +68,17 @@ export default function RegisterScreen() {
 
         <View style={styles.header}>
           <Text style={styles.title}>Criar Conta</Text>
-          <Text style={styles.subtitle}>Preencha seus dados para começar</Text>
+          <Text style={styles.subtitle}>Preencha seus dados para finalizar</Text>
         </View>
 
         <View style={styles.form}>
+          {phone && (
+            <View style={styles.verifiedBadge}>
+              <Text style={styles.verifiedIcon}>✓</Text>
+              <Text style={styles.verifiedText}>Celular verificado: {maskPhone(phone)}</Text>
+            </View>
+          )}
+
           <View style={styles.inputContainer}>
             <Text style={styles.label}>Nome Completo</Text>
             <TextInput
@@ -92,7 +110,7 @@ export default function RegisterScreen() {
             <Text style={styles.label}>Senha</Text>
             <TextInput
               style={styles.input}
-              placeholder="Sua senha"
+              placeholder="Mínimo 8 caracteres"
               placeholderTextColor={colors.placeholder}
               secureTextEntry
               value={password}
@@ -109,15 +127,15 @@ export default function RegisterScreen() {
             {loading ? (
               <ActivityIndicator color={colors.textInverse} />
             ) : (
-              <Text style={styles.buttonText}>Registrar</Text>
+              <Text style={styles.buttonText}>Criar Conta</Text>
             )}
           </TouchableOpacity>
 
           <View style={styles.footer}>
             <Text style={styles.footerText}>Já tem conta? </Text>
-            <Link href="/(auth)/login" style={styles.link}>
-              Faça Login
-            </Link>
+            <TouchableOpacity onPress={() => router.push('/(auth)/login')}>
+              <Text style={styles.link}>Faça Login</Text>
+            </TouchableOpacity>
           </View>
         </View>
       </ScrollView>
@@ -160,6 +178,20 @@ const createStyles = (colors: ReturnType<typeof useColors>) =>
       shadowRadius: 4,
       elevation: 3,
     },
+    verifiedBadge: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: '#f0fdf4',
+      borderWidth: 1,
+      borderColor: '#86efac',
+      borderRadius: 8,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      marginBottom: 16,
+      gap: 8,
+    },
+    verifiedIcon: { fontSize: 16, color: '#16a34a', fontWeight: '700' },
+    verifiedText: { color: '#15803d', fontSize: 14, fontWeight: '500', flex: 1 },
     inputContainer: {
       marginBottom: 16,
     },

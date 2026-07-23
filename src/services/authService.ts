@@ -21,6 +21,13 @@ export type UserRole =
 /**
  * Usuário retornado pela API
  */
+export interface UserPastoral {
+  id: string;
+  name: string;
+  communityId: string;
+  role: string;
+}
+
 export interface User {
   id: string;
   email: string;
@@ -33,6 +40,9 @@ export interface User {
   parishId?: string;
   communityId?: string;
   createdAt: string;
+  /** IDs das pastorais da comunidade em que o usuário é membro ativo */
+  pastoralIds?: string[];
+  pastorals?: UserPastoral[];
 }
 
 /**
@@ -60,6 +70,7 @@ export interface RegisterData {
   password: string;
   name: string;
   phone?: string;
+  verifiedPhoneToken?: string;
   role?: UserRole;
   dioceseId?: string;
   parishId?: string;
@@ -174,6 +185,34 @@ export const authService = {
   },
 
   /**
+   * Solicita a recuperação de senha (envia código por SMS/e-mail).
+   * A resposta é sempre genérica (não revela se a conta existe).
+   */
+  async forgotPassword(params: { email?: string; phone?: string }): Promise<string> {
+    try {
+      const response = await api.post<{ message: string }>('/auth/forgot-password', params);
+      return response.data.message;
+    } catch (error) {
+      throw new Error(getErrorMessage(error));
+    }
+  },
+
+  /**
+   * Redefine a senha usando o código recebido.
+   */
+  async resetPassword(token: string, newPassword: string): Promise<string> {
+    try {
+      const response = await api.post<{ message: string }>('/auth/reset-password', {
+        token,
+        newPassword,
+      });
+      return response.data.message;
+    } catch (error) {
+      throw new Error(getErrorMessage(error));
+    }
+  },
+
+  /**
    * Realiza logout do usuário
    */
   async logout(): Promise<void> {
@@ -185,12 +224,30 @@ export const authService = {
 
     // Chamada real para a API
     try {
+      // Limpa o push token no servidor antes de derrubar a sessão
+      await authService.registerPushToken(null);
       await api.post('/auth/logout');
     } catch (error) {
       // Mesmo se a chamada falhar, limpa os tokens locais
       console.warn('Erro ao fazer logout na API:', error);
     } finally {
       await clearTokens();
+    }
+  },
+
+  /**
+   * Registra (ou limpa, com null) o token de push notification do dispositivo
+   * no usuário logado. Best-effort: falha aqui nunca deve travar login/logout.
+   */
+  async registerPushToken(pushToken: string | null): Promise<void> {
+    if (USE_MOCK) {
+      return;
+    }
+
+    try {
+      await api.patch('/users/me/push-token', { pushToken });
+    } catch (error) {
+      console.warn('Erro ao registrar push token:', error);
     }
   },
 
@@ -221,11 +278,34 @@ export const authService = {
   },
 
   /**
+   * Envia código OTP por SMS para o celular informado
+   */
+  async sendOtp(phone: string): Promise<void> {
+    try {
+      await api.post('/auth/otp/send', { phone });
+    } catch (error) {
+      throw new Error(getErrorMessage(error));
+    }
+  },
+
+  /**
+   * Verifica o código OTP e retorna o token de celular verificado
+   */
+  async verifyOtp(phone: string, code: string): Promise<string> {
+    try {
+      const response = await api.post<{ verifiedPhoneToken: string }>('/auth/otp/verify', { phone, code });
+      return response.data.verifiedPhoneToken;
+    } catch (error) {
+      throw new Error(getErrorMessage(error));
+    }
+  },
+
+  /**
    * Atualiza a comunidade do usuário
    * Usa o endpoint /users/me/community que permite qualquer usuário autenticado
    * atualizar sua própria comunidade (usado no fluxo de onboarding)
    */
-  async updateCommunity(userId: string, communityId: string): Promise<User> {
+  async updateCommunity(userId: string, communityId: string, consentGiven?: boolean): Promise<User> {
     // Modo Mock
     if (USE_MOCK) {
       return mockUpdateCommunity(userId, communityId);
@@ -233,8 +313,8 @@ export const authService = {
 
     // Chamada real para a API - usa endpoint específico para atualizar própria comunidade
     try {
-      const response = await api.patch<User>('/users/me/community', { communityId });
-      
+      const response = await api.patch<User>('/users/me/community', { communityId, consentGiven });
+
       // Atualiza o usuário no AsyncStorage
       await saveUser(response.data);
       

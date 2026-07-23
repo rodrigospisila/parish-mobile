@@ -312,6 +312,7 @@ export interface EventPastoral {
   communityPastoral?: CommunityPastoral;
   role?: string;
   isLeader: boolean;
+  requiredPeople?: number;
   notes?: string;
   assignments?: EventPastoralAssignment[];
   createdAt: string;
@@ -349,6 +350,7 @@ export interface Schedule {
   date: string;
   eventId: string;
   event?: Event;
+  status?: 'OPEN' | 'CLOSED' | 'COMPLETED' | 'CANCELLED';
   assignments?: ScheduleAssignment[];
   createdAt: string;
   updatedAt: string;
@@ -360,6 +362,9 @@ export interface Schedule {
 export interface ScheduleAssignment {
   id: string;
   role: string;
+  status?: 'PENDING' | 'CONFIRMED' | 'DECLINED';
+  communityPastoralId?: string;
+  notes?: string;
   checkedIn: boolean;
   checkedInAt?: string;
   scheduleId: string;
@@ -377,7 +382,7 @@ export interface ScheduleAssignment {
 /**
  * Tipo de horário de missa
  */
-export type MassScheduleType = 'REGULAR' | 'SPECIAL' | 'HOLIDAY';
+export type MassScheduleType = 'MASS' | 'CONFESSION' | 'ADORATION' | 'ROSARY';
 
 /**
  * Horário de missa

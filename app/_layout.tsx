@@ -1,9 +1,10 @@
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { useEffect } from 'react';
-import { View, ActivityIndicator, StatusBar } from 'react-native';
+import { View, ActivityIndicator, StatusBar, AppState } from 'react-native';
 import { AuthProvider, useAuth } from '../src/context/AuthContext';
 import { ThemeProvider, useTheme } from '../src/context/ThemeContext';
 import { NotificationProvider } from '../src/context/NotificationContext';
+import { flushWriteQueue } from '../src/utils/offlineQueue';
 
 // Componente interno que gerencia a navegação baseada no estado de autenticação
 function RootLayoutNav() {
@@ -11,6 +12,20 @@ function RootLayoutNav() {
   const { colors, isDark } = useTheme();
   const segments = useSegments();
   const router = useRouter();
+
+  // Fila de escritas offline (4.7): tenta sincronizar ao abrir o app e
+  // sempre que ele volta ao primeiro plano (momento típico de reconexão).
+  useEffect(() => {
+    if (!isAuthenticated) return;
+
+    flushWriteQueue().catch(() => undefined);
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state === 'active') {
+        flushWriteQueue().catch(() => undefined);
+      }
+    });
+    return () => subscription.remove();
+  }, [isAuthenticated]);
 
   useEffect(() => {
     if (isLoading) return;

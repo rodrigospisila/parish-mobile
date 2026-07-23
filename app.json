@@ -15,7 +15,13 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.parish.mobile"
+      "bundleIdentifier": "com.parish.mobile",
+      "config": {
+        "usesNonExemptEncryption": false
+      },
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -39,6 +45,18 @@
           "icon": "./assets/images/notification-icon.png",
           "color": "#2196F3",
           "sounds": []
+        }
+      ],
+      [
+        "expo-calendar",
+        {
+          "calendarPermission": "O app precisa acessar seu calendário para adicionar os eventos da paróquia."
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "O app usa sua localização para encontrar as missas mais próximas de você."
         }
       ]
     ],

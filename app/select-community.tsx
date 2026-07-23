@@ -21,6 +21,7 @@ export default function SelectCommunityScreen() {
   const [selectedDioceseId, setSelectedDioceseId] = useState<string | undefined>(undefined);
   const [selectedParishId, setSelectedParishId] = useState<string | undefined>(undefined);
   const [selectedCommunityId, setSelectedCommunityId] = useState<string | undefined>(undefined);
+  const [consentGiven, setConsentGiven] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -72,6 +73,11 @@ export default function SelectCommunityScreen() {
       return;
     }
 
+    if (!consentGiven) {
+      Alert.alert('Consentimento necessário', 'Para continuar, autorize o tratamento dos seus dados pessoais.');
+      return;
+    }
+
     if (!user) {
       Alert.alert('Erro', 'Usuário não autenticado.');
       return;
@@ -82,7 +88,7 @@ export default function SelectCommunityScreen() {
       // Usar a função updateCommunity do AuthContext
       // Ela atualiza no backend e no contexto local automaticamente
       // A navegação será feita automaticamente pelo _layout.tsx
-      await updateCommunity(selectedCommunityId);
+      await updateCommunity(selectedCommunityId, consentGiven);
     } catch (error: any) {
       Alert.alert('Erro', error.message || 'Não foi possível salvar sua comunidade. Tente novamente.');
       console.error(error);
@@ -113,7 +119,7 @@ export default function SelectCommunityScreen() {
       <View style={styles.form}>
         <PickerInput
           label="Diocese"
-          selectedValue={selectedDioceseId}
+          selectedValue={selectedDioceseId || ''}
           onValueChange={handleDioceseChange}
           items={dioceses.map((d) => ({ label: d.name, value: d.id }))}
           placeholder="Selecione sua Diocese"
@@ -121,7 +127,7 @@ export default function SelectCommunityScreen() {
 
         <PickerInput
           label="Paróquia"
-          selectedValue={selectedParishId}
+          selectedValue={selectedParishId || ''}
           onValueChange={handleParishChange}
           items={availableParishes.map((p) => ({ label: p.name, value: p.id }))}
           placeholder="Selecione sua Paróquia"
@@ -130,7 +136,7 @@ export default function SelectCommunityScreen() {
 
         <PickerInput
           label="Comunidade"
-          selectedValue={selectedCommunityId}
+          selectedValue={selectedCommunityId || ''}
           onValueChange={handleCommunityChange}
           items={availableCommunities.map((c) => ({ label: c.name, value: c.id }))}
           placeholder="Selecione sua Comunidade"
@@ -138,9 +144,22 @@ export default function SelectCommunityScreen() {
         />
 
         <TouchableOpacity
-          style={[styles.button, isSubmitting && styles.buttonDisabled]}
+          style={styles.consentRow}
+          onPress={() => setConsentGiven((value) => !value)}
+          activeOpacity={0.8}
+        >
+          <View style={[styles.checkbox, consentGiven && styles.checkboxChecked]}>
+            {consentGiven ? <Text style={styles.checkboxMark}>✓</Text> : null}
+          </View>
+          <Text style={styles.consentText}>
+            Autorizo o tratamento dos meus dados pessoais para fins de gestão paroquial (LGPD)
+          </Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.button, (isSubmitting || !consentGiven) && styles.buttonDisabled]}
           onPress={handleSaveCommunity}
-          disabled={isSubmitting}
+          disabled={isSubmitting || !consentGiven}
         >
           {isSubmitting ? (
             <ActivityIndicator color={colors.textInverse} />
@@ -195,6 +214,37 @@ const createStyles = (colors: ReturnType<typeof useColors>) =>
       shadowOpacity: 0.1,
       shadowRadius: 4,
       elevation: 3,
+    },
+    consentRow: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      gap: 10,
+      marginTop: 20,
+    },
+    checkbox: {
+      width: 22,
+      height: 22,
+      borderRadius: 5,
+      borderWidth: 2,
+      borderColor: colors.border,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginTop: 2,
+    },
+    checkboxChecked: {
+      backgroundColor: colors.primary,
+      borderColor: colors.primary,
+    },
+    checkboxMark: {
+      color: colors.textInverse,
+      fontSize: 14,
+      fontWeight: '700',
+    },
+    consentText: {
+      flex: 1,
+      fontSize: 13,
+      color: colors.textSecondary,
+      lineHeight: 18,
     },
     button: {
       backgroundColor: colors.primary,

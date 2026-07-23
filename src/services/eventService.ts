@@ -49,6 +49,7 @@ export interface EventAssignment {
   role: string;
   checkedIn: boolean;
   checkedInAt?: string;
+  status?: 'PENDING' | 'CONFIRMED' | 'DECLINED';
   member: EventMember;
 }
 
@@ -59,6 +60,7 @@ export interface EventPastoral {
   id: string;
   role?: string;
   isLeader: boolean;
+  requiredPeople?: number;
   notes?: string;
   communityPastoral: {
     id: string;
@@ -95,6 +97,9 @@ export interface Event {
   _count?: {
     participants: number;
   };
+  // Agenda fixa (Missa/Confissão/Adoração/Terço) — ocorrência virtual, não editável
+  isFixed?: boolean;
+  fixedType?: 'MASS' | 'CONFESSION' | 'ADORATION' | 'ROSARY';
 }
 
 /**
@@ -115,8 +120,20 @@ export interface ServiceRoster {
   members: {
     id: string;
     name: string;
+    status?: 'PENDING' | 'CONFIRMED' | 'DECLINED';
     role: string;
     phone?: string;
+    checkedIn?: boolean;
+    checkedInAt?: string;
+  }[];
+  membersOnDuty?: {
+    id: string;
+    name: string;
+    status?: 'PENDING' | 'CONFIRMED' | 'DECLINED';
+    role: string;
+    phone?: string;
+    checkedIn?: boolean;
+    checkedInAt?: string;
   }[];
 }
 
@@ -134,22 +151,27 @@ const USE_MOCK = process.env.EXPO_PUBLIC_USE_MOCK === 'true';
  * Converte EventPastoral para ServiceRoster (formato legado)
  */
 function convertToServiceRoster(eventPastoral: EventPastoral): ServiceRoster {
+  const members = eventPastoral.assignments.map((assignment) => ({
+    id: assignment.member.id,
+    name: assignment.member.fullName,
+    role: assignment.role,
+    phone: assignment.member.phone,
+    status: assignment.status,
+    checkedIn: assignment.checkedIn,
+    checkedInAt: assignment.checkedInAt,
+  }));
+
   return {
     id: eventPastoral.id,
     pastoralId: eventPastoral.communityPastoral.id,
     pastoralName: eventPastoral.communityPastoral.globalPastoral.name,
     responsibilities: eventPastoral.role || 'Serviço',
-    members: eventPastoral.assignments.map((assignment) => ({
-      id: assignment.member.id,
-      name: assignment.member.fullName,
-      role: assignment.role,
-      phone: assignment.member.phone,
-    })),
+    members,
+    membersOnDuty: members,
   };
 }
 
-/**
- * Retorna a label do tipo de evento em português
+/** Retorna a label do tipo de evento em português
  */
 export function getEventTypeLabel(type: EventType): string {
   return eventTypeLabels[type] || type;
@@ -192,9 +214,14 @@ export const getNextMass = async (communityId: string): Promise<Event | null> =>
 };
 
 /**
- * Busca todos os eventos para a comunidade do usuário
+ * Busca todos os eventos para a comunidade do usuário.
+ * Com `onlyMyPastorals`, retorna apenas eventos em que alguma pastoral
+ * do usuário está envolvida.
  */
-export const getCommunityEvents = async (communityId: string): Promise<Event[]> => {
+export const getCommunityEvents = async (
+  communityId: string,
+  options?: { onlyMyPastorals?: boolean },
+): Promise<Event[]> => {
   if (USE_MOCK) {
     return mockGetCommunityEvents(communityId);
   }
@@ -203,11 +230,48 @@ export const getCommunityEvents = async (communityId: string): Promise<Event[]> 
     const response = await api.get<Event[]>('/events', {
       params: {
         communityId,
+        ...(options?.onlyMyPastorals ? { onlyMyPastorals: 'true' } : {}),
       },
     });
     return response.data;
   } catch (error) {
     throw new Error(getErrorMessage(error));
+  }
+};
+
+/**
+ * Busca as ocorrências da AGENDA FIXA (Missa/Confissão/Adoração/Terço) num
+ * período e as converte em "eventos" virtuais (isFixed) para exibir no
+ * calendário junto dos eventos reais. São somente-leitura (não editáveis).
+ */
+export const getFixedOccurrences = async (
+  communityId: string,
+  from: Date,
+  to: Date,
+): Promise<Event[]> => {
+  if (USE_MOCK) return [];
+
+  try {
+    const response = await api.get<any[]>('/mass-schedules/occurrences', {
+      params: { communityId, from: from.toISOString(), to: to.toISOString() },
+    });
+    return (response.data || []).map((occ) => ({
+      id: occ.id,
+      title: occ.title,
+      type: (occ.type === 'MASS' ? 'MASS' : 'OTHER') as EventType,
+      startDate: occ.start,
+      endDate: occ.end,
+      location: occ.community?.name,
+      isRecurring: true,
+      isPublic: true,
+      status: 'PUBLISHED' as EventStatus,
+      communityId: occ.community?.id ?? communityId,
+      isFixed: true,
+      fixedType: occ.type,
+    }));
+  } catch (error) {
+    console.error('Erro ao carregar agenda fixa:', error);
+    return []; // não bloqueia o calendário
   }
 };
 
@@ -297,6 +361,10 @@ export const getEventById = async (id: string): Promise<Event> => {
 
 /**
  * Busca um evento com suas escalas de serviço (formato legado)
+ *
+ * Os membros escalados vivem em ScheduleAssignment (via Schedule), não em
+ * EventPastoralAssignment. Por isso buscamos GET /schedules?eventId e
+ * agrupamos os assignments por communityPastoralId para montar o ServiceRoster.
  */
 export const getEventWithRosters = async (event: Event): Promise<EventWithRosters> => {
   if (USE_MOCK) {
@@ -304,22 +372,52 @@ export const getEventWithRosters = async (event: Event): Promise<EventWithRoster
   }
 
   try {
-    // Busca o evento completo com pastorais e assignments
-    const fullEvent = await getEventById(event.id);
+    const [fullEvent, schedulesResponse] = await Promise.all([
+      getEventById(event.id),
+      api.get(`/schedules?eventId=${event.id}`),
+    ]);
 
-    // Converte eventPastorals para serviceRosters (formato legado)
-    const serviceRosters: ServiceRoster[] = (fullEvent.eventPastorals || []).map(convertToServiceRoster);
+    const schedules: any[] = schedulesResponse.data || [];
 
-    return {
-      ...fullEvent,
-      serviceRosters,
-    };
+    // Agrupa assignments de todos os schedules do evento por communityPastoralId
+    const assignmentsByPastoral: Record<string, any[]> = {};
+    for (const schedule of schedules) {
+      for (const assignment of schedule.assignments || []) {
+        const pid = assignment.communityPastoral?.id ?? 'general';
+        if (!assignmentsByPastoral[pid]) assignmentsByPastoral[pid] = [];
+        // Evita duplicatas do mesmo membro em múltiplos schedules
+        if (!assignmentsByPastoral[pid].some((a) => a.member?.id === assignment.member?.id)) {
+          assignmentsByPastoral[pid].push(assignment);
+        }
+      }
+    }
+
+    const serviceRosters: ServiceRoster[] = (fullEvent.eventPastorals || []).map((ep) => {
+      const epAssignments = assignmentsByPastoral[ep.communityPastoral.id] || [];
+      const members = epAssignments.map((a: any) => ({
+        id: a.member.id,
+        name: a.member.fullName,
+        role: a.role,
+        phone: a.member.phone,
+        status: a.status as 'PENDING' | 'CONFIRMED' | 'DECLINED',
+        checkedIn: !!a.checkedIn,
+        checkedInAt: a.checkedInAt,
+      }));
+
+      return {
+        id: ep.id,
+        pastoralId: ep.communityPastoral.id,
+        pastoralName: ep.communityPastoral.globalPastoral.name,
+        responsibilities: ep.role || 'Serviço',
+        members,
+        membersOnDuty: members,
+      };
+    });
+
+    return { ...fullEvent, serviceRosters };
   } catch (error) {
     console.error('Erro ao buscar escalas do evento:', error);
-    return {
-      ...event,
-      serviceRosters: [],
-    };
+    return { ...event, serviceRosters: [] };
   }
 };
 
@@ -334,6 +432,52 @@ export const getEventPastorals = async (eventId: string): Promise<EventPastoral[
   try {
     const response = await api.get<EventPastoral[]>(`/events/${eventId}/pastorals`);
     return response.data;
+  } catch (error) {
+    throw new Error(getErrorMessage(error));
+  }
+};
+
+/**
+ * Busca eventos favoritados pelo usuario
+ */
+export const getFavoriteEvents = async (): Promise<Event[]> => {
+  if (USE_MOCK) {
+    return [];
+  }
+
+  try {
+    const response = await api.get<Event[]>('/events/favorites');
+    return response.data;
+  } catch (error) {
+    throw new Error(getErrorMessage(error));
+  }
+};
+
+/**
+ * Favorita um evento
+ */
+export const addFavoriteEvent = async (eventId: string): Promise<void> => {
+  if (USE_MOCK) {
+    return;
+  }
+
+  try {
+    await api.post(`/events/${eventId}/favorite`);
+  } catch (error) {
+    throw new Error(getErrorMessage(error));
+  }
+};
+
+/**
+ * Remove o evento dos favoritos
+ */
+export const removeFavoriteEvent = async (eventId: string): Promise<void> => {
+  if (USE_MOCK) {
+    return;
+  }
+
+  try {
+    await api.delete(`/events/${eventId}/favorite`);
   } catch (error) {
     throw new Error(getErrorMessage(error));
   }
@@ -475,6 +619,10 @@ export default {
   getEventById,
   getEventWithRosters,
   getEventPastorals,
+  getFavoriteEvents,
+  addFavoriteEvent,
+  removeFavoriteEvent,
   getEventTypeLabel,
   getEventTypeColor,
 };
+
