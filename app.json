@@ -30,7 +30,17 @@
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
-      "package": "com.parish.mobile"
+      "package": "com.parish.mobile",
+      "permissions": [
+        "android.permission.READ_CALENDAR",
+        "android.permission.WRITE_CALENDAR",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.READ_CALENDAR",
+        "android.permission.WRITE_CALENDAR",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION"
+      ]
     },
     "web": {
       "bundler": "metro",
@@ -66,6 +76,19 @@
     "notification": {
       "icon": "./assets/images/notification-icon.png",
       "color": "#2196F3"
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "5bb7dd61-2520-4fdb-ab35-83ac3ae40f78"
+      }
+    },
+    "owner": "rodrigospisila",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/5bb7dd61-2520-4fdb-ab35-83ac3ae40f78"
     }
   }
 }
