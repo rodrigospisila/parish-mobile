@@ -236,6 +236,18 @@ export const authService = {
   },
 
   /**
+   * Exclui DEFINITIVAMENTE a conta do usuário logado (autoatendimento —
+   * exigido pela App Store e pela LGPD). Em caso de sucesso, o chamador deve
+   * encerrar a sessão local (signOut) para voltar à tela de login.
+   */
+  async deleteAccount(): Promise<void> {
+    if (USE_MOCK) {
+      return;
+    }
+    await api.delete('/users/me');
+  },
+
+  /**
    * Registra (ou limpa, com null) o token de push notification do dispositivo
    * no usuário logado. Best-effort: falha aqui nunca deve travar login/logout.
    */
