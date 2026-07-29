@@ -135,6 +135,10 @@ export interface User {
   parishId?: string;
   communityId?: string;
   primaryCommunityId?: string;
+  // Escopo resolvido (nomes) retornado por /users/me
+  diocese?: { id: string; name: string };
+  parish?: { id: string; name: string };
+  community?: { id: string; name: string };
   createdAt: string;
   updatedAt?: string;
   lastLogin?: string;

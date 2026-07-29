@@ -39,6 +39,10 @@ export interface User {
   dioceseId?: string;
   parishId?: string;
   communityId?: string;
+  // Escopo resolvido (nomes) retornado por /users/me
+  diocese?: { id: string; name: string };
+  parish?: { id: string; name: string };
+  community?: { id: string; name: string };
   createdAt: string;
   /** IDs das pastorais da comunidade em que o usuário é membro ativo */
   pastoralIds?: string[];

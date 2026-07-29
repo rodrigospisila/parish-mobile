@@ -705,6 +705,19 @@ export default function HomeScreen() {
               </Text>
             </View>
           )}
+
+          {/* Comunidade do usuário (toque para trocar) */}
+          <TouchableOpacity
+            style={styles.heroCommunity}
+            activeOpacity={0.8}
+            onPress={() => router.push('/change-community' as never)}
+          >
+            <FontAwesome5 name="map-marker-alt" size={12} color="#fff" />
+            <Text style={styles.heroCommunityText} numberOfLines={1}>
+              {[user?.parish?.name, user?.community?.name].filter(Boolean).join(' · ') || 'Definir minha comunidade'}
+            </Text>
+            <FontAwesome5 name="chevron-right" size={11} color="rgba(255,255,255,0.85)" />
+          </TouchableOpacity>
         </LinearGradient>
 
         {/* ATALHOS */}
@@ -876,6 +889,26 @@ const createStyles = (colors: ReturnType<typeof useColors>) =>
     heroLiturgyText: {
       fontSize: 12.5,
       fontWeight: '600',
+      color: '#fff',
+      flexShrink: 1,
+    },
+    heroCommunity: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      marginTop: 10,
+      backgroundColor: 'rgba(255,255,255,0.15)',
+      alignSelf: 'flex-start',
+      maxWidth: '100%',
+      paddingHorizontal: 12,
+      paddingVertical: 7,
+      borderRadius: 999,
+      borderWidth: 1,
+      borderColor: 'rgba(255,255,255,0.25)',
+    },
+    heroCommunityText: {
+      fontSize: 12.5,
+      fontWeight: '700',
       color: '#fff',
       flexShrink: 1,
     },

@@ -10,6 +10,7 @@ import {
   ScrollView,
 } from 'react-native';
 import { useRouter } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../src/context/AuthContext';
 import { useColors, useTheme } from '../../src/context/ThemeContext';
 import { useNotifications } from '../../src/context/NotificationContext';
@@ -150,10 +151,32 @@ export default function ProfileScreen() {
             </View>
             <View style={styles.divider} />
             <View style={styles.infoRow}>
-              <Text style={styles.infoLabel}>Comunidade</Text>
-              <Text style={styles.infoValue}>{user?.communityId || 'Nenhuma'}</Text>
+              <Text style={styles.infoLabel}>Paróquia</Text>
+              <Text style={styles.infoValue} numberOfLines={1}>{user?.parish?.name || 'Não informada'}</Text>
             </View>
+            <View style={styles.divider} />
+            <TouchableOpacity
+              style={styles.infoRow}
+              onPress={() => router.push('/change-community' as never)}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.infoLabel}>Comunidade</Text>
+              <View style={styles.infoValueLink}>
+                <Text style={[styles.infoValue, { color: colors.primary }]} numberOfLines={1}>
+                  {user?.community?.name || 'Definir'}
+                </Text>
+                <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />
+              </View>
+            </TouchableOpacity>
           </View>
+          <TouchableOpacity
+            style={styles.changeCommunityBtn}
+            onPress={() => router.push('/change-community' as never)}
+            activeOpacity={0.8}
+          >
+            <Ionicons name="swap-horizontal" size={16} color={colors.primary} />
+            <Text style={styles.changeCommunityText}>Trocar paróquia / comunidade</Text>
+          </TouchableOpacity>
         </View>
 
         <View style={styles.section}>
@@ -325,7 +348,19 @@ const createStyles = (colors: ReturnType<typeof useColors>) =>
       padding: 16,
     },
     infoLabel: { fontSize: 16, color: colors.text },
-    infoValue: { fontSize: 16, color: colors.textSecondary },
+    infoValue: { fontSize: 16, color: colors.textSecondary, flexShrink: 1, textAlign: 'right' },
+    infoValueLink: { flexDirection: 'row', alignItems: 'center', gap: 4, flexShrink: 1, marginLeft: 12 },
+    changeCommunityBtn: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 8,
+      marginTop: 10,
+      paddingVertical: 12,
+      borderRadius: 12,
+      backgroundColor: colors.highlightLight,
+    },
+    changeCommunityText: { color: colors.primary, fontWeight: '700', fontSize: 14.5 },
     divider: { height: 1, backgroundColor: colors.border, marginLeft: 16 },
     preferenceRow: {
       flexDirection: 'row',
