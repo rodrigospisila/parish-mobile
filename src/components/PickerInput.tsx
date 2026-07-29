@@ -1,4 +1,5 @@
 import React from 'react';
+import { Ionicons } from '@expo/vector-icons';
 import SelectModal from './SelectModal';
 
 interface Item {
@@ -13,6 +14,7 @@ interface PickerInputProps {
   items: Item[];
   placeholder: string;
   disabled?: boolean;
+  icon?: React.ComponentProps<typeof Ionicons>['name'];
 }
 
 const PickerInput: React.FC<PickerInputProps> = (props) => {
