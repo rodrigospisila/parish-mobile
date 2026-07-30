@@ -88,8 +88,14 @@ function massLabel(m: NearbyMass): string {
   return formatMassTime(m.start) + t;
 }
 
-/** HTML do mapa Leaflet (OpenStreetMap) injetado no WebView. */
-function buildMapHtml(origin: Origin, communities: NearbyCommunity[], colors: ThemeColors): string {
+/** HTML do mapa Leaflet (OpenStreetMap) injetado no WebView.
+ *  compact = mapa pequeno (inline): menos padding e sem abrir popup sozinho. */
+function buildMapHtml(
+  origin: Origin,
+  communities: NearbyCommunity[],
+  colors: ThemeColors,
+  compact = false,
+): string {
   const points = communities.map((c) => ({
     name: c.name,
     lat: c.latitude,
@@ -117,7 +123,7 @@ var nearest=null;
 points.forEach(function(p,idx){
   var mk=L.marker([p.lat,p.lng]).addTo(map);
   p.marker=mk;
-  var html='<div style="display:flex;align-items:stretch;gap:10px;min-width:214px;font-family:-apple-system,Roboto,sans-serif">';
+  var html='<div style="display:flex;align-items:center;gap:8px;min-width:206px;font-family:-apple-system,Roboto,sans-serif">';
   // Coluna de informações (esquerda)
   html+='<div style="flex:1;min-width:0">';
   html+='<div style="font-weight:800;font-size:14.5px;color:#181818;line-height:1.25;margin-bottom:6px">'+p.name+'</div>';
@@ -133,8 +139,8 @@ points.forEach(function(p,idx){
     html+='<div style="margin-top:8px;font-size:12px;color:#999">sem horários nos próximos dias</div>';
   }
   html+='</div>';
-  // Botão "Ir" vertical (lateral direita, ocupa a altura do card)
-  html+='<a href="#" class="ir" data-lat="'+p.lat+'" data-lng="'+p.lng+'" style="display:flex;align-items:center;justify-content:center;background:${colors.primary};color:#fff;text-decoration:none;border-radius:10px;padding:8px 6px;min-width:34px;writing-mode:vertical-rl;text-orientation:mixed;font-weight:800;font-size:14px;letter-spacing:2px">Ir</a>';
+  // Botão "Ir" vertical, compacto, ao lado do card
+  html+='<a href="#" class="ir" data-lat="'+p.lat+'" data-lng="'+p.lng+'" style="flex-shrink:0;writing-mode:vertical-rl;text-orientation:mixed;text-align:center;background:${colors.primary};color:#fff;text-decoration:none;border-radius:9px;padding:12px 7px;font-weight:800;font-size:14px;letter-spacing:1px">Ir</a>';
   html+='</div>';
   mk.bindPopup(html,{maxHeight:260,minWidth:214});
   if(nearest===null || p.distance < nearest.distance){ nearest=p; }
@@ -157,8 +163,8 @@ document.addEventListener('click',function(ev){
 });
 // Zoom inicial focado no GPS + a marcação mais próxima (evita afastar demais)
 if(nearest){
-  map.fitBounds([[origin.lat,origin.lng],[nearest.lat,nearest.lng]],{padding:[70,70],maxZoom:16});
-  nearest.marker.openPopup();
+  map.fitBounds([[origin.lat,origin.lng],[nearest.lat,nearest.lng]],{padding:[${compact ? 26 : 70},${compact ? 26 : 70}],maxZoom:16});
+  ${compact ? '' : 'nearest.marker.openPopup();'}
 } else {
   map.setView([origin.lat,origin.lng],15);
 }
@@ -360,9 +366,16 @@ export default function NearbyMassesScreen() {
     });
   }, [result, dayFilter, favorites]);
 
+  // Inline: compacto (menos padding, sem abrir popup sozinho — evita corte no mapa pequeno)
   const mapHtml = useMemo(() => {
     if (!origin || filteredCommunities.length === 0) return null;
-    return buildMapHtml(origin, filteredCommunities, colors);
+    return buildMapHtml(origin, filteredCommunities, colors, true);
+  }, [origin, filteredCommunities, colors]);
+
+  // Tela cheia: mais folga e abre o popup da comunidade mais próxima
+  const mapHtmlFull = useMemo(() => {
+    if (!origin || filteredCommunities.length === 0) return null;
+    return buildMapHtml(origin, filteredCommunities, colors, false);
   }, [origin, filteredCommunities, colors]);
 
   // Busca textual na lista (não afeta o mapa)
@@ -650,10 +663,10 @@ export default function NearbyMassesScreen() {
                 <FontAwesome5 name="times" size={18} color={colors.text} />
               </TouchableOpacity>
             </View>
-            {mapHtml && (
+            {mapHtmlFull && (
               <WebView
                 originWhitelist={['*']}
-                source={{ html: mapHtml }}
+                source={{ html: mapHtmlFull }}
                 onMessage={onMapMessage}
                 style={styles.map}
                 startInLoadingState
