@@ -109,7 +109,9 @@ function buildMapHtml(
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <style>html,body,#map{height:100%;margin:0;padding:0;background:${colors.background}}
-.leaflet-popup-content{font-family:-apple-system,Roboto,sans-serif;font-size:13px}</style>
+.leaflet-popup-content-wrapper{padding:0;overflow:hidden;border-radius:14px}
+.leaflet-popup-content{margin:0;font-family:-apple-system,Roboto,sans-serif;font-size:13px}
+.leaflet-popup-content p{margin:0}</style>
 </head><body><div id="map"></div>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
@@ -123,26 +125,26 @@ var nearest=null;
 points.forEach(function(p,idx){
   var mk=L.marker([p.lat,p.lng]).addTo(map);
   p.marker=mk;
-  var html='<div style="display:flex;align-items:center;gap:8px;min-width:206px;font-family:-apple-system,Roboto,sans-serif">';
-  // Coluna de informações (esquerda)
-  html+='<div style="flex:1;min-width:0">';
-  html+='<div style="font-weight:800;font-size:14.5px;color:#181818;line-height:1.25;margin-bottom:6px">'+p.name+'</div>';
-  html+='<span style="display:inline-flex;align-items:center;background:#e9f1ff;color:${colors.primary};font-weight:800;font-size:11px;padding:3px 9px;border-radius:20px">'+p.distance+' km</span>';
+  var html='<div style="display:flex;align-items:stretch;min-width:224px;font-family:-apple-system,Roboto,sans-serif">';
+  // Botão "Ir" à esquerda (ocupa a altura do card)
+  html+='<a href="#" class="ir" data-lat="'+p.lat+'" data-lng="'+p.lng+'" style="display:flex;align-items:center;justify-content:center;background:${colors.primary};color:#fff;text-decoration:none;font-weight:800;font-size:15px;padding:0 16px">Ir</a>';
+  // Coluna de informações (direita)
+  html+='<div style="flex:1;min-width:0;padding:12px 30px 12px 14px">';
+  html+='<div style="font-weight:800;font-size:15px;color:#181818;line-height:1.2;margin-bottom:7px">'+p.name+'</div>';
+  html+='<span style="display:inline-flex;align-items:center;background:#e9f1ff;color:${colors.primary};font-weight:800;font-size:11.5px;padding:3px 10px;border-radius:20px">'+p.distance+' km</span>';
   if(p.masses && p.masses.length){
-    html+='<div style="margin-top:8px;font-size:12.5px;color:#3a3a3a"><b style="color:#111">Próxima:</b> '+p.masses[0]+'</div>';
+    html+='<div style="margin-top:9px;font-size:12.5px;color:#3a3a3a"><b style="color:#111">Próxima:</b> '+p.masses[0]+'</div>';
     if(p.masses.length>1){
       var extra=p.masses.slice(1);
       html+='<div id="mx'+idx+'" style="display:none;margin-top:4px;font-size:12.5px;color:#3a3a3a;line-height:1.7">'+extra.map(function(m){return '• '+m;}).join('<br>')+'</div>';
-      html+='<a href="#" class="vermais" data-id="mx'+idx+'" style="color:${colors.primary};font-weight:700;font-size:12px;display:inline-block;margin-top:4px;text-decoration:none">ver mais ('+extra.length+')</a>';
+      html+='<a href="#" class="vermais" data-id="mx'+idx+'" style="color:${colors.primary};font-weight:700;font-size:12.5px;display:inline-block;margin-top:5px;text-decoration:none">ver mais ('+extra.length+')</a>';
     }
   } else {
-    html+='<div style="margin-top:8px;font-size:12px;color:#999">sem horários nos próximos dias</div>';
+    html+='<div style="margin-top:9px;font-size:12px;color:#999">sem horários nos próximos dias</div>';
   }
   html+='</div>';
-  // Botão "Ir" vertical, compacto, ao lado do card
-  html+='<a href="#" class="ir" data-lat="'+p.lat+'" data-lng="'+p.lng+'" style="flex-shrink:0;writing-mode:vertical-rl;text-orientation:mixed;text-align:center;background:${colors.primary};color:#fff;text-decoration:none;border-radius:9px;padding:12px 7px;font-weight:800;font-size:14px;letter-spacing:1px">Ir</a>';
   html+='</div>';
-  mk.bindPopup(html,{maxHeight:260,minWidth:214});
+  mk.bindPopup(html,{maxHeight:280,minWidth:224});
   if(nearest===null || p.distance < nearest.distance){ nearest=p; }
 });
 // Interações do popup: "ver mais" expande as datas; "Ir" pede rota ao app nativo
