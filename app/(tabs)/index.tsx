@@ -54,6 +54,37 @@ function initialsOf(name?: string): string {
   return (parts[0][0] + (parts[1]?.[0] ?? '')).toUpperCase();
 }
 
+const SHORT_DAYS = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+function shortDayLabel(dayOfWeek: number): string {
+  return SHORT_DAYS[dayOfWeek] ?? '';
+}
+
+/**
+ * Separa o texto de uma leitura em versículos, para exibir um por linha.
+ * Detecta o número do versículo (início/espaço + dígitos colados na palavra).
+ * Para textos sem numeração (salmos com "—"), quebra por linha/estrofe.
+ */
+function splitIntoVerses(text?: string): { num?: string; text: string }[] {
+  const trimmed = (text || '').replace(/\r/g, '').trim();
+  if (!trimmed) return [];
+  const tokens = trimmed.split(/(?:^|\s)(\d{1,3})(?=[^\s\d])/);
+  const verses: { num?: string; text: string }[] = [];
+  if (tokens[0] && tokens[0].trim()) verses.push({ text: tokens[0].trim() });
+  for (let i = 1; i < tokens.length; i += 2) {
+    const t = (tokens[i + 1] || '').trim();
+    if (t) verses.push({ num: tokens[i], text: t });
+  }
+  // Sem versículos numerados (ex.: salmo): quebra por linha ou por "—".
+  if (verses.length <= 1) {
+    const lines = trimmed
+      .split(/\n+|(?=—\s)/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (lines.length > 1) return lines.map((t) => ({ text: t }));
+  }
+  return verses;
+}
+
 export default function HomeScreen() {
   const { user } = useAuth();
   const colors = useColors();
@@ -337,16 +368,17 @@ export default function HomeScreen() {
       <View style={styles.massScheduleList}>
         {massSchedules.map((schedule) => {
           const isFavorite = favoriteMassScheduleSet.has(schedule.id);
-          const dayLabel = getDayLabel(schedule.dayOfWeek);
-
           return (
-            <View key={schedule.id} style={styles.massScheduleItem}>
-              <View style={styles.massScheduleInfo}>
-                <Text style={styles.massScheduleDay}>{dayLabel}</Text>
-                <Text style={styles.massScheduleTime}>{schedule.time}</Text>
-                {schedule.notes ? (
-                  <Text style={styles.massScheduleNotes}>{schedule.notes}</Text>
-                ) : null}
+            <View key={schedule.id} style={[styles.massItem, isFavorite && styles.massItemFav]}>
+              <View style={styles.massTimeBlock}>
+                <Text style={styles.massTimeDay}>{shortDayLabel(schedule.dayOfWeek)}</Text>
+                <Text style={styles.massTimeHour}>{schedule.time}</Text>
+              </View>
+              <View style={styles.massItemInfo}>
+                <Text style={styles.massItemTitle} numberOfLines={2}>
+                  {schedule.notes || 'Santa Missa'}
+                </Text>
+                <Text style={styles.massItemDay}>{getDayLabel(schedule.dayOfWeek)}</Text>
                 {schedule.isSpecial && schedule.specialDate ? (
                   <Text style={styles.massScheduleSpecial}>
                     Especial: {formatDateBR(schedule.specialDate)}
@@ -358,10 +390,11 @@ export default function HomeScreen() {
                 onPress={() => handleToggleMassScheduleFavorite(schedule)}
                 accessibilityRole="button"
                 accessibilityLabel={isFavorite ? 'Remover favorito' : 'Adicionar favorito'}
+                hitSlop={8}
               >
                 <FontAwesome5
                   name="star"
-                  size={16}
+                  size={17}
                   solid={isFavorite}
                   color={isFavorite ? colors.highlight : colors.textTertiary}
                 />
@@ -486,15 +519,22 @@ export default function HomeScreen() {
         return null;
       }
 
+      const verses = splitIntoVerses(text);
+
       return (
         <View key={item.key} style={styles.modalReadingSection}>
           <Text style={styles.modalReadingTitle}>
-            {item.label}{reference ? ` - ${reference}` : ''}
+            {item.label}{reference ? ` · ${reference}` : ''}
           </Text>
-          {text ? (
-            <Text style={styles.modalReadingText}>{text}</Text>
+          {verses.length > 0 ? (
+            verses.map((v, i) => (
+              <Text key={i} style={styles.modalVerse}>
+                {v.num ? <Text style={styles.modalVerseNum}>{v.num} </Text> : null}
+                {v.text}
+              </Text>
+            ))
           ) : (
-            <Text style={styles.modalReadingMuted}>Texto nao disponivel.</Text>
+            <Text style={styles.modalReadingMuted}>Texto não disponível.</Text>
           )}
         </View>
       );
@@ -535,7 +575,11 @@ export default function HomeScreen() {
               <Text style={styles.liturgyFallbackMessage}>Leituras nao disponiveis.</Text>
             )}
             {canOpenModal && (
-              <Text style={styles.liturgyHint}>Toque no card para ler completo.</Text>
+              <View style={styles.liturgyCta}>
+                <FontAwesome5 name="book-open" size={13} color={colors.primary} />
+                <Text style={styles.liturgyCtaText}>Ler liturgia completa</Text>
+                <FontAwesome5 name="chevron-right" size={11} color={colors.primary} />
+              </View>
             )}
           </>
         )}
@@ -659,12 +703,12 @@ export default function HomeScreen() {
     );
   };
 
-  const quickActions = [
+  const quickActions: { icon: string; label: string; route?: string; kind?: 'liturgy' }[] = [
     { icon: 'calendar-alt', label: 'Calendário', route: '/(tabs)/calendar' },
     { icon: 'clipboard-list', label: 'Minha Escala', route: '/(tabs)/schedule' },
     { icon: 'users', label: 'Pastorais', route: '/(tabs)/pastorals' },
-    { icon: 'user-circle', label: 'Perfil', route: '/(tabs)/profile' },
-  ] as const;
+    { icon: 'book-open', label: 'Liturgia', kind: 'liturgy' },
+  ];
 
   const liturgyDot = getLiturgicalColor(liturgy?.liturgicalColor);
 
@@ -726,13 +770,19 @@ export default function HomeScreen() {
         <View style={styles.quickRow}>
           {quickActions.map((action) => (
             <TouchableOpacity
-              key={action.route}
+              key={action.label}
               style={styles.quickAction}
               activeOpacity={0.8}
-              onPress={() => router.push(action.route as never)}
+              onPress={() => {
+                if (action.kind === 'liturgy') {
+                  if (liturgy) setIsLiturgyModalVisible(true);
+                } else if (action.route) {
+                  router.push(action.route as never);
+                }
+              }}
             >
               <View style={styles.quickIcon}>
-                <FontAwesome5 name={action.icon} size={18} color={colors.primary} />
+                <FontAwesome5 name={action.icon as never} size={18} color={colors.primary} />
               </View>
               <Text style={styles.quickLabel} numberOfLines={1}>{action.label}</Text>
             </TouchableOpacity>
@@ -1206,7 +1256,44 @@ const createStyles = (colors: ReturnType<typeof useColors>) =>
     },
     massScheduleList: {
       marginTop: 5,
+      gap: 10,
     },
+    massItem: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+      padding: 10,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: colors.borderLight,
+      backgroundColor: colors.background,
+    },
+    massItemFav: {
+      borderColor: colors.primary,
+    },
+    massTimeBlock: {
+      width: 62,
+      paddingVertical: 8,
+      borderRadius: 10,
+      alignItems: 'center',
+      backgroundColor: colors.highlightLight,
+    },
+    massTimeDay: {
+      fontSize: 11,
+      fontWeight: '800',
+      color: colors.primary,
+      textTransform: 'uppercase',
+      letterSpacing: 0.4,
+    },
+    massTimeHour: {
+      fontSize: 17,
+      fontWeight: '800',
+      color: colors.primary,
+      marginTop: 1,
+    },
+    massItemInfo: { flex: 1 },
+    massItemTitle: { fontSize: 14.5, fontWeight: '600', color: colors.text },
+    massItemDay: { fontSize: 12.5, color: colors.textTertiary, marginTop: 2 },
     massScheduleItem: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -1365,6 +1452,17 @@ const createStyles = (colors: ReturnType<typeof useColors>) =>
       color: colors.textTertiary,
       marginTop: 8,
     },
+    liturgyCta: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      marginTop: 12,
+      paddingVertical: 11,
+      paddingHorizontal: 12,
+      borderRadius: 10,
+      backgroundColor: colors.highlightLight,
+    },
+    liturgyCtaText: { flex: 1, fontSize: 14, fontWeight: '700', color: colors.primary },
     modalOverlay: {
       flex: 1,
       backgroundColor: colors.overlay,
@@ -1412,6 +1510,17 @@ const createStyles = (colors: ReturnType<typeof useColors>) =>
       fontSize: 13,
       color: colors.textSecondary,
       lineHeight: 20,
+    },
+    modalVerse: {
+      fontSize: 14.5,
+      color: colors.text,
+      lineHeight: 23,
+      marginBottom: 9,
+    },
+    modalVerseNum: {
+      fontSize: 11,
+      fontWeight: '800',
+      color: colors.primary,
     },
     modalReadingMuted: {
       fontSize: 13,
