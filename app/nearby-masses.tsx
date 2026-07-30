@@ -117,7 +117,9 @@ var nearest=null;
 points.forEach(function(p,idx){
   var mk=L.marker([p.lat,p.lng]).addTo(map);
   p.marker=mk;
-  var html='<div style="min-width:196px;font-family:-apple-system,Roboto,sans-serif">';
+  var html='<div style="display:flex;align-items:stretch;gap:10px;min-width:214px;font-family:-apple-system,Roboto,sans-serif">';
+  // Coluna de informações (esquerda)
+  html+='<div style="flex:1;min-width:0">';
   html+='<div style="font-weight:800;font-size:14.5px;color:#181818;line-height:1.25;margin-bottom:6px">'+p.name+'</div>';
   html+='<span style="display:inline-flex;align-items:center;background:#e9f1ff;color:${colors.primary};font-weight:800;font-size:11px;padding:3px 9px;border-radius:20px">'+p.distance+' km</span>';
   if(p.masses && p.masses.length){
@@ -130,9 +132,11 @@ points.forEach(function(p,idx){
   } else {
     html+='<div style="margin-top:8px;font-size:12px;color:#999">sem horários nos próximos dias</div>';
   }
-  html+='<a href="#" class="ir" data-lat="'+p.lat+'" data-lng="'+p.lng+'" style="display:flex;align-items:center;justify-content:center;gap:6px;margin-top:11px;background:${colors.primary};color:#fff;font-weight:800;font-size:13.5px;padding:9px 12px;border-radius:10px;text-decoration:none">Ir ➜</a>';
   html+='</div>';
-  mk.bindPopup(html,{maxHeight:260,minWidth:196});
+  // Botão "Ir" vertical (lateral direita, ocupa a altura do card)
+  html+='<a href="#" class="ir" data-lat="'+p.lat+'" data-lng="'+p.lng+'" style="display:flex;align-items:center;justify-content:center;background:${colors.primary};color:#fff;text-decoration:none;border-radius:10px;padding:8px 6px;min-width:34px;writing-mode:vertical-rl;text-orientation:mixed;font-weight:800;font-size:14px;letter-spacing:2px">Ir</a>';
+  html+='</div>';
+  mk.bindPopup(html,{maxHeight:260,minWidth:214});
   if(nearest===null || p.distance < nearest.distance){ nearest=p; }
 });
 // Interações do popup: "ver mais" expande as datas; "Ir" pede rota ao app nativo
