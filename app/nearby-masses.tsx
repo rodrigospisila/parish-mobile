@@ -113,9 +113,10 @@ var map=L.map('map',{zoomControl:true,attributionControl:false}).setView([origin
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19}).addTo(map);
 var here=L.circleMarker([origin.lat,origin.lng],{radius:9,color:'#fff',weight:3,fillColor:'${colors.primary}',fillOpacity:1}).addTo(map);
 here.bindPopup('<b>Voce esta aqui</b>');
-var bounds=[[origin.lat,origin.lng]];
+var nearest=null;
 points.forEach(function(p,idx){
   var mk=L.marker([p.lat,p.lng]).addTo(map);
+  p.marker=mk;
   var html='<b>'+p.name+'</b><br><span style="color:#666">'+p.distance+' km</span>';
   if(p.masses && p.masses.length){
     html+='<br><b>Próxima:</b> '+p.masses[0];
@@ -128,7 +129,7 @@ points.forEach(function(p,idx){
     html+='<br><span style="color:#999">sem horários nos próximos dias</span>';
   }
   mk.bindPopup(html,{maxHeight:220,minWidth:180});
-  bounds.push([p.lat,p.lng]);
+  if(nearest===null || p.distance < nearest.distance){ nearest=p; }
 });
 // "ver mais": expande a lista de datas dentro do popup
 document.addEventListener('click',function(ev){
@@ -139,7 +140,13 @@ document.addEventListener('click',function(ev){
     ev.preventDefault();
   }
 });
-if(bounds.length>1){map.fitBounds(bounds,{padding:[36,36],maxZoom:15});}
+// Zoom inicial focado no GPS + a marcação mais próxima (evita afastar demais)
+if(nearest){
+  map.fitBounds([[origin.lat,origin.lng],[nearest.lat,nearest.lng]],{padding:[70,70],maxZoom:16});
+  nearest.marker.openPopup();
+} else {
+  map.setView([origin.lat,origin.lng],15);
+}
 </script></body></html>`;
 }
 
