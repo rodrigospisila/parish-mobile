@@ -117,27 +117,38 @@ var nearest=null;
 points.forEach(function(p,idx){
   var mk=L.marker([p.lat,p.lng]).addTo(map);
   p.marker=mk;
-  var html='<b>'+p.name+'</b><br><span style="color:#666">'+p.distance+' km</span>';
+  var html='<div style="min-width:196px;font-family:-apple-system,Roboto,sans-serif">';
+  html+='<div style="font-weight:800;font-size:14.5px;color:#181818;line-height:1.25;margin-bottom:6px">'+p.name+'</div>';
+  html+='<span style="display:inline-flex;align-items:center;background:#e9f1ff;color:${colors.primary};font-weight:800;font-size:11px;padding:3px 9px;border-radius:20px">'+p.distance+' km</span>';
   if(p.masses && p.masses.length){
-    html+='<br><b>Próxima:</b> '+p.masses[0];
+    html+='<div style="margin-top:8px;font-size:12.5px;color:#3a3a3a"><b style="color:#111">Próxima:</b> '+p.masses[0]+'</div>';
     if(p.masses.length>1){
       var extra=p.masses.slice(1);
-      html+='<div id="mx'+idx+'" style="display:none;margin-top:5px;line-height:1.6">'+extra.map(function(m){return '• '+m;}).join('<br>')+'</div>';
-      html+='<a href="#" class="vermais" data-id="mx'+idx+'" style="color:${colors.primary};font-weight:700;display:inline-block;margin-top:5px;text-decoration:none">ver mais ('+extra.length+')</a>';
+      html+='<div id="mx'+idx+'" style="display:none;margin-top:4px;font-size:12.5px;color:#3a3a3a;line-height:1.7">'+extra.map(function(m){return '• '+m;}).join('<br>')+'</div>';
+      html+='<a href="#" class="vermais" data-id="mx'+idx+'" style="color:${colors.primary};font-weight:700;font-size:12px;display:inline-block;margin-top:4px;text-decoration:none">ver mais ('+extra.length+')</a>';
     }
   } else {
-    html+='<br><span style="color:#999">sem horários nos próximos dias</span>';
+    html+='<div style="margin-top:8px;font-size:12px;color:#999">sem horários nos próximos dias</div>';
   }
-  mk.bindPopup(html,{maxHeight:220,minWidth:180});
+  html+='<a href="#" class="ir" data-lat="'+p.lat+'" data-lng="'+p.lng+'" style="display:flex;align-items:center;justify-content:center;gap:6px;margin-top:11px;background:${colors.primary};color:#fff;font-weight:800;font-size:13.5px;padding:9px 12px;border-radius:10px;text-decoration:none">Ir ➜</a>';
+  html+='</div>';
+  mk.bindPopup(html,{maxHeight:260,minWidth:196});
   if(nearest===null || p.distance < nearest.distance){ nearest=p; }
 });
-// "ver mais": expande a lista de datas dentro do popup
+// Interações do popup: "ver mais" expande as datas; "Ir" pede rota ao app nativo
 document.addEventListener('click',function(ev){
-  var t=ev.target;
-  if(t&&t.className==='vermais'){
+  var t=ev.target; if(!t) return;
+  if(t.className==='vermais'){
     var e=document.getElementById(t.getAttribute('data-id'));
     if(e){e.style.display='block';t.style.display='none';}
-    ev.preventDefault();
+    ev.preventDefault(); return;
+  }
+  var ir=(t.className==='ir')?t:(t.closest?t.closest('.ir'):null);
+  if(ir){
+    if(window.ReactNativeWebView){
+      window.ReactNativeWebView.postMessage(JSON.stringify({action:'route',lat:ir.getAttribute('data-lat'),lng:ir.getAttribute('data-lng')}));
+    }
+    ev.preventDefault(); return;
   }
 });
 // Zoom inicial focado no GPS + a marcação mais próxima (evita afastar demais)
@@ -287,11 +298,10 @@ export default function NearbyMassesScreen() {
     }
   };
 
-  const openDirections = (c: NearbyCommunity) => {
-    const dest = `${c.latitude},${c.longitude}`;
-    const label = encodeURIComponent(c.name);
+  const openDirectionsTo = (lat: number, lng: number) => {
+    const dest = `${lat},${lng}`;
     const url = Platform.select({
-      ios: `maps://?daddr=${dest}&q=${label}`,
+      ios: `maps://?daddr=${dest}`,
       android: `google.navigation:q=${dest}`,
       default: `https://www.google.com/maps/dir/?api=1&destination=${dest}`,
     })!;
@@ -300,6 +310,22 @@ export default function NearbyMassesScreen() {
         Alert.alert('Erro', 'Não foi possível abrir o mapa.'),
       );
     });
+  };
+
+  const openDirections = (c: NearbyCommunity) => openDirectionsTo(c.latitude, c.longitude);
+
+  // Mensagens vindas do mapa (WebView): botão "Ir" pede a rota
+  const onMapMessage = (event: { nativeEvent: { data: string } }) => {
+    try {
+      const data = JSON.parse(event.nativeEvent.data);
+      if (data?.action === 'route') {
+        const lat = parseFloat(data.lat);
+        const lng = parseFloat(data.lng);
+        if (Number.isFinite(lat) && Number.isFinite(lng)) openDirectionsTo(lat, lng);
+      }
+    } catch {
+      // ignora payloads inválidos
+    }
   };
 
   // Filtro de dia (client-side) + favoritos no topo
@@ -516,6 +542,7 @@ export default function NearbyMassesScreen() {
           <WebView
             originWhitelist={['*']}
             source={{ html: mapHtml }}
+            onMessage={onMapMessage}
             style={styles.map}
             startInLoadingState
             renderLoading={() => (
@@ -623,6 +650,7 @@ export default function NearbyMassesScreen() {
               <WebView
                 originWhitelist={['*']}
                 source={{ html: mapHtml }}
+                onMessage={onMapMessage}
                 style={styles.map}
                 startInLoadingState
                 renderLoading={() => (
