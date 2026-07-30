@@ -85,6 +85,38 @@ function splitIntoVerses(text?: string): { num?: string; text: string }[] {
   return verses;
 }
 
+/** Próxima data (>= from) de um horário semanal (dia da semana + HH:MM). */
+function weeklyNextDate(dayOfWeek: number, time: string, from: Date): Date {
+  const [hh, mm] = (time || '00:00').split(':').map((n) => parseInt(n, 10) || 0);
+  const c = new Date(from);
+  const daysAhead = (dayOfWeek - c.getDay() + 7) % 7;
+  c.setDate(c.getDate() + daysAhead);
+  c.setHours(hh, mm, 0, 0);
+  if (c.getTime() < from.getTime()) c.setDate(c.getDate() + 7); // já passou hoje → próxima semana
+  return c;
+}
+
+/** Ocorrência mais próxima entre os horários fixos (semanais + especiais). */
+function nextFixedOccurrence(
+  schedules: MassSchedule[],
+  from: Date,
+): { date: Date; schedule: MassSchedule } | null {
+  let best: { date: Date; schedule: MassSchedule } | null = null;
+  for (const s of schedules) {
+    let date: Date;
+    if (s.isSpecial && s.specialDate) {
+      const [hh, mm] = (s.time || '00:00').split(':').map((n) => parseInt(n, 10) || 0);
+      date = new Date(s.specialDate);
+      date.setHours(hh, mm, 0, 0);
+      if (date.getTime() < from.getTime()) continue; // especial no passado
+    } else {
+      date = weeklyNextDate(s.dayOfWeek, s.time, from);
+    }
+    if (!best || date.getTime() < best.date.getTime()) best = { date, schedule: s };
+  }
+  return best;
+}
+
 export default function HomeScreen() {
   const { user } = useAuth();
   const colors = useColors();
@@ -306,20 +338,44 @@ export default function HomeScreen() {
   };
 
 
+  // Próxima celebração = a mais próxima entre o próximo evento-missa e a próxima
+  // ocorrência das missas fixas (agenda semanal).
+  const nextCelebration = (() => {
+    const now = new Date();
+    const candidates: { start: Date; title: string; location?: string; isFixed: boolean }[] = [];
+    if (nextMass) {
+      const d = new Date(nextMass.startDate);
+      if (!Number.isNaN(d.getTime())) {
+        candidates.push({ start: d, title: nextMass.title, location: nextMass.location, isFixed: false });
+      }
+    }
+    const fixed = nextFixedOccurrence(massSchedules, now);
+    if (fixed) {
+      candidates.push({
+        start: fixed.date,
+        title: fixed.schedule.notes || 'Santa Missa',
+        location: user?.community?.name,
+        isFixed: true,
+      });
+    }
+    if (candidates.length === 0) return null;
+    candidates.sort((a, b) => a.start.getTime() - b.start.getTime());
+    return candidates[0];
+  })();
+
   const renderNextMass = () => {
-    if (isLoading) {
+    if ((isLoading || isLoadingMassSchedules) && !nextCelebration) {
       return <ActivityIndicator size="small" color={colors.primary} />;
     }
 
-    if (upcomingEventsError) {
-      return <Text style={styles.errorText}>Não foi possível carregar os eventos. Verifique sua conexão.</Text>;
-    }
-
-    if (!nextMass) {
+    if (!nextCelebration) {
+      if (upcomingEventsError) {
+        return <Text style={styles.errorText}>Não foi possível carregar os eventos. Verifique sua conexão.</Text>;
+      }
       return <Text style={styles.infoText}>Nenhuma missa programada para sua comunidade.</Text>;
     }
 
-    const start = new Date(nextMass.startDate);
+    const { start, title, location, isFixed } = nextCelebration;
     const startOfToday = new Date();
     startOfToday.setHours(0, 0, 0, 0);
     const diffDays = Math.round((new Date(start).setHours(0, 0, 0, 0) - startOfToday.getTime()) / 86400000);
@@ -340,10 +396,12 @@ export default function HomeScreen() {
             <FontAwesome5 name="clock" size={10} color={colors.primary} />
             <Text style={styles.nextMassBadgeText}>{relative} · {format(start, 'HH:mm')}</Text>
           </View>
-          <Text style={styles.nextMassTitle} numberOfLines={2}>{nextMass.title}</Text>
+          <Text style={styles.nextMassTitle} numberOfLines={2}>{title}</Text>
           <View style={styles.nextMassMetaRow}>
-            <FontAwesome5 name="map-marker-alt" size={11} color={colors.textTertiary} />
-            <Text style={styles.nextMassMeta} numberOfLines={1}>{nextMass.location || 'A definir'}</Text>
+            <FontAwesome5 name={isFixed ? 'church' : 'map-marker-alt'} size={11} color={colors.textTertiary} />
+            <Text style={styles.nextMassMeta} numberOfLines={1}>
+              {isFixed ? `Missa fixa${location ? ` · ${location}` : ''}` : location || 'A definir'}
+            </Text>
           </View>
         </View>
         <FontAwesome5 name="chevron-right" size={14} color={colors.textTertiary} />
