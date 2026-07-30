@@ -94,7 +94,9 @@ export default function HomeScreen() {
       }
     };
     loadClergyMessages();
-  }, [user?.id]);
+    // Recarrega ao logar (user.id) E ao trocar de comunidade (communityId),
+    // senão a Palavra Pastoral fica presa na comunidade anterior.
+  }, [user?.id, user?.communityId]);
 
   useEffect(() => {
     if (!user?.communityId) {
