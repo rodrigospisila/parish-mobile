@@ -454,6 +454,54 @@ export default function NearbyMassesScreen() {
 
   const dayEmptyLabel = dayFilter === 'today' ? ' hoje' : dayFilter === 'sunday' ? ' no domingo' : '';
 
+  // Filtros (raio / tipo / dias) — reutilizados na tela e no mapa em tela cheia
+  const renderFilters = () => (
+    <>
+      <View style={styles.radiusRow}>
+        {RADIUS_OPTIONS.map((r) => {
+          const active = r === radiusKm;
+          return (
+            <TouchableOpacity key={r} style={[styles.chip, active && styles.chipActive]} onPress={() => onSelectRadius(r)}>
+              <Text style={[styles.chipText, active && styles.chipTextActive]}>{r} km</Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={styles.filterScroll}
+        contentContainerStyle={styles.filterRow}
+      >
+        {TYPE_OPTIONS.map((t) => {
+          const active = selectedTypes.includes(t.key);
+          return (
+            <TouchableOpacity
+              key={t.key}
+              style={[styles.chipSm, active && styles.chipActive]}
+              onPress={() => toggleType(t.key)}
+            >
+              <Text style={[styles.chipTextSm, active && styles.chipTextActive]}>{t.label}</Text>
+            </TouchableOpacity>
+          );
+        })}
+        <View style={styles.filterDivider} />
+        {DAY_OPTIONS.map((d) => {
+          const active = dayFilter === d.key;
+          return (
+            <TouchableOpacity
+              key={d.key}
+              style={[styles.chipSm, active && styles.chipActive]}
+              onPress={() => setDayFilter(d.key)}
+            >
+              <Text style={[styles.chipTextSm, active && styles.chipTextActive]}>{d.label}</Text>
+            </TouchableOpacity>
+          );
+        })}
+      </ScrollView>
+    </>
+  );
+
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
       {/* HEADER */}
@@ -502,48 +550,7 @@ export default function NearbyMassesScreen() {
       </View>
 
       {/* FILTROS: raio / tipo / quando */}
-      <View style={styles.radiusRow}>
-        {RADIUS_OPTIONS.map((r) => {
-          const active = r === radiusKm;
-          return (
-            <TouchableOpacity key={r} style={[styles.chip, active && styles.chipActive]} onPress={() => onSelectRadius(r)}>
-              <Text style={[styles.chipText, active && styles.chipTextActive]}>{r} km</Text>
-            </TouchableOpacity>
-          );
-        })}
-      </View>
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        style={styles.filterScroll}
-        contentContainerStyle={styles.filterRow}
-      >
-        {TYPE_OPTIONS.map((t) => {
-          const active = selectedTypes.includes(t.key);
-          return (
-            <TouchableOpacity
-              key={t.key}
-              style={[styles.chipSm, active && styles.chipActive]}
-              onPress={() => toggleType(t.key)}
-            >
-              <Text style={[styles.chipTextSm, active && styles.chipTextActive]}>{t.label}</Text>
-            </TouchableOpacity>
-          );
-        })}
-        <View style={styles.filterDivider} />
-        {DAY_OPTIONS.map((d) => {
-          const active = dayFilter === d.key;
-          return (
-            <TouchableOpacity
-              key={d.key}
-              style={[styles.chipSm, active && styles.chipActive]}
-              onPress={() => setDayFilter(d.key)}
-            >
-              <Text style={[styles.chipTextSm, active && styles.chipTextActive]}>{d.label}</Text>
-            </TouchableOpacity>
-          );
-        })}
-      </ScrollView>
+      {renderFilters()}
 
       {/* AVISO OFFLINE */}
       {fromCache && (
@@ -665,7 +672,11 @@ export default function NearbyMassesScreen() {
                 <FontAwesome5 name="times" size={18} color={colors.text} />
               </TouchableOpacity>
             </View>
-            {mapHtmlFull && (
+
+            {/* Filtros fixos no topo do mapa em tela cheia */}
+            <View style={styles.fsFilters}>{renderFilters()}</View>
+
+            {mapHtmlFull ? (
               <WebView
                 originWhitelist={['*']}
                 source={{ html: mapHtmlFull }}
@@ -678,6 +689,11 @@ export default function NearbyMassesScreen() {
                   </View>
                 )}
               />
+            ) : (
+              <View style={styles.centerBox}>
+                <FontAwesome5 name="map-marked-alt" size={40} color={colors.textTertiary} />
+                <Text style={styles.centerText}>Nenhuma comunidade{dayEmptyLabel} com esse filtro.</Text>
+              </View>
             )}
           </SafeAreaView>
         </SafeAreaProvider>
@@ -822,6 +838,12 @@ function createStyles(colors: ThemeColors) {
     },
     fsTitle: { flex: 1, fontSize: 15, fontWeight: '700', color: colors.text },
     fsClose: { width: 34, height: 34, alignItems: 'center', justifyContent: 'center' },
+    fsFilters: {
+      backgroundColor: colors.surface,
+      paddingBottom: 6,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: colors.border,
+    },
     centerBox: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32, gap: 12 },
     centerText: { fontSize: 14, color: colors.textSecondary, textAlign: 'center', lineHeight: 20 },
     retryBtn: {
