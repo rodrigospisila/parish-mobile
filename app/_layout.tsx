@@ -1,10 +1,15 @@
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { useEffect } from 'react';
 import { View, ActivityIndicator, StatusBar, AppState } from 'react-native';
+import { useFonts } from 'expo-font';
 import { AuthProvider, useAuth } from '../src/context/AuthContext';
 import { ThemeProvider, useTheme } from '../src/context/ThemeContext';
 import { NotificationProvider } from '../src/context/NotificationContext';
 import { flushWriteQueue } from '../src/utils/offlineQueue';
+import { applyGlobalFont } from '../src/utils/globalFont';
+
+// Instala o mapeamento peso→Nunito Sans antes de qualquer render de texto.
+applyGlobalFont();
 
 // Componente interno que gerencia a navegação baseada no estado de autenticação
 function RootLayoutNav() {
@@ -91,6 +96,22 @@ function RootLayoutWithNotifications() {
 }
 
 export default function RootLayout() {
+  const [fontsLoaded, fontError] = useFonts({
+    NunitoSans_400Regular: require('../assets/fonts/NunitoSans-Regular.ttf'),
+    NunitoSans_600SemiBold: require('../assets/fonts/NunitoSans-SemiBold.ttf'),
+    NunitoSans_700Bold: require('../assets/fonts/NunitoSans-Bold.ttf'),
+    NunitoSans_800ExtraBold: require('../assets/fonts/NunitoSans-ExtraBold.ttf'),
+  });
+
+  // Aguarda as fontes (ou segue caso falhem, para não travar o app)
+  if (!fontsLoaded && !fontError) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#0B1C2C' }}>
+        <ActivityIndicator size="large" color="#0A84FF" />
+      </View>
+    );
+  }
+
   return (
     <ThemeProvider>
       <AuthProvider>
