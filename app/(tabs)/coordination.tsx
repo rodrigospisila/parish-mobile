@@ -42,6 +42,13 @@ export default function CoordinationScreen() {
   const [assignmentFilter, setAssignmentFilter] = useState<AssignmentFilter>('all');
   const [dateRange, setDateRange] = useState<DateRange>('next30');
   const [expandedIds, setExpandedIds] = useState<Record<string, boolean>>({});
+  // Visão do painel: lista (padrão) ou calendário mensal
+  const [view, setView] = useState<'list' | 'calendar'>('list');
+  const [calMonth, setCalMonth] = useState(() => {
+    const now = new Date();
+    return new Date(now.getFullYear(), now.getMonth(), 1);
+  });
+  const [calSelectedId, setCalSelectedId] = useState<string | null>(null);
 
   // Mesma regra da tab: papel gestor OU coordenação/vice de alguma pastoral
   const coordinatorPastoralRoles = ['COORDINATOR', 'Coordenador', 'Vice-Coordenador'];
@@ -51,6 +58,12 @@ export default function CoordinationScreen() {
   const styles = createStyles(colors);
 
   const getDateRangeParams = useCallback(() => {
+    // Calendário: carrega o mês exibido inteiro
+    if (view === 'calendar') {
+      const from = new Date(calMonth.getFullYear(), calMonth.getMonth(), 1, 0, 0, 0);
+      const to = new Date(calMonth.getFullYear(), calMonth.getMonth() + 1, 0, 23, 59, 59);
+      return { from: from.toISOString(), to: to.toISOString() };
+    }
     if (dateRange === 'all') return {};
     const now = new Date();
     const from = new Date(now);
@@ -61,7 +74,7 @@ export default function CoordinationScreen() {
     else if (dateRange === 'next90') to.setDate(to.getDate() + 90);
     to.setHours(23, 59, 59, 999);
     return { from: from.toISOString(), to: to.toISOString() };
-  }, [dateRange]);
+  }, [calMonth, dateRange, view]);
 
   const loadOverview = useCallback(
     async (refresh = false) => {
@@ -121,6 +134,45 @@ export default function CoordinationScreen() {
     [schedules],
   );
 
+  // ===== Calendário =====
+  const toDayKey = (value: string | Date) => {
+    const date = new Date(value);
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(
+      date.getDate(),
+    ).padStart(2, '0')}`;
+  };
+
+  const schedulesByDay = useMemo(() => {
+    const map = new Map<string, CoordinatorScheduleSummary[]>();
+    for (const schedule of schedules) {
+      const key = toDayKey(schedule.date);
+      if (!map.has(key)) map.set(key, []);
+      map.get(key)!.push(schedule);
+    }
+    for (const list of map.values()) {
+      list.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+    }
+    return map;
+  }, [schedules]);
+
+  const calCells = useMemo(() => {
+    const first = new Date(calMonth.getFullYear(), calMonth.getMonth(), 1);
+    const start = new Date(first);
+    start.setDate(first.getDate() - first.getDay());
+    return Array.from({ length: 42 }, (_, index) => {
+      const date = new Date(start);
+      date.setDate(start.getDate() + index);
+      return { date, key: toDayKey(date), inMonth: date.getMonth() === calMonth.getMonth() };
+    });
+  }, [calMonth]);
+
+  const calSelected = useMemo(
+    () => schedules.find((schedule) => schedule.scheduleId === calSelectedId) ?? null,
+    [calSelectedId, schedules],
+  );
+
+  const monthLabel = calMonth.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
+
   const getFilteredAssignments = (assignments: CoordinatorAssignmentSummary[]) => {
     if (assignmentFilter === 'all') return assignments;
     if (assignmentFilter === 'CHECKED_IN') return assignments.filter((a) => a.checkedIn);
@@ -173,7 +225,31 @@ export default function CoordinationScreen() {
           <Text style={styles.subtitle}>Pendências, confirmações e presenças da sua pastoral.</Text>
         </View>
 
+        {/* Alternância Lista | Calendário */}
+        <View style={styles.filterRow}>
+          {([
+            { label: '☰ Lista', value: 'list' },
+            { label: '🗓 Calendário', value: 'calendar' },
+          ] as { label: string; value: 'list' | 'calendar' }[]).map((item) => (
+            <TouchableOpacity
+              key={item.value}
+              style={[styles.filterChip, view === item.value && styles.filterChipActive]}
+              onPress={() => {
+                setView(item.value);
+                setCalSelectedId(null);
+              }}
+            >
+              <Text
+                style={[styles.filterChipText, view === item.value && styles.filterChipTextActive]}
+              >
+                {item.label}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+
         {/* Filtro de período */}
+        {view === 'list' && (
         <View style={styles.filterRow}>
           {([
             { label: 'Próximos 7 dias', value: 'next7' },
@@ -197,6 +273,7 @@ export default function CoordinationScreen() {
             </TouchableOpacity>
           ))}
         </View>
+        )}
 
         {/* KPI cards */}
         <View style={styles.kpiGrid}>
@@ -230,6 +307,7 @@ export default function CoordinationScreen() {
         </View>
 
         {/* Filtro de status dos membros */}
+        {view === 'list' && (
         <View style={[styles.filterRow, styles.filterRowSpaced]}>
           {([
             { label: 'Todos', value: 'all' },
@@ -257,9 +335,162 @@ export default function CoordinationScreen() {
             </TouchableOpacity>
           ))}
         </View>
+        )}
+
+        {/* Calendário mensal */}
+        {view === 'calendar' && (
+          <View style={styles.calWrap}>
+            <View style={styles.calToolbar}>
+              <TouchableOpacity
+                style={styles.calNavButton}
+                onPress={() => {
+                  setCalMonth(new Date(calMonth.getFullYear(), calMonth.getMonth() - 1, 1));
+                  setCalSelectedId(null);
+                }}
+              >
+                <Text style={styles.calNavButtonText}>‹</Text>
+              </TouchableOpacity>
+              <Text style={styles.calMonthLabel}>{monthLabel}</Text>
+              <TouchableOpacity
+                style={styles.calNavButton}
+                onPress={() => {
+                  setCalMonth(new Date(calMonth.getFullYear(), calMonth.getMonth() + 1, 1));
+                  setCalSelectedId(null);
+                }}
+              >
+                <Text style={styles.calNavButtonText}>›</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.calTodayButton}
+                onPress={() => {
+                  const now = new Date();
+                  setCalMonth(new Date(now.getFullYear(), now.getMonth(), 1));
+                  setCalSelectedId(null);
+                }}
+              >
+                <Text style={styles.calTodayButtonText}>Hoje</Text>
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.calWeekHead}>
+              {['D', 'S', 'T', 'Q', 'Q', 'S', 'S'].map((weekday, index) => (
+                <Text key={index} style={styles.calWeekday}>
+                  {weekday}
+                </Text>
+              ))}
+            </View>
+
+            {isLoading ? (
+              <View style={styles.centerState}>
+                <ActivityIndicator size="small" color={colors.primary} />
+              </View>
+            ) : (
+              <View style={styles.calGrid}>
+                {calCells.map((cell) => {
+                  const daySchedules = schedulesByDay.get(cell.key) ?? [];
+                  const isToday = cell.key === toDayKey(new Date());
+                  return (
+                    <View
+                      key={cell.key}
+                      style={[
+                        styles.calCell,
+                        !cell.inMonth && styles.calCellOut,
+                        isToday && styles.calCellToday,
+                      ]}
+                    >
+                      <Text style={[styles.calDayNum, !cell.inMonth && styles.calDayNumOut]}>
+                        {cell.date.getDate()}
+                      </Text>
+                      {daySchedules.map((schedule) => (
+                        <TouchableOpacity
+                          key={schedule.scheduleId}
+                          style={[
+                            styles.calPill,
+                            schedule.counts.total === 0 && styles.calPillEmpty,
+                            calSelectedId === schedule.scheduleId && styles.calPillActive,
+                          ]}
+                          onPress={() =>
+                            setCalSelectedId(
+                              calSelectedId === schedule.scheduleId ? null : schedule.scheduleId,
+                            )
+                          }
+                        >
+                          <Text
+                            style={[
+                              styles.calPillText,
+                              schedule.counts.total === 0 && styles.calPillTextEmpty,
+                              calSelectedId === schedule.scheduleId && styles.calPillTextActive,
+                            ]}
+                            numberOfLines={1}
+                          >
+                            {schedule.counts.total === 0 ? '⚠' : schedule.counts.total}
+                            {(schedule.counts.swapsPending ?? 0) > 0 ? ' 🔁' : ''}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  );
+                })}
+              </View>
+            )}
+
+            {calSelected ? (
+              <View style={styles.calDetail}>
+                <Text style={styles.calDetailTitle}>{calSelected.title}</Text>
+                <Text style={styles.calDetailMeta}>
+                  {formatToBrazilianDate(calSelected.date, 'dd/MM/yyyy')} às{' '}
+                  {formatToBrazilianDate(calSelected.date, 'HH:mm')} •{' '}
+                  {calSelected.event.location || 'Local a definir'}
+                </Text>
+                {calSelected.assignments.length === 0 ? (
+                  <Text style={styles.noAssignments}>⚠ Nenhum membro escalado ainda.</Text>
+                ) : (
+                  <View style={styles.assignmentList}>
+                    {calSelected.assignments.map((a) => (
+                      <View key={a.id} style={styles.assignmentRow}>
+                        <View style={styles.assignmentInfo}>
+                          <Text style={styles.assignmentName}>
+                            {a.memberName}
+                            {a.spouseId &&
+                            calSelected.assignments.some((x) => x.memberId === a.spouseId)
+                              ? ' 💍'
+                              : ''}
+                            {a.hasPendingSwap ? ' 🔁' : ''}
+                          </Text>
+                          <Text style={styles.assignmentRole}>{a.role}</Text>
+                        </View>
+                        <View style={styles.statusBadge}>
+                          <View style={[styles.statusDot, { backgroundColor: getStatusColor(a) }]} />
+                          <Text style={[styles.statusText, { color: getStatusColor(a) }]}>
+                            {getStatusLabel(a)}
+                          </Text>
+                        </View>
+                      </View>
+                    ))}
+                  </View>
+                )}
+                <TouchableOpacity
+                  style={styles.openAction}
+                  activeOpacity={0.85}
+                  onPress={() =>
+                    router.push({
+                      pathname: '/coordination/[scheduleId]',
+                      params: { scheduleId: calSelected.scheduleId },
+                    })
+                  }
+                >
+                  <Text style={styles.openActionText}>Abrir operação da escala</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <Text style={styles.calHint}>Toque numa escala do calendário para ver a equipe.</Text>
+            )}
+          </View>
+        )}
 
         {/* Lista de escalas */}
-        {isLoading ? (
+        {view === 'list' &&
+          (isLoading ? (
           <View style={styles.centerState}>
             <ActivityIndicator size="small" color={colors.primary} />
             <Text style={styles.centerText}>Carregando escalas...</Text>
@@ -410,7 +641,7 @@ export default function CoordinationScreen() {
               );
             })}
           </View>
-        )}
+        ))}
       </ScrollView>
     </SafeAreaView>
   );
@@ -629,6 +860,140 @@ const createStyles = (colors: ReturnType<typeof useColors>) =>
       color: colors.textSecondary,
       textAlign: 'center',
       lineHeight: 20,
+    },
+    calWrap: {
+      paddingHorizontal: 18,
+      paddingBottom: 24,
+    },
+    calToolbar: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+      marginBottom: 8,
+    },
+    calNavButton: {
+      width: 34,
+      height: 34,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.card,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    calNavButtonText: {
+      fontSize: 18,
+      fontWeight: '700',
+      color: colors.text,
+    },
+    calMonthLabel: {
+      flex: 1,
+      textAlign: 'center',
+      fontSize: 15,
+      fontWeight: '700',
+      color: colors.text,
+      textTransform: 'capitalize',
+    },
+    calTodayButton: {
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: colors.primary,
+      backgroundColor: `${colors.primary}18`,
+      paddingHorizontal: 12,
+      paddingVertical: 8,
+    },
+    calTodayButtonText: {
+      fontSize: 12,
+      fontWeight: '700',
+      color: colors.primary,
+    },
+    calWeekHead: {
+      flexDirection: 'row',
+      marginBottom: 4,
+    },
+    calWeekday: {
+      flex: 1,
+      textAlign: 'center',
+      fontSize: 11,
+      fontWeight: '700',
+      color: colors.textTertiary,
+    },
+    calGrid: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+    },
+    calCell: {
+      width: `${100 / 7}%`,
+      minHeight: 58,
+      padding: 2,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.borderLight,
+      backgroundColor: colors.card,
+    },
+    calCellOut: {
+      backgroundColor: colors.background,
+    },
+    calCellToday: {
+      borderColor: colors.primary,
+      borderWidth: 1.5,
+    },
+    calDayNum: {
+      fontSize: 11,
+      fontWeight: '700',
+      color: colors.textSecondary,
+      marginBottom: 2,
+    },
+    calDayNumOut: {
+      color: colors.textTertiary,
+    },
+    calPill: {
+      backgroundColor: colors.highlightLight,
+      borderRadius: 6,
+      paddingHorizontal: 3,
+      paddingVertical: 2,
+      marginBottom: 2,
+    },
+    calPillEmpty: {
+      backgroundColor: `${colors.warning}22`,
+    },
+    calPillActive: {
+      backgroundColor: colors.primary,
+    },
+    calPillText: {
+      fontSize: 10,
+      fontWeight: '700',
+      color: colors.highlight,
+      textAlign: 'center',
+    },
+    calPillTextEmpty: {
+      color: colors.warning,
+    },
+    calPillTextActive: {
+      color: colors.textInverse,
+    },
+    calDetail: {
+      marginTop: 12,
+      backgroundColor: colors.card,
+      borderRadius: 16,
+      borderWidth: 1,
+      borderColor: colors.border,
+      padding: 14,
+      gap: 8,
+    },
+    calDetailTitle: {
+      fontSize: 16,
+      fontWeight: '700',
+      color: colors.text,
+    },
+    calDetailMeta: {
+      fontSize: 12.5,
+      color: colors.textSecondary,
+    },
+    calHint: {
+      marginTop: 12,
+      fontSize: 13,
+      color: colors.textTertiary,
+      textAlign: 'center',
     },
     emptyCard: {
       marginHorizontal: 18,
