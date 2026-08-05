@@ -48,7 +48,7 @@ export default function CoordinationScreen() {
     const now = new Date();
     return new Date(now.getFullYear(), now.getMonth(), 1);
   });
-  const [calSelectedId, setCalSelectedId] = useState<string | null>(null);
+  const [calSelectedDay, setCalSelectedDay] = useState<string | null>(null);
 
   // Mesma regra da tab: papel gestor OU coordenação/vice de alguma pastoral
   const coordinatorPastoralRoles = ['COORDINATOR', 'Coordenador', 'Vice-Coordenador'];
@@ -166,10 +166,24 @@ export default function CoordinationScreen() {
     });
   }, [calMonth]);
 
-  const calSelected = useMemo(
-    () => schedules.find((schedule) => schedule.scheduleId === calSelectedId) ?? null,
-    [calSelectedId, schedules],
+  /** Dias do mês exibido que têm escalas (para a agenda com nomes). */
+  const agendaDays = useMemo(
+    () =>
+      Array.from(schedulesByDay.keys())
+        .filter((key) => {
+          const [year, month] = key.split('-').map(Number);
+          return year === calMonth.getFullYear() && month === calMonth.getMonth() + 1;
+        })
+        .sort(),
+    [calMonth, schedulesByDay],
   );
+
+  const agendaDayLabel = (dayKey: string) => {
+    const [year, month, day] = dayKey.split('-').map(Number);
+    const date = new Date(year, month - 1, day);
+    const weekdays = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
+    return `${weekdays[date.getDay()]}, ${String(day).padStart(2, '0')}/${String(month).padStart(2, '0')}`;
+  };
 
   const monthLabel = calMonth.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
 
@@ -236,7 +250,7 @@ export default function CoordinationScreen() {
               style={[styles.filterChip, view === item.value && styles.filterChipActive]}
               onPress={() => {
                 setView(item.value);
-                setCalSelectedId(null);
+                setCalSelectedDay(null);
               }}
             >
               <Text
@@ -337,7 +351,7 @@ export default function CoordinationScreen() {
         </View>
         )}
 
-        {/* Calendário mensal */}
+        {/* Calendário mensal: grade compacta + agenda com os nomes */}
         {view === 'calendar' && (
           <View style={styles.calWrap}>
             <View style={styles.calToolbar}>
@@ -345,7 +359,7 @@ export default function CoordinationScreen() {
                 style={styles.calNavButton}
                 onPress={() => {
                   setCalMonth(new Date(calMonth.getFullYear(), calMonth.getMonth() - 1, 1));
-                  setCalSelectedId(null);
+                  setCalSelectedDay(null);
                 }}
               >
                 <Text style={styles.calNavButtonText}>‹</Text>
@@ -355,7 +369,7 @@ export default function CoordinationScreen() {
                 style={styles.calNavButton}
                 onPress={() => {
                   setCalMonth(new Date(calMonth.getFullYear(), calMonth.getMonth() + 1, 1));
-                  setCalSelectedId(null);
+                  setCalSelectedDay(null);
                 }}
               >
                 <Text style={styles.calNavButtonText}>›</Text>
@@ -365,7 +379,7 @@ export default function CoordinationScreen() {
                 onPress={() => {
                   const now = new Date();
                   setCalMonth(new Date(now.getFullYear(), now.getMonth(), 1));
-                  setCalSelectedId(null);
+                  setCalSelectedDay(null);
                 }}
               >
                 <Text style={styles.calTodayButtonText}>Hoje</Text>
@@ -389,102 +403,134 @@ export default function CoordinationScreen() {
                 {calCells.map((cell) => {
                   const daySchedules = schedulesByDay.get(cell.key) ?? [];
                   const isToday = cell.key === toDayKey(new Date());
+                  const isSelected = calSelectedDay === cell.key;
                   return (
-                    <View
+                    <TouchableOpacity
                       key={cell.key}
+                      disabled={daySchedules.length === 0}
+                      onPress={() => setCalSelectedDay(isSelected ? null : cell.key)}
                       style={[
                         styles.calCell,
                         !cell.inMonth && styles.calCellOut,
                         isToday && styles.calCellToday,
+                        isSelected && styles.calCellSelected,
                       ]}
                     >
                       <Text style={[styles.calDayNum, !cell.inMonth && styles.calDayNumOut]}>
                         {cell.date.getDate()}
                       </Text>
                       {daySchedules.map((schedule) => (
-                        <TouchableOpacity
+                        <View
                           key={schedule.scheduleId}
                           style={[
                             styles.calPill,
                             schedule.counts.total === 0 && styles.calPillEmpty,
-                            calSelectedId === schedule.scheduleId && styles.calPillActive,
                           ]}
-                          onPress={() =>
-                            setCalSelectedId(
-                              calSelectedId === schedule.scheduleId ? null : schedule.scheduleId,
-                            )
-                          }
                         >
                           <Text
                             style={[
                               styles.calPillText,
                               schedule.counts.total === 0 && styles.calPillTextEmpty,
-                              calSelectedId === schedule.scheduleId && styles.calPillTextActive,
                             ]}
                             numberOfLines={1}
                           >
                             {schedule.counts.total === 0 ? '⚠' : schedule.counts.total}
                             {(schedule.counts.swapsPending ?? 0) > 0 ? ' 🔁' : ''}
                           </Text>
-                        </TouchableOpacity>
+                        </View>
                       ))}
-                    </View>
+                    </TouchableOpacity>
                   );
                 })}
               </View>
             )}
 
-            {calSelected ? (
-              <View style={styles.calDetail}>
-                <Text style={styles.calDetailTitle}>{calSelected.title}</Text>
-                <Text style={styles.calDetailMeta}>
-                  {formatToBrazilianDate(calSelected.date, 'dd/MM/yyyy')} às{' '}
-                  {formatToBrazilianDate(calSelected.date, 'HH:mm')} •{' '}
-                  {calSelected.event.location || 'Local a definir'}
-                </Text>
-                {calSelected.assignments.length === 0 ? (
-                  <Text style={styles.noAssignments}>⚠ Nenhum membro escalado ainda.</Text>
-                ) : (
-                  <View style={styles.assignmentList}>
-                    {calSelected.assignments.map((a) => (
-                      <View key={a.id} style={styles.assignmentRow}>
-                        <View style={styles.assignmentInfo}>
-                          <Text style={styles.assignmentName}>
-                            {a.memberName}
-                            {a.spouseId &&
-                            calSelected.assignments.some((x) => x.memberId === a.spouseId)
-                              ? ' 💍'
-                              : ''}
-                            {a.hasPendingSwap ? ' 🔁' : ''}
-                          </Text>
-                          <Text style={styles.assignmentRole}>{a.role}</Text>
+            {/* Agenda do mês: nomes dos escalados dia a dia */}
+            {!isLoading && agendaDays.length === 0 ? (
+              <Text style={styles.calHint}>Nenhuma escala neste mês.</Text>
+            ) : null}
+            {!isLoading &&
+              (calSelectedDay ? [calSelectedDay] : agendaDays).map((dayKey) => {
+                const dayList = schedulesByDay.get(dayKey) ?? [];
+                if (dayList.length === 0) return null;
+                return (
+                  <View key={dayKey} style={styles.agendaDay}>
+                    <View style={styles.agendaDayHeader}>
+                      <Text style={styles.agendaDayTitle}>{agendaDayLabel(dayKey)}</Text>
+                      {calSelectedDay === dayKey ? (
+                        <TouchableOpacity onPress={() => setCalSelectedDay(null)} hitSlop={8}>
+                          <Text style={styles.agendaShowAll}>Ver mês inteiro</Text>
+                        </TouchableOpacity>
+                      ) : null}
+                    </View>
+                    {dayList.map((schedule) => (
+                      <View key={schedule.scheduleId} style={styles.agendaCard}>
+                        <View style={styles.agendaCardHeader}>
+                          <View style={styles.agendaCardHeaderText}>
+                            <Text style={styles.agendaCardTitle}>{schedule.title}</Text>
+                            <Text style={styles.agendaCardMeta}>
+                              {formatToBrazilianDate(schedule.date, 'HH:mm')} •{' '}
+                              {schedule.event.location || 'Local a definir'}
+                            </Text>
+                          </View>
+                          {(schedule.counts.swapsPending ?? 0) > 0 ? (
+                            <View style={[styles.alertChip, styles.alertChipSwap]}>
+                              <Text style={styles.alertChipSwapText}>
+                                🔁 {schedule.counts.swapsPending}
+                              </Text>
+                            </View>
+                          ) : null}
                         </View>
-                        <View style={styles.statusBadge}>
-                          <View style={[styles.statusDot, { backgroundColor: getStatusColor(a) }]} />
-                          <Text style={[styles.statusText, { color: getStatusColor(a) }]}>
-                            {getStatusLabel(a)}
-                          </Text>
-                        </View>
+
+                        {schedule.assignments.length === 0 ? (
+                          <View style={[styles.alertChip, styles.alertChipWarn, styles.agendaEmptyChip]}>
+                            <Text style={styles.alertChipWarnText}>⚠ Nenhum membro escalado</Text>
+                          </View>
+                        ) : (
+                          <View style={styles.agendaMemberList}>
+                            {schedule.assignments.map((a) => (
+                              <View key={a.id} style={styles.agendaMemberRow}>
+                                <View style={styles.assignmentInfo}>
+                                  <Text style={styles.agendaMemberName}>
+                                    {a.memberName}
+                                    {a.spouseId &&
+                                    schedule.assignments.some((x) => x.memberId === a.spouseId)
+                                      ? ' 💍'
+                                      : ''}
+                                    {a.hasPendingSwap ? ' 🔁' : ''}
+                                  </Text>
+                                  <Text style={styles.assignmentRole}>{a.role}</Text>
+                                </View>
+                                <View style={styles.statusBadge}>
+                                  <View
+                                    style={[styles.statusDot, { backgroundColor: getStatusColor(a) }]}
+                                  />
+                                  <Text style={[styles.statusText, { color: getStatusColor(a) }]}>
+                                    {getStatusLabel(a)}
+                                  </Text>
+                                </View>
+                              </View>
+                            ))}
+                          </View>
+                        )}
+
+                        <TouchableOpacity
+                          style={styles.agendaOpenAction}
+                          activeOpacity={0.85}
+                          onPress={() =>
+                            router.push({
+                              pathname: '/coordination/[scheduleId]',
+                              params: { scheduleId: schedule.scheduleId },
+                            })
+                          }
+                        >
+                          <Text style={styles.agendaOpenActionText}>Abrir operação</Text>
+                        </TouchableOpacity>
                       </View>
                     ))}
                   </View>
-                )}
-                <TouchableOpacity
-                  style={styles.openAction}
-                  activeOpacity={0.85}
-                  onPress={() =>
-                    router.push({
-                      pathname: '/coordination/[scheduleId]',
-                      params: { scheduleId: calSelected.scheduleId },
-                    })
-                  }
-                >
-                  <Text style={styles.openActionText}>Abrir operação da escala</Text>
-                </TouchableOpacity>
-              </View>
-            ) : (
-              <Text style={styles.calHint}>Toque numa escala do calendário para ver a equipe.</Text>
-            )}
+                );
+              })}
           </View>
         )}
 
@@ -971,23 +1017,92 @@ const createStyles = (colors: ReturnType<typeof useColors>) =>
     calPillTextActive: {
       color: colors.textInverse,
     },
-    calDetail: {
-      marginTop: 12,
+    calCellSelected: {
+      borderColor: colors.primary,
+      borderWidth: 2,
+      backgroundColor: `${colors.primary}10`,
+    },
+    agendaDay: {
+      marginTop: 14,
+      gap: 8,
+    },
+    agendaDayHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 8,
+    },
+    agendaDayTitle: {
+      fontSize: 13,
+      fontWeight: '700',
+      color: colors.textSecondary,
+      textTransform: 'uppercase',
+      letterSpacing: 0.4,
+    },
+    agendaShowAll: {
+      fontSize: 12,
+      fontWeight: '700',
+      color: colors.primary,
+    },
+    agendaCard: {
       backgroundColor: colors.card,
       borderRadius: 16,
       borderWidth: 1,
       borderColor: colors.border,
-      padding: 14,
+      padding: 12,
+      gap: 10,
+    },
+    agendaCardHeader: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      justifyContent: 'space-between',
       gap: 8,
     },
-    calDetailTitle: {
-      fontSize: 16,
+    agendaCardHeaderText: {
+      flex: 1,
+      gap: 2,
+    },
+    agendaCardTitle: {
+      fontSize: 15,
       fontWeight: '700',
       color: colors.text,
     },
-    calDetailMeta: {
+    agendaCardMeta: {
       fontSize: 12.5,
       color: colors.textSecondary,
+    },
+    agendaEmptyChip: {
+      alignSelf: 'flex-start',
+    },
+    agendaMemberList: {
+      gap: 6,
+    },
+    agendaMemberRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      backgroundColor: colors.background,
+      borderRadius: 10,
+      paddingHorizontal: 10,
+      paddingVertical: 8,
+    },
+    agendaMemberName: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: colors.text,
+    },
+    agendaOpenAction: {
+      backgroundColor: `${colors.primary}18`,
+      borderWidth: 1,
+      borderColor: colors.primary,
+      borderRadius: 10,
+      paddingVertical: 9,
+      alignItems: 'center',
+    },
+    agendaOpenActionText: {
+      fontSize: 13,
+      fontWeight: '700',
+      color: colors.primary,
     },
     calHint: {
       marginTop: 12,
