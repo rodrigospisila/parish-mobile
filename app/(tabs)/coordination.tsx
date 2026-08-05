@@ -1,6 +1,7 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   RefreshControl,
   SafeAreaView,
   ScrollView,
@@ -42,7 +43,11 @@ export default function CoordinationScreen() {
   const [dateRange, setDateRange] = useState<DateRange>('next30');
   const [expandedIds, setExpandedIds] = useState<Record<string, boolean>>({});
 
-  const isCoordinator = !!user?.role && coordinatorRoles.includes(user.role);
+  // Mesma regra da tab: papel gestor OU coordenação/vice de alguma pastoral
+  const coordinatorPastoralRoles = ['COORDINATOR', 'Coordenador', 'Vice-Coordenador'];
+  const isCoordinator =
+    (!!user?.role && coordinatorRoles.includes(user.role)) ||
+    !!user?.pastorals?.some((pastoral) => coordinatorPastoralRoles.includes(pastoral.role));
   const styles = createStyles(colors);
 
   const getDateRangeParams = useCallback(() => {
@@ -286,6 +291,22 @@ export default function CoordinationScreen() {
                       <Text style={styles.scheduleMeta}>
                         {schedule.event.location || 'Local a definir'}
                       </Text>
+                      {(schedule.counts.total === 0 || (schedule.counts.swapsPending ?? 0) > 0) && (
+                        <View style={styles.alertChipsRow}>
+                          {schedule.counts.total === 0 && (
+                            <View style={[styles.alertChip, styles.alertChipWarn]}>
+                              <Text style={styles.alertChipWarnText}>⚠ Sem atribuições</Text>
+                            </View>
+                          )}
+                          {(schedule.counts.swapsPending ?? 0) > 0 && (
+                            <View style={[styles.alertChip, styles.alertChipSwap]}>
+                              <Text style={styles.alertChipSwapText}>
+                                🔁 {schedule.counts.swapsPending} troca(s)
+                              </Text>
+                            </View>
+                          )}
+                        </View>
+                      )}
                     </View>
                     <View style={styles.rateBadge}>
                       <Text style={styles.rateBadgeValue}>
@@ -321,9 +342,30 @@ export default function CoordinationScreen() {
                       {shown.map((a) => (
                         <View key={a.id} style={styles.assignmentRow}>
                           <View style={styles.assignmentInfo}>
-                            <Text style={styles.assignmentName}>{a.memberName}</Text>
+                            <Text style={styles.assignmentName}>
+                              {a.memberName}
+                              {a.spouseId &&
+                              schedule.assignments.some((x) => x.memberId === a.spouseId)
+                                ? ' 💍'
+                                : ''}
+                            </Text>
                             <Text style={styles.assignmentRole}>{a.role}</Text>
                           </View>
+                          {a.hasPendingSwap && (
+                            <TouchableOpacity
+                              hitSlop={8}
+                              onPress={() =>
+                                Alert.alert(
+                                  '🔁 Pedido de troca',
+                                  a.pendingSwapMessage
+                                    ? `“${a.pendingSwapMessage}”`
+                                    : `${a.memberName} pediu troca desta escala (sem mensagem).`,
+                                )
+                              }
+                            >
+                              <Text style={styles.swapMini}>🔁</Text>
+                            </TouchableOpacity>
+                          )}
                           <View style={styles.statusBadge}>
                             <View
                               style={[styles.statusDot, { backgroundColor: getStatusColor(a) }]}
@@ -512,6 +554,40 @@ const createStyles = (colors: ReturnType<typeof useColors>) =>
       flexDirection: 'row',
       alignItems: 'center',
       gap: 4,
+    },
+    swapMini: {
+      fontSize: 14,
+      marginRight: 8,
+    },
+    alertChipsRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 6,
+      marginTop: 6,
+    },
+    alertChip: {
+      borderRadius: 999,
+      borderWidth: 1,
+      paddingHorizontal: 10,
+      paddingVertical: 4,
+    },
+    alertChipWarn: {
+      backgroundColor: `${colors.warning}18`,
+      borderColor: colors.warning,
+    },
+    alertChipWarnText: {
+      fontSize: 11,
+      fontWeight: '700',
+      color: colors.warning,
+    },
+    alertChipSwap: {
+      backgroundColor: '#6d43a518',
+      borderColor: '#6d43a5',
+    },
+    alertChipSwapText: {
+      fontSize: 11,
+      fontWeight: '700',
+      color: '#6d43a5',
     },
     statusDot: { width: 6, height: 6, borderRadius: 3 },
     statusText: { fontSize: 12, fontWeight: '700' },
