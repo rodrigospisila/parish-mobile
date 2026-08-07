@@ -98,6 +98,8 @@ export interface CoordinatorScheduleAssignment {
   swapRequests?: Array<{ id: string; message?: string | null; createdAt?: string }>;
   /** O cônjuge participa da mesma pastoral desta atribuição */
   spouseInSamePastoral?: boolean;
+  /** Grupo escalado como unidade (pastorais por grupos) */
+  pastoralGroup?: { id: string; name: string } | null;
 }
 
 export interface CoordinatorScheduleDetail {

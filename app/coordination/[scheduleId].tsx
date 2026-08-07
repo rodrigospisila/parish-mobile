@@ -819,7 +819,10 @@ export default function CoordinationScheduleDetailScreen() {
                               {assignment.member.fullName}
                               {spouseTogether ? ' 💍' : ''}
                             </Text>
-                            <Text style={styles.assignmentRole}>{assignment.role}</Text>
+                            <Text style={styles.assignmentRole}>
+                              {assignment.role}
+                              {assignment.pastoralGroup ? `  •  🎵 ${assignment.pastoralGroup.name}` : ''}
+                            </Text>
                             {assignment.member.phone ? (
                               <TouchableOpacity
                                 onPress={() => Linking.openURL(whatsappUrl(assignment.member.phone!))}
