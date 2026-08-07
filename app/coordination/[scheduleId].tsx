@@ -1143,6 +1143,13 @@ export default function CoordinationScheduleDetailScreen() {
                           </Text>
                         ))
                       : null}
+                    {(item.groupWarnings?.length ?? 0) > 0
+                      ? item.groupWarnings!.map((warning, index) => (
+                          <Text key={`gw-${index}`} style={styles.rotationWarning}>
+                            🎵 {warning}
+                          </Text>
+                        ))
+                      : null}
                     {item.gaps.length > 0 ? (
                       <Text style={styles.rotationWarning}>
                         ⚠️ Vagas sem candidato:{' '}

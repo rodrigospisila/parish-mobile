@@ -23,6 +23,7 @@ import {
   getUserRosterHistory,
   confirmRosterPresence,
   declineRosterPresence,
+  respondGroupPresence,
   getScheduleTeam,
   RosterConfirmationStatus,
 } from '../../src/services/pastoralService';
@@ -139,6 +140,51 @@ export default function ScheduleScreen() {
       Alert.alert('Erro', 'Ocorreu um erro ao confirmar presença.');
     } finally {
       setProcessingRosterId(null);
+    }
+  };
+
+  /** 🎵 Líder do grupo: responde a escala em nome de toda a equipe. */
+  const handleGroupRespond = (roster: UserRoster, action: 'confirm' | 'decline') => {
+    if (!roster.pastoralGroupId) return;
+    const doRespond = async () => {
+      setProcessingRosterId(roster.id);
+      try {
+        await respondGroupPresence(roster.scheduleId, roster.pastoralGroupId!, action);
+        setUserRosters((prev) =>
+          prev.map((r) =>
+            r.scheduleId === roster.scheduleId && r.pastoralGroupId === roster.pastoralGroupId
+              ? {
+                  ...r,
+                  confirmationStatus:
+                    action === 'confirm'
+                      ? ('confirmed' as RosterConfirmationStatus)
+                      : ('declined' as RosterConfirmationStatus),
+                }
+              : r,
+          ),
+        );
+        Alert.alert(
+          action === 'confirm' ? '🎵 Grupo confirmado' : '🎵 Grupo recusado',
+          `Resposta registrada para toda a equipe${roster.pastoralGroupName ? ` "${roster.pastoralGroupName}"` : ''}.`,
+        );
+      } catch (error) {
+        Alert.alert('Erro', error instanceof Error ? error.message : 'Tente novamente.');
+      } finally {
+        setProcessingRosterId(null);
+      }
+    };
+
+    if (action === 'decline') {
+      Alert.alert(
+        'Recusar pelo grupo',
+        `Recusar esta escala em nome de toda a equipe${roster.pastoralGroupName ? ` "${roster.pastoralGroupName}"` : ''}?`,
+        [
+          { text: 'Cancelar', style: 'cancel' },
+          { text: 'Recusar grupo', style: 'destructive', onPress: () => void doRespond() },
+        ],
+      );
+    } else {
+      void doRespond();
     }
   };
 
@@ -286,6 +332,12 @@ export default function ScheduleScreen() {
           <View style={styles.rosterPastoralContainer}>
             <Text style={styles.rosterPastoralName}>{roster.pastoralName}</Text>
             <Text style={styles.rosterResponsibilities}>{roster.responsibilities}</Text>
+            {roster.pastoralGroupName ? (
+              <Text style={styles.rosterGroupLine}>
+                🎵 Grupo: {roster.pastoralGroupName}
+                {roster.isGroupLeader ? ' — você é o líder' : ''}
+              </Text>
+            ) : null}
           </View>
 
           {/* Ações: apenas em escalas futuras e não finalizadas */}
@@ -311,6 +363,28 @@ export default function ScheduleScreen() {
               </TouchableOpacity>
             </View>
           )}
+
+          {!isHistory &&
+            roster.confirmationStatus === 'pending' &&
+            roster.isGroupLeader &&
+            roster.pastoralGroupId ? (
+            <View style={styles.actionButtons}>
+              <TouchableOpacity
+                style={[styles.actionButton, styles.groupRespondButton]}
+                onPress={() => handleGroupRespond(roster, 'confirm')}
+                disabled={isProcessing}
+              >
+                <Text style={styles.groupRespondButtonText}>🎵 Confirmar grupo</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.actionButton, styles.groupDeclineButton]}
+                onPress={() => handleGroupRespond(roster, 'decline')}
+                disabled={isProcessing}
+              >
+                <Text style={styles.groupDeclineButtonText}>Recusar grupo</Text>
+              </TouchableOpacity>
+            </View>
+          ) : null}
 
           {!isHistory && roster.confirmationStatus === 'confirmed' && (
             <>
@@ -710,6 +784,30 @@ const createStyles = (colors: ReturnType<typeof useColors>) =>
     confirmButtonText: { color: '#fff', fontWeight: '600', fontSize: 14 },
     declineButton: { backgroundColor: 'transparent', borderWidth: 1, borderColor: colors.error },
     declineButtonText: { color: colors.error, fontWeight: '600', fontSize: 14 },
+    rosterGroupLine: {
+      fontSize: 12,
+      color: '#8a6d1b',
+      fontWeight: '700',
+      marginTop: 4,
+    },
+    groupRespondButton: {
+      backgroundColor: '#8a6d1b',
+    },
+    groupRespondButtonText: {
+      color: '#fff',
+      fontSize: 14,
+      fontWeight: '700',
+    },
+    groupDeclineButton: {
+      backgroundColor: 'transparent',
+      borderWidth: 1,
+      borderColor: '#b03a2e',
+    },
+    groupDeclineButtonText: {
+      color: '#b03a2e',
+      fontSize: 14,
+      fontWeight: '700',
+    },
     cancelConfirmedButton: { marginTop: 8 },
     confirmedMessage: {
       backgroundColor: colors.primary + '15',

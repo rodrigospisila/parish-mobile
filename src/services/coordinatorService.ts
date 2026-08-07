@@ -444,6 +444,7 @@ export interface RotationPreviewItem {
     memberName: string;
     score: number;
     spouseId?: string | null;
+    pastoralGroupId?: string | null;
   }>;
   gaps: Array<{ role: string; missing: number }>;
   pastorals?: Array<{ communityPastoralId: string; name: string; requiredPeople: number }>;
@@ -451,6 +452,7 @@ export interface RotationPreviewItem {
   noSlots?: boolean;
   allFilled?: boolean;
   coupleWarnings?: string[];
+  groupWarnings?: string[];
 }
 
 export interface RotationResponse {

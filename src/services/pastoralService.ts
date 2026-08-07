@@ -175,6 +175,11 @@ export interface UserRoster {
   confirmationStatus: RosterConfirmationStatus;
   checkedIn?: boolean;
   confirmedAt?: string;
+  /** Grupo escalado como unidade (pastorais por grupos) */
+  pastoralGroupId?: string | null;
+  pastoralGroupName?: string | null;
+  /** O usuário é líder do grupo — pode responder pela equipe */
+  isGroupLeader?: boolean;
 }
 
 export interface ScheduleTeamMember {
@@ -378,6 +383,23 @@ export const declineRosterPresence = async (rosterId: string, reason?: string): 
 /**
  * Busca todos os membros escalados para uma escala específica
  */
+/**
+ * Líder do grupo responde (confirma/recusa) a escala em nome de TODA a equipe.
+ */
+export const respondGroupPresence = async (
+  scheduleId: string,
+  pastoralGroupId: string,
+  action: 'confirm' | 'decline',
+  reason?: string,
+): Promise<void> => {
+  await api.patch('/schedules/assignments/group/respond', {
+    scheduleId,
+    pastoralGroupId,
+    action,
+    ...(reason ? { reason } : {}),
+  });
+};
+
 export const getScheduleTeam = async (scheduleId: string): Promise<ScheduleTeamMember[]> => {
   try {
     const response = await api.get(`/schedules/assignments/all?scheduleId=${scheduleId}`);
@@ -720,6 +742,9 @@ export const getUserUpcomingRosters = async (userId: string): Promise<UserRoster
           confirmationStatus,
           checkedIn: !!assignment.checkedIn,
           confirmedAt: assignment.checkedInAt,
+          pastoralGroupId: assignment.pastoralGroup?.id ?? null,
+          pastoralGroupName: assignment.pastoralGroup?.name ?? null,
+          isGroupLeader: !!assignment.isGroupLeader,
         };
       });
     });
