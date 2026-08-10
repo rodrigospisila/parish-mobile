@@ -17,7 +17,10 @@ import { useColors } from '../../src/context/ThemeContext';
 import {
   CoordinatorAssignmentSummary,
   CoordinatorScheduleSummary,
+  FixedPendingItem,
+  createScheduleFromFixed,
   getCoordinatorScheduleOverview,
+  getFixedSchedulePending,
 } from '../../src/services/coordinatorService';
 import { formatToBrazilianDate } from '../../src/utils/dateUtils';
 
@@ -31,6 +34,22 @@ const coordinatorRoles = [
   'COMMUNITY_COORDINATOR',
   'PASTORAL_COORDINATOR',
 ];
+
+const FIXED_TYPE_LABELS: Record<string, string> = {
+  MASS: 'Missa',
+  CONFESSION: 'Confissão',
+  ADORATION: 'Adoração',
+  ROSARY: 'Terço',
+};
+
+const FIXED_WEEKDAYS = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb'];
+
+/** Formata 'YYYY-MM-DD' sem deslocar o dia por fuso. */
+const fixedDateLabel = (isoDate: string) => {
+  const [year, month, day] = isoDate.split('-').map(Number);
+  const weekday = FIXED_WEEKDAYS[new Date(Date.UTC(year, month - 1, day)).getUTCDay()];
+  return `${weekday}., ${String(day).padStart(2, '0')}/${String(month).padStart(2, '0')}`;
+};
 
 export default function CoordinationScreen() {
   const colors = useColors();
@@ -49,6 +68,9 @@ export default function CoordinationScreen() {
     return new Date(now.getFullYear(), now.getMonth(), 1);
   });
   const [calSelectedDay, setCalSelectedDay] = useState<string | null>(null);
+  // Agenda fixa sem escala (pendencias dos proximos 30 dias)
+  const [fixedPending, setFixedPending] = useState<FixedPendingItem[]>([]);
+  const [creatingFixedKey, setCreatingFixedKey] = useState<string | null>(null);
 
   // Mesma regra da tab: papel gestor OU coordenação/vice de alguma pastoral
   const coordinatorPastoralRoles = ['COORDINATOR', 'Coordenador', 'Vice-Coordenador'];
@@ -91,8 +113,12 @@ export default function CoordinationScreen() {
       }
 
       try {
-        const data = await getCoordinatorScheduleOverview(getDateRangeParams());
+        const [data, pending] = await Promise.all([
+          getCoordinatorScheduleOverview(getDateRangeParams()),
+          getFixedSchedulePending(30).catch(() => [] as FixedPendingItem[]),
+        ]);
         setSchedules(data);
+        setFixedPending(pending);
       } catch (error) {
         console.error('Erro ao carregar painel de coordenacao:', error);
         setSchedules([]);
@@ -109,6 +135,46 @@ export default function CoordinationScreen() {
       loadOverview();
     }, [loadOverview]),
   );
+
+  // Coordenador de pastoral ve apenas pendencias que envolvem suas pastorais
+  const visibleFixedPending = useMemo(() => {
+    const myIds = new Set((user?.pastorals ?? []).map((pastoral) => pastoral.id));
+    if (user?.role !== 'PASTORAL_COORDINATOR' || myIds.size === 0) return fixedPending;
+    return fixedPending.filter((item) => item.pastorals.some((p) => myIds.has(p.id)));
+  }, [fixedPending, user]);
+
+  const handleCreateFixedSchedule = (item: FixedPendingItem) => {
+    const key = `${item.massScheduleId}-${item.date}`;
+    const label = FIXED_TYPE_LABELS[item.type] ?? item.type;
+    Alert.alert(
+      'Criar escala',
+      `Criar a escala de ${label} de ${fixedDateLabel(item.date)} às ${item.time}? As pastorais do horário fixo serão copiadas.`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Criar escala',
+          onPress: async () => {
+            setCreatingFixedKey(key);
+            try {
+              const created = await createScheduleFromFixed(item.massScheduleId, item.date);
+              await loadOverview(true);
+              Alert.alert('Escala criada ✓', 'Deseja abrir a operação para escalar os membros?', [
+                { text: 'Depois', style: 'cancel' },
+                {
+                  text: 'Abrir operação',
+                  onPress: () => router.push(`/coordination/${created.id}` as never),
+                },
+              ]);
+            } catch (error: any) {
+              Alert.alert('Erro', error?.message ?? 'Erro ao criar a escala');
+            } finally {
+              setCreatingFixedKey(null);
+            }
+          },
+        },
+      ],
+    );
+  };
 
   const summary = useMemo(
     () =>
@@ -319,6 +385,52 @@ export default function CoordinationScreen() {
             <Text style={styles.kpiLabel}>Taxa de presença</Text>
           </View>
         </View>
+
+        {/* Agenda fixa sem escala */}
+        {view === 'list' && visibleFixedPending.length > 0 && (
+          <View style={styles.fixedPendingCard}>
+            <Text style={styles.fixedPendingTitle}>
+              📌 Agenda fixa sem escala ({visibleFixedPending.length})
+            </Text>
+            <Text style={styles.fixedPendingHint}>
+              Horários fixos dos próximos 30 dias que ainda não receberam escala.
+            </Text>
+            {visibleFixedPending.slice(0, 6).map((item) => {
+              const key = `${item.massScheduleId}-${item.date}`;
+              const label = FIXED_TYPE_LABELS[item.type] ?? item.type;
+              return (
+                <View key={key} style={styles.fixedPendingRow}>
+                  <View style={styles.fixedPendingInfo}>
+                    <Text style={styles.fixedPendingWhen}>
+                      {label} · {fixedDateLabel(item.date)} às {item.time}
+                      {item.notes ? ` — ${item.notes}` : ''}
+                    </Text>
+                    <Text style={styles.fixedPendingPastorals} numberOfLines={1}>
+                      {item.pastorals.map((p) => p.name).join(' · ')}
+                    </Text>
+                  </View>
+                  <TouchableOpacity
+                    style={[
+                      styles.fixedPendingButton,
+                      creatingFixedKey === key && styles.fixedPendingButtonDisabled,
+                    ]}
+                    disabled={creatingFixedKey === key}
+                    onPress={() => handleCreateFixedSchedule(item)}
+                  >
+                    <Text style={styles.fixedPendingButtonText}>
+                      {creatingFixedKey === key ? '...' : 'Criar escala'}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              );
+            })}
+            {visibleFixedPending.length > 6 && (
+              <Text style={styles.fixedPendingMore}>
+                + {visibleFixedPending.length - 6} pendência(s) além das listadas
+              </Text>
+            )}
+          </View>
+        )}
 
         {/* Filtro de status dos membros */}
         {view === 'list' && (
@@ -734,6 +846,39 @@ const createStyles = (colors: ReturnType<typeof useColors>) =>
     },
     filterChipText: { fontSize: 12, color: colors.textSecondary, fontWeight: '600' },
     filterChipTextActive: { color: colors.primary },
+    fixedPendingCard: {
+      marginHorizontal: 18,
+      marginBottom: 12,
+      backgroundColor: colors.card,
+      borderRadius: 14,
+      borderWidth: 1,
+      borderColor: colors.warning,
+      borderLeftWidth: 4,
+      padding: 14,
+      gap: 8,
+    },
+    fixedPendingTitle: { fontSize: 15, fontWeight: '700', color: colors.text },
+    fixedPendingHint: { fontSize: 12, color: colors.textSecondary, marginBottom: 2 },
+    fixedPendingRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+      borderTopWidth: 1,
+      borderTopColor: colors.border,
+      paddingTop: 10,
+    },
+    fixedPendingInfo: { flex: 1, gap: 2 },
+    fixedPendingWhen: { fontSize: 13, fontWeight: '600', color: colors.text },
+    fixedPendingPastorals: { fontSize: 12, color: colors.textSecondary },
+    fixedPendingButton: {
+      backgroundColor: colors.primary,
+      borderRadius: 10,
+      paddingHorizontal: 12,
+      paddingVertical: 8,
+    },
+    fixedPendingButtonDisabled: { opacity: 0.5 },
+    fixedPendingButtonText: { color: '#fff', fontSize: 12, fontWeight: '700' },
+    fixedPendingMore: { fontSize: 12, color: colors.textSecondary, paddingTop: 8 },
     kpiGrid: {
       flexDirection: 'row',
       flexWrap: 'wrap',

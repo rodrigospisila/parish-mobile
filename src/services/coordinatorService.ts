@@ -497,3 +497,44 @@ export const notifyScheduleTeam = async (
     throw new Error(getErrorMessage(error));
   }
 };
+
+// ===== Agenda fixa: pendencias (ocorrencias projetadas sem escala criada) =====
+
+export interface FixedPendingItem {
+  massScheduleId: string;
+  title: string;
+  type: string;
+  notes?: string | null;
+  /** YYYY-MM-DD (relogio de parede da comunidade) */
+  date: string;
+  /** HH:MM */
+  time: string;
+  community: { id: string; name: string } | null;
+  pastorals: { id: string; name: string; requiredPeople?: number }[];
+}
+
+/** Horarios fixos dos proximos `days` dias que ainda nao receberam escala. */
+export async function getFixedSchedulePending(days = 30): Promise<FixedPendingItem[]> {
+  if (USE_MOCK) return [];
+  const from = new Date().toISOString().slice(0, 10);
+  const to = new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  try {
+    const { data } = await api.get('/mass-schedules/pending', { params: { from, to } });
+    return data ?? [];
+  } catch (error) {
+    throw new Error(getErrorMessage(error));
+  }
+}
+
+/** Cria a escala de uma data especifica do horario fixo (copia as pastorais vinculadas). */
+export async function createScheduleFromFixed(
+  massScheduleId: string,
+  date: string,
+): Promise<{ id: string }> {
+  try {
+    const { data } = await api.post(`/mass-schedules/${massScheduleId}/schedule`, { date });
+    return data;
+  } catch (error) {
+    throw new Error(getErrorMessage(error));
+  }
+}
