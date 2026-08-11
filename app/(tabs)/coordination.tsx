@@ -19,6 +19,7 @@ import {
   CoordinatorScheduleSummary,
   FixedPendingItem,
   createScheduleFromFixed,
+  generateAllFixedPending,
   getCoordinatorScheduleOverview,
   getFixedSchedulePending,
 } from '../../src/services/coordinatorService';
@@ -142,6 +143,41 @@ export default function CoordinationScreen() {
     if (user?.role !== 'PASTORAL_COORDINATOR' || myIds.size === 0) return fixedPending;
     return fixedPending.filter((item) => item.pastorals.some((p) => myIds.has(p.id)));
   }, [fixedPending, user]);
+
+  const handleGenerateAllFixed = () => {
+    if (visibleFixedPending.length === 0 || creatingFixedKey) return;
+    Alert.alert(
+      'Gerar todas as escalas',
+      `Criar as ${visibleFixedPending.length} escala(s) pendentes da agenda fixa dos próximos 30 dias? As pastorais de cada horário serão copiadas.`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: `Gerar ${visibleFixedPending.length}`,
+          onPress: async () => {
+            setCreatingFixedKey('__all__');
+            try {
+              const myIds = (user?.pastorals ?? []).map((pastoral) => pastoral.id);
+              const result = await generateAllFixedPending(
+                30,
+                user?.role === 'PASTORAL_COORDINATOR' ? myIds : undefined,
+              );
+              await loadOverview(true);
+              Alert.alert(
+                'Escalas criadas ✓',
+                result.failed > 0
+                  ? `${result.created} criada(s); ${result.failed} falharam.`
+                  : `${result.created} escala(s) criada(s). Agora escale os membros de cada uma.`,
+              );
+            } catch (error: any) {
+              Alert.alert('Erro', error?.message ?? 'Erro ao gerar as escalas');
+            } finally {
+              setCreatingFixedKey(null);
+            }
+          },
+        },
+      ],
+    );
+  };
 
   const handleCreateFixedSchedule = (item: FixedPendingItem) => {
     const key = `${item.massScheduleId}-${item.date}`;
@@ -389,9 +425,23 @@ export default function CoordinationScreen() {
         {/* Agenda fixa sem escala */}
         {view === 'list' && visibleFixedPending.length > 0 && (
           <View style={styles.fixedPendingCard}>
-            <Text style={styles.fixedPendingTitle}>
-              📌 Agenda fixa sem escala ({visibleFixedPending.length})
-            </Text>
+            <View style={styles.fixedPendingHeader}>
+              <Text style={[styles.fixedPendingTitle, { flex: 1 }]}>
+                📌 Agenda fixa sem escala ({visibleFixedPending.length})
+              </Text>
+              <TouchableOpacity
+                style={[
+                  styles.fixedPendingButton,
+                  creatingFixedKey === '__all__' && styles.fixedPendingButtonDisabled,
+                ]}
+                disabled={creatingFixedKey === '__all__'}
+                onPress={handleGenerateAllFixed}
+              >
+                <Text style={styles.fixedPendingButtonText}>
+                  {creatingFixedKey === '__all__' ? 'Gerando...' : '⚡ Gerar todas'}
+                </Text>
+              </TouchableOpacity>
+            </View>
             <Text style={styles.fixedPendingHint}>
               Horários fixos dos próximos 30 dias que ainda não receberam escala.
             </Text>
@@ -857,6 +907,7 @@ const createStyles = (colors: ReturnType<typeof useColors>) =>
       padding: 14,
       gap: 8,
     },
+    fixedPendingHeader: { flexDirection: 'row', alignItems: 'center', gap: 10 },
     fixedPendingTitle: { fontSize: 15, fontWeight: '700', color: colors.text },
     fixedPendingHint: { fontSize: 12, color: colors.textSecondary, marginBottom: 2 },
     fixedPendingRow: {

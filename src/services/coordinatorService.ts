@@ -526,6 +526,25 @@ export async function getFixedSchedulePending(days = 30): Promise<FixedPendingIt
   }
 }
 
+/** Cria de uma vez as escalas de todas as pendencias do periodo. */
+export async function generateAllFixedPending(
+  days = 30,
+  pastoralIds?: string[],
+): Promise<{ created: number; failed: number }> {
+  const from = new Date().toISOString().slice(0, 10);
+  const to = new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  try {
+    const { data } = await api.post('/mass-schedules/generate-pending', {
+      from,
+      to,
+      pastoralIds: pastoralIds?.length ? pastoralIds : undefined,
+    });
+    return data;
+  } catch (error) {
+    throw new Error(getErrorMessage(error));
+  }
+}
+
 /** Cria a escala de uma data especifica do horario fixo (copia as pastorais vinculadas). */
 export async function createScheduleFromFixed(
   massScheduleId: string,
