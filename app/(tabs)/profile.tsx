@@ -15,9 +15,12 @@ import { useAuth } from '../../src/context/AuthContext';
 import { useColors, useTheme } from '../../src/context/ThemeContext';
 import { useNotifications } from '../../src/context/NotificationContext';
 import { authService } from '../../src/services/authService';
+import { useCommunity } from '../../src/context/CommunityContext';
+import { removeMyCommunity } from '../../src/services/memberCommunitiesService';
 
 export default function ProfileScreen() {
-  const { user, signOut } = useAuth();
+  const { user, signOut, updateCommunity, refreshUser } = useAuth();
+  const { links, activeCommunityId, setActiveCommunity, refreshLinks } = useCommunity();
   const router = useRouter();
   const colors = useColors();
   const { theme, setTheme, isDark } = useTheme();
@@ -176,6 +179,95 @@ export default function ProfileScreen() {
           >
             <Ionicons name="swap-horizontal" size={16} color={colors.primary} />
             <Text style={styles.changeCommunityText}>Trocar paróquia / comunidade</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Minhas comunidades (multi-comunidade, Fase 3) */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Minhas comunidades</Text>
+          <View style={styles.card}>
+            {links.length === 0 ? (
+              <View style={styles.infoRow}>
+                <Text style={[styles.infoValue, { textAlign: 'left', flex: 1 }]}>
+                  {user?.community?.name
+                    ? `⭐ ${user.community.name} (principal)`
+                    : 'Nenhuma comunidade vinculada ainda.'}
+                </Text>
+              </View>
+            ) : (
+              links.map((link, index) => (
+                <React.Fragment key={link.id}>
+                  {index > 0 && <View style={styles.divider} />}
+                  <View style={styles.infoRow}>
+                    <Text style={[styles.infoValue, { textAlign: 'left', flex: 1, color: colors.text }]} numberOfLines={1}>
+                      {link.isPrimary ? '⭐ ' : '🔗 '}
+                      {link.community.name}
+                      {link.isPrimary ? ' · principal' : ''}
+                      {link.communityId === activeCommunityId ? ' · em foco' : ''}
+                    </Text>
+                    {!link.isPrimary && (
+                      <TouchableOpacity
+                        hitSlop={8}
+                        onPress={() => {
+                          Alert.alert(link.community.name, 'O que deseja fazer com este vínculo?', [
+                            {
+                              text: 'Tornar principal',
+                              onPress: () => {
+                                Alert.alert(
+                                  'Trocar comunidade principal',
+                                  `${link.community.name} vira sua comunidade principal e a atual passa a ser um vínculo secundário.`,
+                                  [
+                                    { text: 'Cancelar', style: 'cancel' },
+                                    {
+                                      text: 'Confirmar',
+                                      onPress: async () => {
+                                        try {
+                                          await updateCommunity(link.communityId, true);
+                                          await refreshLinks();
+                                          await setActiveCommunity(link.communityId);
+                                        } catch (error: any) {
+                                          Alert.alert('Erro', error?.message ?? 'Não foi possível trocar.');
+                                        }
+                                      },
+                                    },
+                                  ],
+                                );
+                              },
+                            },
+                            {
+                              text: 'Remover vínculo',
+                              style: 'destructive',
+                              onPress: async () => {
+                                try {
+                                  await removeMyCommunity(link.communityId);
+                                  await refreshLinks();
+                                  if (activeCommunityId === link.communityId && user?.communityId) {
+                                    await setActiveCommunity(user.communityId);
+                                  }
+                                } catch (error: any) {
+                                  Alert.alert('Erro', error?.message ?? 'Não foi possível remover.');
+                                }
+                              },
+                            },
+                            { text: 'Cancelar', style: 'cancel' },
+                          ]);
+                        }}
+                      >
+                        <Ionicons name="ellipsis-horizontal" size={18} color={colors.textSecondary} />
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                </React.Fragment>
+              ))
+            )}
+          </View>
+          <TouchableOpacity
+            style={styles.changeCommunityBtn}
+            onPress={() => router.push('/link-community' as never)}
+            activeOpacity={0.8}
+          >
+            <Ionicons name="add-circle-outline" size={16} color={colors.primary} />
+            <Text style={styles.changeCommunityText}>Vincular outra comunidade</Text>
           </TouchableOpacity>
         </View>
 

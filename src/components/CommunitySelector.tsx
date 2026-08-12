@@ -16,6 +16,8 @@ interface Props {
   initialCommunityId?: string;
   /** Chamado após salvar com sucesso. No onboarding, o _layout navega sozinho. */
   onSaved?: () => void;
+  /** Ação customizada ao confirmar (ex.: vincular secundária). Default: troca a comunidade principal. */
+  onSubmit?: (communityId: string) => Promise<void>;
 }
 
 const CommunitySelector: React.FC<Props> = ({
@@ -25,6 +27,7 @@ const CommunitySelector: React.FC<Props> = ({
   initialParishId,
   initialCommunityId,
   onSaved,
+  onSubmit,
 }) => {
   const { user, updateCommunity } = useAuth();
   const colors = useColors();
@@ -77,7 +80,11 @@ const CommunitySelector: React.FC<Props> = ({
     }
     setSubmitting(true);
     try {
-      await updateCommunity(communityId, true);
+      if (onSubmit) {
+        await onSubmit(communityId);
+      } else {
+        await updateCommunity(communityId, true);
+      }
       onSaved?.();
     } catch (error: any) {
       Alert.alert('Erro', error?.message || 'Não foi possível salvar. Tente novamente.');

@@ -21,6 +21,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { parseISO, format, differenceInCalendarDays, addDays, isToday, isTomorrow, startOfDay } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { useAuth } from '../../src/context/AuthContext';
+import { useCommunity } from '../../src/context/CommunityContext';
 import { useColors, useTheme } from '../../src/context/ThemeContext';
 import { useNotifications } from '../../src/context/NotificationContext';
 import {
@@ -193,7 +194,8 @@ export default function CalendarScreen() {
   const [isLoadingRosters, setIsLoadingRosters] = useState(false);
   const [rostersError, setRostersError] = useState(false);
 
-  const communityId = user?.communityId;
+  const { activeCommunityId } = useCommunity();
+  const communityId = activeCommunityId ?? user?.communityId;
 
 
 

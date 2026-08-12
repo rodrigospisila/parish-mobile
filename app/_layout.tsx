@@ -5,6 +5,7 @@ import { useFonts } from 'expo-font';
 import { AuthProvider, useAuth } from '../src/context/AuthContext';
 import { ThemeProvider, useTheme } from '../src/context/ThemeContext';
 import { NotificationProvider } from '../src/context/NotificationContext';
+import { CommunityProvider } from '../src/context/CommunityContext';
 import { flushWriteQueue } from '../src/utils/offlineQueue';
 import { applyGlobalFont } from '../src/utils/globalFont';
 
@@ -115,7 +116,9 @@ export default function RootLayout() {
   return (
     <ThemeProvider>
       <AuthProvider>
-        <RootLayoutWithNotifications />
+        <CommunityProvider>
+          <RootLayoutWithNotifications />
+        </CommunityProvider>
       </AuthProvider>
     </ThemeProvider>
   );

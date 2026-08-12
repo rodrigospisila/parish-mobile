@@ -17,6 +17,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { useAuth } from '../../src/context/AuthContext';
+import { useCommunity } from '../../src/context/CommunityContext';
 import { useColors } from '../../src/context/ThemeContext';
 import { useNotifications } from '../../src/context/NotificationContext';
 import { FontAwesome5 } from '@expo/vector-icons';
@@ -119,6 +120,8 @@ function nextFixedOccurrence(
 
 export default function HomeScreen() {
   const { user } = useAuth();
+  const { activeCommunityId, activeCommunityName, isSecondaryActive, links, setActiveCommunity } =
+    useCommunity();
   const colors = useColors();
   const router = useRouter();
   const { rescheduleEventNotifications } = useNotifications();
@@ -162,7 +165,7 @@ export default function HomeScreen() {
   }, [user?.id, user?.communityId]);
 
   useEffect(() => {
-    if (!user?.communityId) {
+    if (!activeCommunityId) {
       setIsLoading(false);
       setIsLoadingUpcoming(false);
       setIsLoadingMassSchedules(false);
@@ -174,7 +177,7 @@ export default function HomeScreen() {
       setIsLoadingUpcoming(true);
       setUpcomingEventsError(false);
       try {
-        const events = await getUpcomingEvents(user.communityId!, 10);
+        const events = await getUpcomingEvents(activeCommunityId, 10);
         setUpcomingEvents(events.slice(0, 3));
         setNextMass(events.find((event) => event.type === 'MASS') || null);
       } catch (error) {
@@ -187,10 +190,10 @@ export default function HomeScreen() {
     };
 
     loadUpcomingEvents();
-  }, [user?.communityId]);
+  }, [activeCommunityId]);
 
   useEffect(() => {
-    if (!user?.communityId) {
+    if (!activeCommunityId) {
       return;
     }
 
@@ -198,7 +201,7 @@ export default function HomeScreen() {
       setIsLoadingMassSchedules(true);
       setMassSchedulesError(false);
       try {
-        const schedules = await getMassSchedules(user.communityId!);
+        const schedules = await getMassSchedules(activeCommunityId);
         const massOnly = schedules.filter((schedule) => schedule.type === 'MASS');
         setMassSchedules(massOnly);
         try {
@@ -216,7 +219,7 @@ export default function HomeScreen() {
     };
 
     loadMassSchedules();
-  }, [user?.communityId]);
+  }, [activeCommunityId]);
   useEffect(() => {
     const loadLiturgy = async () => {
       setIsLoadingLiturgy(true);
@@ -354,7 +357,7 @@ export default function HomeScreen() {
       candidates.push({
         start: fixed.date,
         title: fixed.schedule.notes || 'Santa Missa',
-        location: user?.community?.name,
+        location: activeCommunityName ?? user?.community?.name,
         isFixed: true,
       });
     }
@@ -810,17 +813,44 @@ export default function HomeScreen() {
             </View>
           )}
 
-          {/* Comunidade do usuário (toque para trocar) */}
+          {/* Comunidade ATIVA (toque para alternar entre as vinculadas) */}
           <TouchableOpacity
             style={styles.heroCommunity}
             activeOpacity={0.8}
-            onPress={() => router.push('/change-community' as never)}
+            onPress={() => {
+              if (links.length <= 1) {
+                router.push('/change-community' as never);
+                return;
+              }
+              Alert.alert(
+                'Comunidade em foco',
+                'Escolha a comunidade para ver eventos, agenda e pastorais.',
+                [
+                  ...links.map((link) => ({
+                    text: `${link.communityId === activeCommunityId ? '✓ ' : ''}${link.community.name}${link.isPrimary ? ' (principal)' : ''}`,
+                    onPress: () => void setActiveCommunity(link.communityId),
+                  })),
+                  {
+                    text: 'Gerenciar comunidades',
+                    onPress: () => router.push('/(tabs)/profile' as never),
+                  },
+                  { text: 'Cancelar', style: 'cancel' as const },
+                ],
+              );
+            }}
           >
             <FontAwesome5 name="map-marker-alt" size={12} color="#fff" />
             <Text style={styles.heroCommunityText} numberOfLines={1}>
-              {[user?.parish?.name, user?.community?.name].filter(Boolean).join(' · ') || 'Definir minha comunidade'}
+              {activeCommunityName
+                ? `${activeCommunityName}${isSecondaryActive ? ' · secundária' : ''}`
+                : [user?.parish?.name, user?.community?.name].filter(Boolean).join(' · ') ||
+                  'Definir minha comunidade'}
             </Text>
-            <FontAwesome5 name="chevron-right" size={11} color="rgba(255,255,255,0.85)" />
+            <FontAwesome5
+              name={links.length > 1 ? 'exchange-alt' : 'chevron-right'}
+              size={11}
+              color="rgba(255,255,255,0.85)"
+            />
           </TouchableOpacity>
         </LinearGradient>
 

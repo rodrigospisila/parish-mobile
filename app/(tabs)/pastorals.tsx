@@ -12,6 +12,7 @@ import {
   SafeAreaView,
 } from 'react-native';
 import { useAuth } from '../../src/context/AuthContext';
+import { useCommunity } from '../../src/context/CommunityContext';
 import { useColors } from '../../src/context/ThemeContext';
 import { Pastoral, Member, getPastorals } from '../../src/services/pastoralService';
 
@@ -23,7 +24,8 @@ export default function PastoralsScreen() {
   const [selectedPastoral, setSelectedPastoral] = useState<Pastoral | null>(null);
   const [isModalVisible, setIsModalVisible] = useState(false);
 
-  const communityId = user?.communityId;
+  const { activeCommunityId } = useCommunity();
+  const communityId = activeCommunityId ?? user?.communityId;
 
   // Carregar Pastorais
   useEffect(() => {
