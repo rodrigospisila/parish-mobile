@@ -366,6 +366,8 @@ export default function CoordinationScheduleDetailScreen() {
                       await finish();
                     } catch (error) {
                       Alert.alert('Erro', error instanceof Error ? error.message : 'Tente novamente.');
+                      // Recarrega o estado real (o titular pode ter sido escalado)
+                      await finish();
                     } finally {
                       setPickingMemberId(null);
                     }
@@ -384,6 +386,8 @@ export default function CoordinationScheduleDetailScreen() {
                       await finish();
                     } catch (error) {
                       Alert.alert('Erro', error instanceof Error ? error.message : 'Tente novamente.');
+                      // Recarrega o estado real (o titular pode ter sido escalado)
+                      await finish();
                     } finally {
                       setPickingMemberId(null);
                     }
