@@ -133,6 +133,7 @@ export default function HomeScreen() {
   const [isLoadingLiturgy, setIsLoadingLiturgy] = useState(true);
   const [expandedReadings, setExpandedReadings] = useState<Record<string, boolean>>({});
   const [isLiturgyModalVisible, setIsLiturgyModalVisible] = useState(false);
+  const [showCommunityPicker, setShowCommunityPicker] = useState(false);
   const [massSchedules, setMassSchedules] = useState<MassSchedule[]>([]);
   const [favoriteMassScheduleIds, setFavoriteMassScheduleIds] = useState<string[]>([]);
   const [isLoadingMassSchedules, setIsLoadingMassSchedules] = useState(true);
@@ -822,21 +823,7 @@ export default function HomeScreen() {
                 router.push('/change-community' as never);
                 return;
               }
-              Alert.alert(
-                'Comunidade em foco',
-                'Escolha a comunidade para ver eventos, agenda e pastorais.',
-                [
-                  ...links.map((link) => ({
-                    text: `${link.communityId === activeCommunityId ? '✓ ' : ''}${link.community.name}${link.isPrimary ? ' (principal)' : ''}`,
-                    onPress: () => void setActiveCommunity(link.communityId),
-                  })),
-                  {
-                    text: 'Gerenciar comunidades',
-                    onPress: () => router.push('/(tabs)/profile' as never),
-                  },
-                  { text: 'Cancelar', style: 'cancel' as const },
-                ],
-              );
+              setShowCommunityPicker(true);
             }}
           >
             <FontAwesome5 name="map-marker-alt" size={12} color="#fff" />
@@ -853,6 +840,95 @@ export default function HomeScreen() {
             />
           </TouchableOpacity>
         </LinearGradient>
+
+        {/* Seletor da comunidade em foco (multi-comunidade) */}
+        <Modal
+          visible={showCommunityPicker}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setShowCommunityPicker(false)}
+        >
+          <Pressable
+            style={{
+              flex: 1,
+              backgroundColor: 'rgba(0,0,0,0.45)',
+              justifyContent: 'flex-end',
+            }}
+            onPress={() => setShowCommunityPicker(false)}
+          >
+            <Pressable
+              style={{
+                backgroundColor: colors.card,
+                borderTopLeftRadius: 18,
+                borderTopRightRadius: 18,
+                padding: 18,
+                paddingBottom: 30,
+                gap: 8,
+              }}
+              onPress={() => {}}
+            >
+              <Text style={{ fontSize: 16, fontWeight: '800', color: colors.text }}>
+                Comunidade em foco
+              </Text>
+              <Text style={{ fontSize: 13, color: colors.textSecondary, marginBottom: 6 }}>
+                Escolha a comunidade para ver eventos, agenda e pastorais.
+              </Text>
+              {links.map((link) => (
+                <TouchableOpacity
+                  key={link.id}
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 10,
+                    paddingVertical: 12,
+                    paddingHorizontal: 12,
+                    borderRadius: 12,
+                    borderWidth: 1,
+                    borderColor:
+                      link.communityId === activeCommunityId ? colors.primary : colors.border,
+                    backgroundColor:
+                      link.communityId === activeCommunityId
+                        ? `${colors.primary}14`
+                        : 'transparent',
+                  }}
+                  onPress={() => {
+                    void setActiveCommunity(link.communityId);
+                    setShowCommunityPicker(false);
+                  }}
+                >
+                  <FontAwesome5
+                    name={link.isPrimary ? 'star' : 'link'}
+                    size={13}
+                    color={
+                      link.communityId === activeCommunityId ? colors.primary : colors.textSecondary
+                    }
+                  />
+                  <Text
+                    style={{ flex: 1, fontSize: 15, fontWeight: '600', color: colors.text }}
+                    numberOfLines={1}
+                  >
+                    {link.community.name}
+                    {link.isPrimary ? ' (principal)' : ''}
+                  </Text>
+                  {link.communityId === activeCommunityId && (
+                    <FontAwesome5 name="check" size={13} color={colors.primary} />
+                  )}
+                </TouchableOpacity>
+              ))}
+              <TouchableOpacity
+                style={{ paddingVertical: 12, alignItems: 'center' }}
+                onPress={() => {
+                  setShowCommunityPicker(false);
+                  router.push('/(tabs)/profile' as never);
+                }}
+              >
+                <Text style={{ color: colors.primary, fontWeight: '700' }}>
+                  Gerenciar comunidades
+                </Text>
+              </TouchableOpacity>
+            </Pressable>
+          </Pressable>
+        </Modal>
 
         {/* ATALHOS */}
         <View style={styles.quickRow}>
