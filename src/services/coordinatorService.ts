@@ -1,5 +1,27 @@
 import api, { USE_MOCK, getErrorMessage } from '../config/api';
 
+/** Conflito global de escala (409 GLOBAL_CONFLICT): erro enriquecido para a UI
+ *  oferecer "escalar mesmo assim" (retry com overrideConflict). */
+export interface GlobalConflictInfo {
+  memberName: string;
+  scheduleTitle: string;
+  communityName?: string | null;
+  type: 'OVERLAP' | 'SAME_DAY';
+}
+
+const toGlobalConflictError = (
+  error: any,
+): (Error & { isGlobalConflict: true; conflicts: GlobalConflictInfo[] }) | null => {
+  const data = error?.response?.data;
+  if (error?.response?.status === 409 && data?.code === 'GLOBAL_CONFLICT') {
+    const err: any = new Error(data.message || 'Já escalado em outra escala no mesmo dia/horário.');
+    err.isGlobalConflict = true;
+    err.conflicts = data.conflicts ?? [];
+    return err;
+  }
+  return null;
+};
+
 export type CoordinatorAssignmentStatus = 'PENDING' | 'CONFIRMED' | 'DECLINED';
 export type CandidateRecommendationLevel = 'RECOMMENDED' | 'ATTENTION' | 'CONFLICT';
 export type CandidateAvailabilityStatus = 'NOT_CONFIGURED' | 'AVAILABLE' | 'PARTIAL' | 'UNAVAILABLE';
@@ -328,14 +350,21 @@ export const getScheduleCandidates = async (
 export const replaceCoordinatorAssignment = async (
   assignmentId: string,
   memberId: string,
-): Promise<void> => {
+  overrideConflict = false,
+): Promise<any> => {
   if (USE_MOCK) {
     return;
   }
 
   try {
-    await api.patch(`/schedules/assignments/${assignmentId}/replace`, { memberId });
+    const response = await api.patch(`/schedules/assignments/${assignmentId}/replace`, {
+      memberId,
+      ...(overrideConflict ? { overrideConflict: true } : {}),
+    });
+    return response.data;
   } catch (error) {
+    const conflictError = toGlobalConflictError(error);
+    if (conflictError) throw conflictError;
     throw new Error(getErrorMessage(error));
   }
 };
@@ -403,6 +432,7 @@ export const createScheduleAssignment = async (params: {
   memberId: string;
   role: string;
   communityPastoralId?: string;
+  overrideConflict?: boolean;
 }): Promise<void> => {
   if (USE_MOCK) {
     return;
@@ -413,8 +443,11 @@ export const createScheduleAssignment = async (params: {
       memberId: params.memberId,
       role: params.role,
       ...(params.communityPastoralId ? { communityPastoralId: params.communityPastoralId } : {}),
+      ...(params.overrideConflict ? { overrideConflict: true } : {}),
     });
   } catch (error) {
+    const conflictError = toGlobalConflictError(error);
+    if (conflictError) throw conflictError;
     throw new Error(getErrorMessage(error));
   }
 };

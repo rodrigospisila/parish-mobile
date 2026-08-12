@@ -59,10 +59,17 @@ export const getMySwaps = async (): Promise<MySwaps> => {
   }
 };
 
-export const acceptSwap = async (swapId: string): Promise<void> => {
+export const acceptSwap = async (swapId: string, overrideConflict = false): Promise<void> => {
   try {
-    await api.patch(`/swaps/${swapId}/accept`);
-  } catch (error) {
+    await api.patch(`/swaps/${swapId}/accept`, overrideConflict ? { overrideConflict: true } : {});
+  } catch (error: any) {
+    // Conflito global: você já serve em outra escala no mesmo dia/horário
+    const data = error?.response?.data;
+    if (error?.response?.status === 409 && data?.code === 'GLOBAL_CONFLICT') {
+      const err: any = new Error(data.message || 'Você já está escalado no mesmo dia/horário.');
+      err.isGlobalConflict = true;
+      throw err;
+    }
     throw new Error(getErrorMessage(error));
   }
 };

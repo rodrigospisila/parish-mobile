@@ -55,6 +55,20 @@ const whatsappUrl = (phone: string) => {
   return `https://wa.me/${full}`;
 };
 
+/** Confirma conflito global ("já escalado em outra escala") via Alert. */
+const confirmGlobalConflict = (error: unknown): Promise<boolean> =>
+  new Promise((resolve) => {
+    Alert.alert(
+      '⚠ Já escalado em outra escala',
+      `${error instanceof Error ? error.message : 'Conflito de agenda detectado.'}\n\nEscalar mesmo assim?`,
+      [
+        { text: 'Cancelar', style: 'cancel', onPress: () => resolve(false) },
+        { text: 'Escalar mesmo assim', style: 'destructive', onPress: () => resolve(true) },
+      ],
+      { cancelable: true, onDismiss: () => resolve(false) },
+    );
+  });
+
 export default function CoordinationScheduleDetailScreen() {
   const colors = useColors();
   const router = useRouter();
@@ -229,15 +243,31 @@ export default function CoordinationScheduleDetailScreen() {
 
       const previousName = selectedAssignment.member.fullName;
       setPickingMemberId(memberId);
-      try {
-        const result = await replaceCoordinatorAssignment(selectedAssignment.id, memberId);
+      const doReplace = async (override: boolean) => {
+        const result = await replaceCoordinatorAssignment(selectedAssignment.id, memberId, override);
         const newName = (result as any)?.member?.fullName || 'novo membro';
         closePicker();
         await loadSchedule(true);
         Alert.alert('Substituição realizada', `${previousName} foi substituído(a) por ${newName}.`);
+      };
+      try {
+        await doReplace(false);
       } catch (error) {
-        console.error('Erro ao substituir membro da escala:', error);
-        Alert.alert('Erro', 'Não foi possível realizar a substituição. Tente novamente.');
+        if ((error as any)?.isGlobalConflict && (await confirmGlobalConflict(error))) {
+          try {
+            await doReplace(true);
+          } catch (retryError) {
+            Alert.alert('Erro', retryError instanceof Error ? retryError.message : 'Tente novamente.');
+          }
+        } else {
+          console.error('Erro ao substituir membro da escala:', error);
+          Alert.alert(
+            'Erro',
+            error instanceof Error && (error as any)?.isGlobalConflict
+              ? error.message
+              : 'Não foi possível realizar a substituição. Tente novamente.',
+          );
+        }
       } finally {
         setPickingMemberId(null);
       }
@@ -261,12 +291,22 @@ export default function CoordinationScheduleDetailScreen() {
   const assignMember = useCallback(
     async (member: ScheduleCandidateMember, role: string, pastoralId: string | null) => {
       if (!scheduleId) return;
-      await createScheduleAssignment({
+      const payload = {
         scheduleId,
         memberId: member.id,
         role,
         communityPastoralId: pastoralId || undefined,
-      });
+      };
+      try {
+        await createScheduleAssignment(payload);
+      } catch (error) {
+        // Conflito global: oferece escalar mesmo assim (registrado em auditoria)
+        if ((error as any)?.isGlobalConflict && (await confirmGlobalConflict(error))) {
+          await createScheduleAssignment({ ...payload, overrideConflict: true });
+          return;
+        }
+        throw error;
+      }
     },
     [scheduleId],
   );
@@ -381,13 +421,22 @@ export default function CoordinationScheduleDetailScreen() {
     async (assignment: CoordinatorScheduleAssignment) => {
       if (!scheduleId || !assignment.member.spouseId) return;
       setActionAssignmentId(assignment.id);
+      const spousePayload = {
+        scheduleId,
+        memberId: assignment.member.spouseId,
+        role: assignment.role,
+        communityPastoralId: assignment.communityPastoral?.id || undefined,
+      };
       try {
-        await createScheduleAssignment({
-          scheduleId,
-          memberId: assignment.member.spouseId,
-          role: assignment.role,
-          communityPastoralId: assignment.communityPastoral?.id || undefined,
-        });
+        try {
+          await createScheduleAssignment(spousePayload);
+        } catch (error) {
+          if ((error as any)?.isGlobalConflict && (await confirmGlobalConflict(error))) {
+            await createScheduleAssignment({ ...spousePayload, overrideConflict: true });
+          } else {
+            throw error;
+          }
+        }
         Alert.alert(
           'Casal completo',
           `💍 ${assignment.member.spouse?.fullName || 'Cônjuge'} escalado(a) junto de ${assignment.member.fullName}.`,

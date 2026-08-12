@@ -266,7 +266,31 @@ export default function ScheduleScreen() {
     setProcessingSwapId(swap.id);
     try {
       if (action === 'accept') {
-        await acceptSwap(swap.id);
+        try {
+          await acceptSwap(swap.id);
+        } catch (error: any) {
+          // Conflito global: já escalado no mesmo dia/horário em outra escala
+          if (error?.isGlobalConflict) {
+            const proceed = await new Promise<boolean>((resolve) => {
+              Alert.alert(
+                '⚠ Você já está escalado neste dia',
+                `${error.message}\n\nAceitar a troca mesmo assim?`,
+                [
+                  { text: 'Cancelar', style: 'cancel', onPress: () => resolve(false) },
+                  { text: 'Aceitar mesmo assim', style: 'destructive', onPress: () => resolve(true) },
+                ],
+                { cancelable: true, onDismiss: () => resolve(false) },
+              );
+            });
+            if (!proceed) {
+              setProcessingSwapId(null);
+              return;
+            }
+            await acceptSwap(swap.id, true);
+          } else {
+            throw error;
+          }
+        }
         Alert.alert('Troca aceita', 'A escala agora é sua — ela já aparece nas suas próximas participações.');
       } else if (action === 'reject') {
         await rejectSwap(swap.id);
