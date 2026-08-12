@@ -10,6 +10,7 @@ import {
   ScrollView,
 } from 'react-native';
 import { useRouter } from 'expo-router';
+import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../src/context/AuthContext';
 import { useColors, useTheme } from '../../src/context/ThemeContext';
@@ -21,6 +22,13 @@ import { removeMyCommunity } from '../../src/services/memberCommunitiesService';
 export default function ProfileScreen() {
   const { user, signOut, updateCommunity, refreshUser } = useAuth();
   const { links, activeCommunityId, setActiveCommunity, refreshLinks } = useCommunity();
+
+  // Revalida os vínculos ao abrir o perfil (cobre revogações feitas pela web)
+  useFocusEffect(
+    React.useCallback(() => {
+      void refreshLinks();
+    }, [refreshLinks]),
+  );
   const router = useRouter();
   const colors = useColors();
   const { theme, setTheme, isDark } = useTheme();

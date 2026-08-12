@@ -4,6 +4,7 @@ import React, {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -33,6 +34,8 @@ export function CommunityProvider({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
   const [links, setLinks] = useState<MemberCommunityLink[]>([]);
   const [activeId, setActiveId] = useState<string | undefined>(undefined);
+  const [hydrated, setHydrated] = useState(false);
+  const prevPrimaryRef = useRef<string | undefined>(undefined);
 
   const refreshLinks = useCallback(async () => {
     if (!user?.id) {
@@ -42,18 +45,19 @@ export function CommunityProvider({ children }: { children: React.ReactNode }) {
     try {
       setLinks(await getMyCommunities());
     } catch {
-      // Sem cadastro de membro (ou erro): segue só com a comunidade principal
-      setLinks([]);
+      // Falha transitória: mantém a lista atual (não zera o estado)
     }
   }, [user?.id]);
 
-  // Carrega vínculos + comunidade ativa persistida ao autenticar
+  // Hidratação por USUÁRIO: vínculos + comunidade ativa persistida
   useEffect(() => {
     let cancelled = false;
     (async () => {
       if (!user?.id) {
         setActiveId(undefined);
         setLinks([]);
+        setHydrated(false);
+        prevPrimaryRef.current = undefined;
         return;
       }
       let loaded: MemberCommunityLink[] = [];
@@ -71,12 +75,36 @@ export function CommunityProvider({ children }: { children: React.ReactNode }) {
         ...loaded.map((link) => link.communityId),
       ]);
       if (cancelled) return;
+      prevPrimaryRef.current = user.communityId;
       setActiveId(stored && validIds.has(stored) ? stored : user.communityId);
+      setHydrated(true);
     })();
     return () => {
       cancelled = true;
     };
-  }, [user?.id, user?.communityId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]);
+
+  // Troca de PRINCIPAL (qualquer fluxo): o foco acompanha a nova principal
+  useEffect(() => {
+    if (!hydrated || !user?.communityId) return;
+    if (prevPrimaryRef.current !== user.communityId) {
+      prevPrimaryRef.current = user.communityId;
+      setActiveId(user.communityId);
+      AsyncStorage.setItem(STORAGE_KEY, user.communityId).catch(() => {});
+      void refreshLinks();
+    }
+  }, [user?.communityId, hydrated, refreshLinks]);
+
+  // Comunidade ativa órfã (vínculo revogado): volta para a principal
+  useEffect(() => {
+    if (!hydrated || !activeId || !user?.communityId) return;
+    if (activeId === user.communityId) return;
+    if (!links.some((link) => link.communityId === activeId)) {
+      setActiveId(user.communityId);
+      AsyncStorage.setItem(STORAGE_KEY, user.communityId).catch(() => {});
+    }
+  }, [links, activeId, user?.communityId, hydrated]);
 
   const setActiveCommunity = useCallback(async (communityId: string) => {
     setActiveId(communityId);
