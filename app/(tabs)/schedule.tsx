@@ -39,6 +39,22 @@ import {
 import { getEventTypeColor } from '../../src/services/eventService';
 import { formatToBrazilianDate } from '../../src/utils/dateUtils';
 
+/**
+ * Quando a escala tem startTime próprio (agenda fixa grava a data à meia-noite
+ * UTC), o dia é formatado em UTC e a hora vem crua do startTime — sem o fuso
+ * do aparelho deslocar dia/horário.
+ */
+const rosterWhenLabel = (roster: { eventDate: string; startTime?: string | null }): string => {
+  if (roster.startTime && /^\d{1,2}:\d{2}$/.test(roster.startTime)) {
+    const date = new Date(roster.eventDate);
+    const day = `${String(date.getUTCDate()).padStart(2, '0')}/${String(
+      date.getUTCMonth() + 1,
+    ).padStart(2, '0')}/${date.getUTCFullYear()}`;
+    return `${day} às ${roster.startTime}`;
+  }
+  return `${formatToBrazilianDate(roster.eventDate, 'dd/MM/yyyy')} às ${formatToBrazilianDate(roster.eventDate, 'HH:mm')}`;
+};
+
 export default function ScheduleScreen() {
   const { user } = useAuth();
   const colors = useColors();
@@ -348,13 +364,15 @@ export default function ScheduleScreen() {
           </View>
 
           <Text style={styles.rosterDate}>
-            {formatToBrazilianDate(roster.eventDate, 'dd/MM/yyyy')} às{' '}
-            {formatToBrazilianDate(roster.eventDate, 'HH:mm')}
+            {rosterWhenLabel(roster)}
           </Text>
           <Text style={styles.rosterLocation}>{roster.eventLocation}</Text>
 
           <View style={styles.rosterPastoralContainer}>
-            <Text style={styles.rosterPastoralName}>{roster.pastoralName}</Text>
+            <Text style={styles.rosterPastoralName}>
+              {roster.communityName ?? roster.pastoralName}
+              {roster.parishName ? ` · ${roster.parishName}` : ''}
+            </Text>
             <Text style={styles.rosterResponsibilities}>{roster.responsibilities}</Text>
             {roster.pastoralGroupName ? (
               <Text style={styles.rosterGroupLine}>

@@ -150,7 +150,7 @@ export default function HomeScreen() {
     const loadClergyMessages = async () => {
       setIsLoadingClergy(true);
       try {
-        const { messages, fromCache } = await getClergyMessages(5);
+        const { messages, fromCache } = await getClergyMessages(5, activeCommunityId);
         setClergyMessages(messages.slice(0, 3));
         setClergyFromCache(fromCache);
       } catch (error) {
@@ -903,13 +903,20 @@ export default function HomeScreen() {
                       link.communityId === activeCommunityId ? colors.primary : colors.textSecondary
                     }
                   />
-                  <Text
-                    style={{ flex: 1, fontSize: 15, fontWeight: '600', color: colors.text }}
-                    numberOfLines={1}
-                  >
-                    {link.community.name}
-                    {link.isPrimary ? ' (principal)' : ''}
-                  </Text>
+                  <View style={{ flex: 1 }}>
+                    <Text
+                      style={{ fontSize: 15, fontWeight: '600', color: colors.text }}
+                      numberOfLines={1}
+                    >
+                      {link.community.name}
+                      {link.isPrimary ? ' (principal)' : ''}
+                    </Text>
+                    {link.community.parish?.name ? (
+                      <Text style={{ fontSize: 12, color: colors.textSecondary }} numberOfLines={1}>
+                        {link.community.parish.name}
+                      </Text>
+                    ) : null}
+                  </View>
                   {link.communityId === activeCommunityId && (
                     <FontAwesome5 name="check" size={13} color={colors.primary} />
                   )}

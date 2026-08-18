@@ -207,12 +207,22 @@ export default function ProfileScreen() {
                 <React.Fragment key={link.id}>
                   {index > 0 && <View style={styles.divider} />}
                   <View style={styles.infoRow}>
-                    <Text style={[styles.infoValue, { textAlign: 'left', flex: 1, color: colors.text }]} numberOfLines={1}>
-                      {link.isPrimary ? '⭐ ' : '🔗 '}
-                      {link.community.name}
-                      {link.isPrimary ? ' · principal' : ''}
-                      {link.communityId === activeCommunityId ? ' · em foco' : ''}
-                    </Text>
+                    <View style={{ flex: 1 }}>
+                      <Text style={[styles.infoValue, { textAlign: 'left', color: colors.text }]} numberOfLines={1}>
+                        {link.isPrimary ? '⭐ ' : '🔗 '}
+                        {link.community.name}
+                        {link.isPrimary ? ' · principal' : ''}
+                        {link.communityId === activeCommunityId ? ' · em foco' : ''}
+                      </Text>
+                      {link.community.parish?.name ? (
+                        <Text
+                          style={[styles.infoValue, { textAlign: 'left', fontSize: 13 }]}
+                          numberOfLines={1}
+                        >
+                          {link.community.parish.name}
+                        </Text>
+                      ) : null}
+                    </View>
                     {!link.isPrimary && (
                       <TouchableOpacity
                         hitSlop={8}

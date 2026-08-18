@@ -31,10 +31,14 @@ export interface ClergyMessage {
  */
 export const getClergyMessages = async (
   limit = 20,
+  communityId?: string,
 ): Promise<{ messages: ClergyMessage[]; fromCache: boolean }> => {
   try {
-    const result = await cachedFetch<ClergyMessage[]>('clergy-messages', async () => {
-      const response = await api.get<ClergyMessage[]>('/clergy-messages', { params: { limit } });
+    const cacheKey = communityId ? `clergy-messages:${communityId}` : 'clergy-messages';
+    const result = await cachedFetch<ClergyMessage[]>(cacheKey, async () => {
+      const response = await api.get<ClergyMessage[]>('/clergy-messages', {
+        params: { limit, ...(communityId ? { communityId } : {}) },
+      });
       return response.data;
     });
     return { messages: result.data, fromCache: result.fromCache };

@@ -171,6 +171,11 @@ export interface UserRoster {
   eventLocation: string;
   eventType: EventType;
   pastoralName: string;
+  /** Comunidade real da escala (evento ou agenda fixa) */
+  communityName?: string | null;
+  parishName?: string | null;
+  /** HH:MM da escala sem evento (agenda fixa) — hora exibida sem fuso */
+  startTime?: string | null;
   responsibilities: string;
   confirmationStatus: RosterConfirmationStatus;
   checkedIn?: boolean;
@@ -737,7 +742,19 @@ export const getUserUpcomingRosters = async (userId: string): Promise<UserRoster
           eventDate: assignment.schedule?.date,
           eventLocation: assignment.schedule?.event?.location || 'A definir',
           eventType: assignment.schedule?.event?.type || 'OTHER',
-          pastoralName: assignment.schedule?.event?.community?.name || 'Comunidade',
+          pastoralName:
+            assignment.schedule?.community?.name ||
+            assignment.schedule?.event?.community?.name ||
+            'Comunidade',
+          communityName:
+            assignment.schedule?.community?.name ??
+            assignment.schedule?.event?.community?.name ??
+            null,
+          parishName:
+            assignment.schedule?.community?.parish?.name ??
+            assignment.schedule?.event?.community?.parish?.name ??
+            null,
+          startTime: assignment.schedule?.startTime ?? null,
           responsibilities: assignment.role || 'Participação',
           confirmationStatus,
           checkedIn: !!assignment.checkedIn,
