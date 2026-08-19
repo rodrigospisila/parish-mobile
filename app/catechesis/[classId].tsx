@@ -26,6 +26,7 @@ import {
   getCatechesisSessions,
   getSessionAttendance,
   markSessionAttendance,
+  notifyClassFamilies,
 } from '../../src/services/catechesisService';
 
 /** Estado cíclico da chamada: null (sem marcação) → presente → atrasado → ausente. */
@@ -76,6 +77,11 @@ export default function CatechesisClassScreen() {
   const [newDate, setNewDate] = useState(todayIso());
   const [newTopic, setNewTopic] = useState('');
   const [creating, setCreating] = useState(false);
+
+  // Mensagem às famílias
+  const [showNotify, setShowNotify] = useState(false);
+  const [notifyText, setNotifyText] = useState('');
+  const [notifying, setNotifying] = useState(false);
 
   // Chamada
   const [attendance, setAttendance] = useState<SessionAttendance | null>(null);
@@ -158,6 +164,25 @@ export default function CatechesisClassScreen() {
     }
   };
 
+  const handleNotifyFamilies = async () => {
+    if (!classId) return;
+    if (!notifyText.trim()) {
+      Alert.alert('Mensagem vazia', 'Escreva o aviso para as famílias.');
+      return;
+    }
+    setNotifying(true);
+    try {
+      const result = await notifyClassFamilies(classId, notifyText.trim());
+      setShowNotify(false);
+      setNotifyText('');
+      Alert.alert('Aviso enviado ✓', `${result.notified} família(s)/catequizando(s) notificados.`);
+    } catch (error: any) {
+      Alert.alert('Erro', error?.message ?? 'Não foi possível enviar o aviso.');
+    } finally {
+      setNotifying(false);
+    }
+  };
+
   const handleSaveAttendance = async () => {
     if (!attendance) return;
     const entries = attendance.students
@@ -225,10 +250,19 @@ export default function CatechesisClassScreen() {
             {/* Encontros */}
             <View style={styles.sectionHead}>
               <Text style={styles.sectionTitle}>Encontros</Text>
-              <TouchableOpacity style={styles.newBtn} onPress={() => setShowNewSession(true)}>
-                <FontAwesome5 name="plus" size={11} color="#fff" />
-                <Text style={styles.newBtnText}>Novo encontro</Text>
-              </TouchableOpacity>
+              <View style={{ flexDirection: 'row', gap: 8 }}>
+                <TouchableOpacity
+                  style={[styles.newBtn, { backgroundColor: colors.warning }]}
+                  onPress={() => setShowNotify(true)}
+                >
+                  <FontAwesome5 name="bullhorn" size={11} color="#fff" />
+                  <Text style={styles.newBtnText}>Avisar famílias</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.newBtn} onPress={() => setShowNewSession(true)}>
+                  <FontAwesome5 name="plus" size={11} color="#fff" />
+                  <Text style={styles.newBtnText}>Novo encontro</Text>
+                </TouchableOpacity>
+              </View>
             </View>
             {sessions.length === 0 ? (
               <Text style={styles.emptyLine}>
@@ -324,6 +358,34 @@ export default function CatechesisClassScreen() {
               <Text style={styles.primaryBtnText}>
                 {creating ? 'Criando...' : 'Criar e fazer a chamada'}
               </Text>
+            </TouchableOpacity>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* Aviso às famílias */}
+      <Modal visible={showNotify} transparent animationType="fade" onRequestClose={() => setShowNotify(false)}>
+        <Pressable style={styles.modalOverlay} onPress={() => setShowNotify(false)}>
+          <Pressable style={styles.modalCard} onPress={() => {}}>
+            <Text style={styles.modalTitle}>Avisar as famílias</Text>
+            <Text style={styles.fieldLabel}>
+              A mensagem chega por notificação aos catequizandos e responsáveis da turma.
+            </Text>
+            <TextInput
+              style={[styles.input, { minHeight: 90, textAlignVertical: 'top' }]}
+              value={notifyText}
+              onChangeText={setNotifyText}
+              placeholder="Ex.: Domingo o encontro será na capela. Trazer a Bíblia!"
+              placeholderTextColor={colors.textTertiary}
+              multiline
+              maxLength={500}
+            />
+            <TouchableOpacity
+              style={[styles.primaryBtn, notifying && { opacity: 0.6 }]}
+              disabled={notifying}
+              onPress={() => void handleNotifyFamilies()}
+            >
+              <Text style={styles.primaryBtnText}>{notifying ? 'Enviando...' : 'Enviar aviso'}</Text>
             </TouchableOpacity>
           </Pressable>
         </Pressable>

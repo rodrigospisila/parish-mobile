@@ -18,7 +18,7 @@ import { useNotifications } from '../../src/context/NotificationContext';
 import { authService } from '../../src/services/authService';
 import { useCommunity } from '../../src/context/CommunityContext';
 import { removeMyCommunity } from '../../src/services/memberCommunitiesService';
-import { getMyCatechesisClasses } from '../../src/services/catechesisService';
+import { getMyCatechesisClasses, getMyFamilyCatechesis } from '../../src/services/catechesisService';
 
 export default function ProfileScreen() {
   const { user, signOut, updateCommunity, refreshUser } = useAuth();
@@ -30,8 +30,11 @@ export default function ProfileScreen() {
   useFocusEffect(
     React.useCallback(() => {
       void refreshLinks();
-      getMyCatechesisClasses()
-        .then((classes) => setCatechesisClassCount(classes.length))
+      Promise.all([
+        getMyCatechesisClasses().catch(() => []),
+        getMyFamilyCatechesis().catch(() => []),
+      ])
+        .then(([classes, family]) => setCatechesisClassCount(classes.length + family.length))
         .catch(() => setCatechesisClassCount(0));
     }, [refreshLinks]),
   );
@@ -157,9 +160,7 @@ export default function ProfileScreen() {
               style={[styles.headerAction, { marginTop: 8 }]}
               onPress={() => router.push('/catechesis' as never)}
             >
-              <Text style={styles.headerActionText}>
-                Catequese · {catechesisClassCount === 1 ? 'minha turma' : 'minhas turmas'}
-              </Text>
+              <Text style={styles.headerActionText}>Catequese</Text>
             </TouchableOpacity>
           )}
         </View>

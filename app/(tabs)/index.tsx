@@ -18,7 +18,7 @@ import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { useAuth } from '../../src/context/AuthContext';
 import { useCommunity } from '../../src/context/CommunityContext';
-import { getMyCatechesisClasses } from '../../src/services/catechesisService';
+import { getMyCatechesisClasses, getMyFamilyCatechesis } from '../../src/services/catechesisService';
 import { useColors } from '../../src/context/ThemeContext';
 import { useNotifications } from '../../src/context/NotificationContext';
 import { FontAwesome5 } from '@expo/vector-icons';
@@ -772,8 +772,11 @@ export default function HomeScreen() {
       setCatechesisClassCount(0);
       return;
     }
-    getMyCatechesisClasses()
-      .then((classes) => setCatechesisClassCount(classes.length))
+    Promise.all([
+      getMyCatechesisClasses().catch(() => []),
+      getMyFamilyCatechesis().catch(() => []),
+    ])
+      .then(([classes, family]) => setCatechesisClassCount(classes.length + family.length))
       .catch(() => setCatechesisClassCount(0));
   }, [user?.id]);
 
@@ -1003,9 +1006,7 @@ export default function HomeScreen() {
             <View style={{ flex: 1 }}>
               <Text style={styles.nearbyTitle}>Catequese</Text>
               <Text style={styles.nearbySub} numberOfLines={1}>
-                {catechesisClassCount === 1
-                  ? 'Sua turma: encontros e chamada'
-                  : `Suas ${catechesisClassCount} turmas: encontros e chamada`}
+                Turmas, encontros, chamada e acompanhamento da família
               </Text>
             </View>
             <FontAwesome5 name="chevron-right" size={14} color={colors.textTertiary} />

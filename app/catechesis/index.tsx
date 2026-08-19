@@ -14,7 +14,9 @@ import { useFocusEffect } from '@react-navigation/native';
 import { FontAwesome5 } from '@expo/vector-icons';
 import { useColors } from '../../src/context/ThemeContext';
 import {
+  FamilyCatechesisItem,
   getMyCatechesisClasses,
+  getMyFamilyCatechesis,
   MyCatechesisClass,
 } from '../../src/services/catechesisService';
 
@@ -27,13 +29,19 @@ export default function CatechesisClassesScreen() {
   const styles = createStyles(colors);
 
   const [classes, setClasses] = useState<MyCatechesisClass[]>([]);
+  const [family, setFamily] = useState<FamilyCatechesisItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
   const load = useCallback(async (refresh = false) => {
     if (refresh) setIsRefreshing(true);
     try {
-      setClasses(await getMyCatechesisClasses());
+      const [mine, familyItems] = await Promise.all([
+        getMyCatechesisClasses(),
+        getMyFamilyCatechesis().catch(() => [] as FamilyCatechesisItem[]),
+      ]);
+      setClasses(mine);
+      setFamily(familyItems);
     } catch (error) {
       console.error('Erro ao carregar turmas de catequese:', error);
     } finally {
@@ -64,19 +72,73 @@ export default function CatechesisClassesScreen() {
         refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={() => load(true)} />}
         showsVerticalScrollIndicator={false}
       >
-        <Text style={styles.subtitle}>Suas turmas como catequista ou auxiliar.</Text>
-
         {isLoading ? (
           <ActivityIndicator size="large" color={colors.primary} style={{ marginTop: 40 }} />
-        ) : classes.length === 0 ? (
+        ) : classes.length === 0 && family.length === 0 ? (
           <View style={styles.empty}>
             <FontAwesome5 name="book-open" size={28} color={colors.textTertiary} />
             <Text style={styles.emptyText}>
-              Você ainda não está vinculado(a) a nenhuma turma. A coordenação da catequese faz o
-              vínculo pelo painel da paróquia.
+              Nenhuma turma por aqui ainda — vínculos de catequista e matrículas são feitos pela
+              coordenação da catequese.
             </Text>
           </View>
         ) : (
+          <>
+          {family.length > 0 && (
+            <>
+              <Text style={styles.sectionLabel}>Acompanhamento da família</Text>
+              {family.map((item) => (
+                <View key={item.enrollmentId} style={styles.card}>
+                  <View style={styles.cardTop}>
+                    <Text style={styles.cardTitle} numberOfLines={1}>
+                      {item.member.isSelf ? 'Você' : item.member.fullName}
+                    </Text>
+                    <Text
+                      style={[
+                        styles.roleChip,
+                        item.status === 'COMPLETED' && { color: colors.success, borderColor: colors.success },
+                      ]}
+                    >
+                      {item.status === 'COMPLETED' ? 'Concluído' : 'Ativo'}
+                    </Text>
+                  </View>
+                  <Text style={styles.cardStage} numberOfLines={1}>
+                    {item.class.stage.name} · {item.class.name}
+                  </Text>
+                  <Text style={styles.cardMeta} numberOfLines={1}>
+                    {item.class.community.name}
+                    {item.class.weekday !== null && item.class.weekday !== undefined
+                      ? ` · ${WEEKDAYS[item.class.weekday]}`
+                      : ''}
+                    {item.class.time ? ` às ${item.class.time}` : ''}
+                  </Text>
+                  <View style={styles.cardStats}>
+                    <Text style={styles.cardStat}>
+                      ✅ Presença: {item.attendanceRate === null ? '—' : `${item.attendanceRate}%`}
+                    </Text>
+                    {item.nextSession ? (
+                      <Text style={styles.cardStat}>
+                        📅 Próximo: {new Date(item.nextSession.date).getUTCDate().toString().padStart(2, '0')}/
+                        {(new Date(item.nextSession.date).getUTCMonth() + 1).toString().padStart(2, '0')}
+                      </Text>
+                    ) : null}
+                  </View>
+                  {item.pendingDocuments ? (
+                    <Text style={styles.pendingLine} numberOfLines={2}>
+                      📄 Documentos pendentes: {item.pendingDocuments}
+                    </Text>
+                  ) : null}
+                </View>
+              ))}
+            </>
+          )}
+
+          {classes.length > 0 && (
+            <Text style={styles.sectionLabel}>
+              {family.length > 0 ? 'Minhas turmas (catequista)' : 'Suas turmas como catequista ou auxiliar'}
+            </Text>
+          )}
+          {classes.length > 0 && (
           classes.map((klass) => (
             <TouchableOpacity
               key={klass.classId}
@@ -111,6 +173,8 @@ export default function CatechesisClassesScreen() {
               </View>
             </TouchableOpacity>
           ))
+          )}
+          </>
         )}
       </ScrollView>
     </SafeAreaView>
@@ -134,6 +198,16 @@ const createStyles = (colors: ReturnType<typeof useColors>) =>
     headerTitle: { fontSize: 17, fontWeight: '800', color: colors.text },
     scroll: { padding: 16, paddingBottom: 40, gap: 10 },
     subtitle: { fontSize: 13, color: colors.textSecondary, marginBottom: 4 },
+    sectionLabel: {
+      fontSize: 13,
+      fontWeight: '800',
+      color: colors.textSecondary,
+      textTransform: 'uppercase',
+      letterSpacing: 0.4,
+      marginTop: 6,
+      marginBottom: 2,
+    },
+    pendingLine: { fontSize: 12.5, color: colors.warning, marginTop: 6 },
     empty: { alignItems: 'center', gap: 12, marginTop: 48, paddingHorizontal: 24 },
     emptyText: { fontSize: 14, color: colors.textSecondary, textAlign: 'center', lineHeight: 20 },
     card: {

@@ -61,6 +61,49 @@ export interface SessionAttendance {
   students: SessionAttendanceStudent[];
 }
 
+export interface FamilyCatechesisItem {
+  enrollmentId: string;
+  member: { id: string; fullName: string; isSelf: boolean };
+  status: 'ACTIVE' | 'TRANSFERRED' | 'COMPLETED' | 'DROPPED_OUT';
+  pendingDocuments?: string | null;
+  attendanceRate: number | null;
+  sessions: number;
+  class: {
+    id: string;
+    name: string;
+    year: number;
+    weekday?: number | null;
+    time?: string | null;
+    room?: string | null;
+    stage: { id: string; name: string; sacramentType?: string | null };
+    community: { id: string; name: string };
+  };
+  nextSession: { date: string; topic?: string | null } | null;
+}
+
+/** Catequese da FAMÍLIA: matrículas próprias e dos dependentes. */
+export const getMyFamilyCatechesis = async (): Promise<FamilyCatechesisItem[]> => {
+  try {
+    const { data } = await api.get('/catechesis/my-family');
+    return data ?? [];
+  } catch (error) {
+    throw new Error(getErrorMessage(error));
+  }
+};
+
+/** Mensagem do catequista para as famílias da turma. */
+export const notifyClassFamilies = async (
+  classId: string,
+  message: string,
+): Promise<{ notified: number }> => {
+  try {
+    const { data } = await api.post(`/catechesis/classes/${classId}/notify`, { message });
+    return data;
+  } catch (error) {
+    throw new Error(getErrorMessage(error));
+  }
+};
+
 /** Turmas em que o usuário logado é catequista/auxiliar. */
 export const getMyCatechesisClasses = async (): Promise<MyCatechesisClass[]> => {
   try {
