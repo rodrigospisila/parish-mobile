@@ -175,7 +175,12 @@ export default function CatechesisClassScreen() {
       const result = await notifyClassFamilies(classId, notifyText.trim());
       setShowNotify(false);
       setNotifyText('');
-      Alert.alert('Aviso enviado ✓', `${result.notified} família(s)/catequizando(s) notificados.`);
+      Alert.alert(
+        result.notified > 0 ? 'Aviso enviado ✓' : 'Sem destinatários',
+        result.notified > 0
+          ? `Enviado para ${result.notified} conta(s) (catequizandos e responsáveis com app).`
+          : 'Nenhuma família desta turma tem conta no app para receber o aviso.',
+      );
     } catch (error: any) {
       Alert.alert('Erro', error?.message ?? 'Não foi possível enviar o aviso.');
     } finally {
