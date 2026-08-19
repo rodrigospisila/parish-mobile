@@ -18,15 +18,21 @@ import { useNotifications } from '../../src/context/NotificationContext';
 import { authService } from '../../src/services/authService';
 import { useCommunity } from '../../src/context/CommunityContext';
 import { removeMyCommunity } from '../../src/services/memberCommunitiesService';
+import { getMyCatechesisClasses } from '../../src/services/catechesisService';
 
 export default function ProfileScreen() {
   const { user, signOut, updateCommunity, refreshUser } = useAuth();
   const { links, activeCommunityId, setActiveCommunity, refreshLinks } = useCommunity();
 
+  const [catechesisClassCount, setCatechesisClassCount] = React.useState(0);
+
   // Revalida os vínculos ao abrir o perfil (cobre revogações feitas pela web)
   useFocusEffect(
     React.useCallback(() => {
       void refreshLinks();
+      getMyCatechesisClasses()
+        .then((classes) => setCatechesisClassCount(classes.length))
+        .catch(() => setCatechesisClassCount(0));
     }, [refreshLinks]),
   );
   const router = useRouter();
@@ -146,6 +152,16 @@ export default function ProfileScreen() {
           <TouchableOpacity style={styles.headerAction} onPress={() => router.push('/member-availability')}>
             <Text style={styles.headerActionText}>Minha disponibilidade</Text>
           </TouchableOpacity>
+          {catechesisClassCount > 0 && (
+            <TouchableOpacity
+              style={[styles.headerAction, { marginTop: 8 }]}
+              onPress={() => router.push('/catechesis' as never)}
+            >
+              <Text style={styles.headerActionText}>
+                Catequese · {catechesisClassCount === 1 ? 'minha turma' : 'minhas turmas'}
+              </Text>
+            </TouchableOpacity>
+          )}
         </View>
 
         <View style={styles.section}>

@@ -18,6 +18,7 @@ import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { useAuth } from '../../src/context/AuthContext';
 import { useCommunity } from '../../src/context/CommunityContext';
+import { getMyCatechesisClasses } from '../../src/services/catechesisService';
 import { useColors } from '../../src/context/ThemeContext';
 import { useNotifications } from '../../src/context/NotificationContext';
 import { FontAwesome5 } from '@expo/vector-icons';
@@ -134,6 +135,7 @@ export default function HomeScreen() {
   const [expandedReadings, setExpandedReadings] = useState<Record<string, boolean>>({});
   const [isLiturgyModalVisible, setIsLiturgyModalVisible] = useState(false);
   const [showCommunityPicker, setShowCommunityPicker] = useState(false);
+  const [catechesisClassCount, setCatechesisClassCount] = useState(0);
   const [massSchedules, setMassSchedules] = useState<MassSchedule[]>([]);
   const [favoriteMassScheduleIds, setFavoriteMassScheduleIds] = useState<string[]>([]);
   const [isLoadingMassSchedules, setIsLoadingMassSchedules] = useState(true);
@@ -765,6 +767,16 @@ export default function HomeScreen() {
     );
   };
 
+  useEffect(() => {
+    if (!user?.id) {
+      setCatechesisClassCount(0);
+      return;
+    }
+    getMyCatechesisClasses()
+      .then((classes) => setCatechesisClassCount(classes.length))
+      .catch(() => setCatechesisClassCount(0));
+  }, [user?.id]);
+
   const quickActions: { icon: string; label: string; route?: string; kind?: 'liturgy' }[] = [
     { icon: 'calendar-alt', label: 'Calendário', route: '/(tabs)/calendar' },
     { icon: 'clipboard-list', label: 'Minha Escala', route: '/(tabs)/schedule' },
@@ -977,6 +989,28 @@ export default function HomeScreen() {
           </View>
           <FontAwesome5 name="chevron-right" size={14} color={colors.textTertiary} />
         </TouchableOpacity>
+
+        {/* CATEQUESE — só para catequistas */}
+        {catechesisClassCount > 0 && (
+          <TouchableOpacity
+            style={styles.nearbyBanner}
+            activeOpacity={0.9}
+            onPress={() => router.push('/catechesis' as never)}
+          >
+            <View style={styles.nearbyIcon}>
+              <FontAwesome5 name="book-open" size={18} color={colors.primary} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.nearbyTitle}>Catequese</Text>
+              <Text style={styles.nearbySub} numberOfLines={1}>
+                {catechesisClassCount === 1
+                  ? 'Sua turma: encontros e chamada'
+                  : `Suas ${catechesisClassCount} turmas: encontros e chamada`}
+              </Text>
+            </View>
+            <FontAwesome5 name="chevron-right" size={14} color={colors.textTertiary} />
+          </TouchableOpacity>
+        )}
 
         {/* PRÓXIMA MISSA */}
         <View style={styles.section}>
