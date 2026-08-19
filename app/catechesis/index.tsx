@@ -74,16 +74,26 @@ export default function CatechesisClassesScreen() {
       >
         {isLoading ? (
           <ActivityIndicator size="large" color={colors.primary} style={{ marginTop: 40 }} />
-        ) : classes.length === 0 && family.length === 0 ? (
-          <View style={styles.empty}>
-            <FontAwesome5 name="book-open" size={28} color={colors.textTertiary} />
-            <Text style={styles.emptyText}>
-              Nenhuma turma por aqui ainda — vínculos de catequista e matrículas são feitos pela
-              coordenação da catequese.
-            </Text>
-          </View>
         ) : (
           <>
+          <TouchableOpacity
+            style={styles.applyBtn}
+            activeOpacity={0.85}
+            onPress={() => router.push('/catechesis/apply' as never)}
+          >
+            <FontAwesome5 name="user-plus" size={14} color="#fff" />
+            <Text style={styles.applyBtnText}>Inscrever na catequese</Text>
+          </TouchableOpacity>
+
+          {classes.length === 0 && family.length === 0 && (
+            <View style={styles.empty}>
+              <FontAwesome5 name="book-open" size={28} color={colors.textTertiary} />
+              <Text style={styles.emptyText}>
+                Nenhuma turma por aqui ainda — inscreva você ou seus filhos pelo botão acima, ou
+                procure a coordenação da catequese.
+              </Text>
+            </View>
+          )}
           {family.length > 0 && (
             <>
               <Text style={styles.sectionLabel}>Acompanhamento da família</Text>
@@ -97,9 +107,17 @@ export default function CatechesisClassesScreen() {
                       style={[
                         styles.roleChip,
                         item.status === 'COMPLETED' && { color: colors.success, borderColor: colors.success },
+                        item.status === 'PENDING_APPROVAL' && { color: colors.warning, borderColor: colors.warning },
+                        item.status === 'REJECTED' && { color: colors.error, borderColor: colors.error },
                       ]}
                     >
-                      {item.status === 'COMPLETED' ? 'Concluído' : 'Ativo'}
+                      {item.status === 'COMPLETED'
+                        ? 'Concluído'
+                        : item.status === 'PENDING_APPROVAL'
+                          ? 'Aguardando aprovação'
+                          : item.status === 'REJECTED'
+                            ? 'Não aprovada'
+                            : 'Ativo'}
                     </Text>
                   </View>
                   <Text style={styles.cardStage} numberOfLines={1}>
@@ -208,6 +226,16 @@ const createStyles = (colors: ReturnType<typeof useColors>) =>
       marginBottom: 2,
     },
     pendingLine: { fontSize: 12.5, color: colors.warning, marginTop: 6 },
+    applyBtn: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 8,
+      backgroundColor: colors.primary,
+      borderRadius: 12,
+      paddingVertical: 13,
+    },
+    applyBtnText: { color: '#fff', fontSize: 14.5, fontWeight: '800' },
     empty: { alignItems: 'center', gap: 12, marginTop: 48, paddingHorizontal: 24 },
     emptyText: { fontSize: 14, color: colors.textSecondary, textAlign: 'center', lineHeight: 20 },
     card: {

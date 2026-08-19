@@ -993,8 +993,8 @@ export default function HomeScreen() {
           <FontAwesome5 name="chevron-right" size={14} color={colors.textTertiary} />
         </TouchableOpacity>
 
-        {/* CATEQUESE — só para catequistas */}
-        {catechesisClassCount > 0 && (
+        {/* CATEQUESE — inscrição aberta a todos; turmas/chamada para catequistas */}
+        {(
           <TouchableOpacity
             style={styles.nearbyBanner}
             activeOpacity={0.9}
@@ -1006,7 +1006,9 @@ export default function HomeScreen() {
             <View style={{ flex: 1 }}>
               <Text style={styles.nearbyTitle}>Catequese</Text>
               <Text style={styles.nearbySub} numberOfLines={1}>
-                Turmas, encontros, chamada e acompanhamento da família
+                {catechesisClassCount > 0
+                  ? 'Turmas, encontros, chamada e acompanhamento da família'
+                  : 'Inscrições e acompanhamento da família'}
               </Text>
             </View>
             <FontAwesome5 name="chevron-right" size={14} color={colors.textTertiary} />

@@ -27,6 +27,8 @@ import {
   getSessionAttendance,
   markSessionAttendance,
   notifyClassFamilies,
+  approveCatechesisEnrollment,
+  rejectCatechesisEnrollment,
 } from '../../src/services/catechesisService';
 
 /** Estado cíclico da chamada: null (sem marcação) → presente → atrasado → ausente. */
@@ -119,6 +121,60 @@ export default function CatechesisClassScreen() {
     () => (report?.students ?? []).filter((student) => student.status === 'ACTIVE'),
     [report],
   );
+  const pendingStudents = useMemo(
+    () => (report?.students ?? []).filter((student) => student.status === 'PENDING_APPROVAL'),
+    [report],
+  );
+  const [decidingId, setDecidingId] = useState<string | null>(null);
+
+  const handleApprove = (enrollmentId: string, name: string) => {
+    Alert.alert('Aprovar matrícula', `Confirmar a matrícula de ${name} nesta turma?`, [
+      { text: 'Cancelar', style: 'cancel' },
+      {
+        text: 'Aprovar',
+        onPress: () => {
+          void (async () => {
+            setDecidingId(enrollmentId);
+            try {
+              await approveCatechesisEnrollment(enrollmentId);
+              await load(true);
+            } catch (error: any) {
+              Alert.alert('Erro', error?.message ?? 'Não foi possível aprovar.');
+            } finally {
+              setDecidingId(null);
+            }
+          })();
+        },
+      },
+    ]);
+  };
+
+  const handleReject = (enrollmentId: string, name: string) => {
+    Alert.alert(
+      'Recusar inscrição',
+      `A família de ${name} será avisada. Para registrar o motivo, use a área da coordenação na web.`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Recusar',
+          style: 'destructive',
+          onPress: () => {
+            void (async () => {
+              setDecidingId(enrollmentId);
+              try {
+                await rejectCatechesisEnrollment(enrollmentId);
+                await load(true);
+              } catch (error: any) {
+                Alert.alert('Erro', error?.message ?? 'Não foi possível recusar.');
+              } finally {
+                setDecidingId(null);
+              }
+            })();
+          },
+        },
+      ],
+    );
+  };
   const averageAttendance = useMemo(() => {
     const rates = activeStudents
       .map((student) => student.attendanceRate)
@@ -251,6 +307,44 @@ export default function CatechesisClassScreen() {
                 <Text style={styles.kpiLabel}>Desistências</Text>
               </View>
             </View>
+
+            {/* Inscrições aguardando aprovação */}
+            {pendingStudents.length > 0 && (
+              <>
+                <Text style={[styles.sectionTitle, { marginBottom: 8 }]}>
+                  Inscrições aguardando ({pendingStudents.length})
+                </Text>
+                {pendingStudents.map((student) => (
+                  <View key={student.enrollmentId} style={styles.pendingCard}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.studentName} numberOfLines={1}>
+                        {student.member.fullName}
+                      </Text>
+                      {student.pendingDocuments ? (
+                        <Text style={styles.studentPending} numberOfLines={1}>
+                          📄 Pendente: {student.pendingDocuments}
+                        </Text>
+                      ) : null}
+                    </View>
+                    <TouchableOpacity
+                      style={[styles.decisionBtn, { backgroundColor: colors.success }]}
+                      disabled={decidingId === student.enrollmentId}
+                      onPress={() => handleApprove(student.enrollmentId, student.member.fullName)}
+                    >
+                      <FontAwesome5 name="check" size={13} color="#fff" />
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.decisionBtn, { backgroundColor: colors.error ?? '#d9534f' }]}
+                      disabled={decidingId === student.enrollmentId}
+                      onPress={() => handleReject(student.enrollmentId, student.member.fullName)}
+                    >
+                      <FontAwesome5 name="times" size={13} color="#fff" />
+                    </TouchableOpacity>
+                  </View>
+                ))}
+                <View style={{ height: 14 }} />
+              </>
+            )}
 
             {/* Encontros */}
             <View style={styles.sectionHead}>
@@ -525,6 +619,25 @@ const createStyles = (colors: ReturnType<typeof useColors>) =>
     sessionDate: { fontSize: 14, fontWeight: '700', color: colors.text },
     sessionMeta: { fontSize: 12.5, color: colors.textSecondary, marginTop: 2 },
 
+    pendingCard: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      backgroundColor: colors.card,
+      borderRadius: 12,
+      borderWidth: 1.5,
+      borderColor: colors.warning,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      marginBottom: 8,
+    },
+    decisionBtn: {
+      width: 38,
+      height: 38,
+      borderRadius: 10,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
     studentRow: {
       flexDirection: 'row',
       alignItems: 'center',

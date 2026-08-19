@@ -155,14 +155,12 @@ export default function ProfileScreen() {
           <TouchableOpacity style={styles.headerAction} onPress={() => router.push('/member-availability')}>
             <Text style={styles.headerActionText}>Minha disponibilidade</Text>
           </TouchableOpacity>
-          {catechesisClassCount > 0 && (
-            <TouchableOpacity
-              style={[styles.headerAction, { marginTop: 8 }]}
-              onPress={() => router.push('/catechesis' as never)}
-            >
-              <Text style={styles.headerActionText}>Catequese</Text>
-            </TouchableOpacity>
-          )}
+          <TouchableOpacity
+            style={[styles.headerAction, { marginTop: 8 }]}
+            onPress={() => router.push('/catechesis' as never)}
+          >
+            <Text style={styles.headerActionText}>Catequese</Text>
+          </TouchableOpacity>
         </View>
 
         <View style={styles.section}>
