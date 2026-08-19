@@ -37,6 +37,7 @@ export default function CatechesisApplyScreen() {
   const [classes, setClasses] = useState<CatechesisOpenClass[]>([]);
   const [dependents, setDependents] = useState<MyDependent[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const [selectedClass, setSelectedClass] = useState<CatechesisOpenClass | null>(null);
   const [who, setWho] = useState<Who>({ kind: 'self' });
@@ -47,6 +48,7 @@ export default function CatechesisApplyScreen() {
 
   const load = useCallback(async () => {
     setIsLoading(true);
+    setLoadError(null);
     try {
       const [openClasses, myDependents] = await Promise.all([
         getCatechesisOpenClasses(activeCommunityId),
@@ -54,9 +56,10 @@ export default function CatechesisApplyScreen() {
       ]);
       setClasses(openClasses);
       setDependents(myDependents);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Erro ao carregar turmas abertas:', error);
       setClasses([]);
+      setLoadError(error?.message ?? 'Não foi possível carregar as turmas.');
     } finally {
       setIsLoading(false);
     }
@@ -78,9 +81,17 @@ export default function CatechesisApplyScreen() {
         Alert.alert('Nome do catequizando', 'Informe o nome completo.');
         return;
       }
-      if (childBirth.trim() && !/^\d{4}-\d{2}-\d{2}$/.test(childBirth.trim())) {
-        Alert.alert('Data de nascimento', 'Use o formato AAAA-MM-DD (ou deixe em branco).');
-        return;
+      if (childBirth.trim()) {
+        const raw = childBirth.trim();
+        const parsed = new Date(raw);
+        const valid =
+          /^\d{4}-\d{2}-\d{2}$/.test(raw) &&
+          !Number.isNaN(parsed.getTime()) &&
+          parsed.toISOString().slice(0, 10) === raw;
+        if (!valid) {
+          Alert.alert('Data de nascimento', 'Data inválida — use AAAA-MM-DD (ou deixe em branco).');
+          return;
+        }
       }
     }
     if (!consent) {
@@ -127,6 +138,14 @@ export default function CatechesisApplyScreen() {
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
         {isLoading ? (
           <ActivityIndicator size="large" color={colors.primary} style={{ marginTop: 40 }} />
+        ) : loadError ? (
+          <View style={styles.empty}>
+            <FontAwesome5 name="exclamation-circle" size={26} color={colors.textTertiary} />
+            <Text style={styles.emptyText}>{loadError}</Text>
+            <TouchableOpacity style={styles.primaryBtn} onPress={() => void load()}>
+              <Text style={styles.primaryBtnText}>Tentar de novo</Text>
+            </TouchableOpacity>
+          </View>
         ) : classes.length === 0 ? (
           <View style={styles.empty}>
             <FontAwesome5 name="book-open" size={26} color={colors.textTertiary} />
