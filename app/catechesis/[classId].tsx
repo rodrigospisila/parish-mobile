@@ -174,7 +174,10 @@ export default function CatechesisClassScreen() {
   );
 
   const activeStudents = useMemo(
-    () => (report?.students ?? []).filter((student) => student.status === 'ACTIVE'),
+    () =>
+      (report?.students ?? []).filter(
+        (student) => student.status === 'ACTIVE' || student.status === 'COMPLETED',
+      ),
     [report],
   );
   const pendingStudents = useMemo(
@@ -466,6 +469,7 @@ export default function CatechesisClassScreen() {
                 <View style={{ flex: 1 }}>
                   <Text style={styles.studentName} numberOfLines={1}>
                     {student.member.fullName}
+                    {student.status === 'COMPLETED' ? '  ✅' : ''}
                   </Text>
                   {student.pendingDocuments ? (
                     <Text style={styles.studentPending} numberOfLines={1}>
@@ -599,6 +603,9 @@ export default function CatechesisClassScreen() {
                   key={value}
                   style={[styles.ratingChip, assessRating === value && styles.ratingChipSelected]}
                   onPress={() => setAssessRating(assessRating === value ? null : value)}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: assessRating === value }}
+                  accessibilityLabel={`Conceito ${RATING_LABELS[value]}`}
                 >
                   <Text
                     style={[styles.ratingChipText, assessRating === value && { color: '#fff' }]}

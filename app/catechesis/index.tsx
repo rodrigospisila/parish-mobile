@@ -8,6 +8,8 @@ import {
   ActivityIndicator,
   RefreshControl,
   Alert,
+  Modal,
+  Pressable,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Stack, useRouter } from 'expo-router';
@@ -272,13 +274,18 @@ export default function CatechesisClassesScreen() {
         )}
       </ScrollView>
 
-      {/* Pareceres (leitura da família) */}
-      {assessView && (
-        <View style={styles.assessOverlay}>
-          <View style={styles.assessSheet}>
-            <Text style={styles.assessTitle}>Pareceres · {assessView.name}</Text>
+      {/* Pareceres (leitura da família) — Modal trata o voltar do Android */}
+      <Modal
+        visible={!!assessView}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setAssessView(null)}
+      >
+        <Pressable style={styles.assessOverlay} onPress={() => setAssessView(null)}>
+          <Pressable style={styles.assessSheet} onPress={() => {}}>
+            <Text style={styles.assessTitle}>Pareceres · {assessView?.name ?? ''}</Text>
             <ScrollView style={{ maxHeight: 380 }} showsVerticalScrollIndicator={false}>
-              {assessView.items.map((assessment) => (
+              {(assessView?.items ?? []).map((assessment) => (
                 <View key={assessment.id} style={styles.assessCard}>
                   <Text style={styles.assessPeriod}>
                     {assessment.period}
@@ -291,9 +298,9 @@ export default function CatechesisClassesScreen() {
             <TouchableOpacity style={styles.assessClose} onPress={() => setAssessView(null)}>
               <Text style={styles.assessCloseText}>Fechar</Text>
             </TouchableOpacity>
-          </View>
-        </View>
-      )}
+          </Pressable>
+        </Pressable>
+      </Modal>
     </SafeAreaView>
   );
 }
