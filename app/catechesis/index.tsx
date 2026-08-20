@@ -7,6 +7,7 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   RefreshControl,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Stack, useRouter } from 'expo-router';
@@ -18,6 +19,8 @@ import {
   getMyCatechesisClasses,
   getMyFamilyCatechesis,
   MyCatechesisClass,
+  shareCatechesisCertificate,
+  shareCatechesisDeclaration,
 } from '../../src/services/catechesisService';
 
 const WEEKDAYS = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
@@ -32,6 +35,22 @@ export default function CatechesisClassesScreen() {
   const [family, setFamily] = useState<FamilyCatechesisItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [downloadingId, setDownloadingId] = useState<string | null>(null);
+
+  const handleShareDocument = async (
+    enrollmentId: string,
+    kind: 'certificate' | 'declaration',
+  ) => {
+    setDownloadingId(enrollmentId);
+    try {
+      if (kind === 'certificate') await shareCatechesisCertificate(enrollmentId);
+      else await shareCatechesisDeclaration(enrollmentId);
+    } catch (error: any) {
+      Alert.alert('Documento', error?.message ?? 'Não foi possível gerar o documento.');
+    } finally {
+      setDownloadingId(null);
+    }
+  };
 
   const load = useCallback(async (refresh = false) => {
     if (refresh) setIsRefreshing(true);
@@ -146,6 +165,28 @@ export default function CatechesisClassesScreen() {
                       📄 Documentos pendentes: {item.pendingDocuments}
                     </Text>
                   ) : null}
+                  {item.status === 'COMPLETED' && (
+                    <TouchableOpacity
+                      style={styles.docBtn}
+                      disabled={downloadingId === item.enrollmentId}
+                      onPress={() => void handleShareDocument(item.enrollmentId, 'certificate')}
+                    >
+                      <Text style={styles.docBtnText}>
+                        {downloadingId === item.enrollmentId ? 'Gerando...' : '🎓 Baixar certificado'}
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+                  {item.status === 'ACTIVE' && (
+                    <TouchableOpacity
+                      style={styles.docBtn}
+                      disabled={downloadingId === item.enrollmentId}
+                      onPress={() => void handleShareDocument(item.enrollmentId, 'declaration')}
+                    >
+                      <Text style={styles.docBtnText}>
+                        {downloadingId === item.enrollmentId ? 'Gerando...' : '📄 Declaração de matrícula'}
+                      </Text>
+                    </TouchableOpacity>
+                  )}
                 </View>
               ))}
             </>
@@ -236,6 +277,16 @@ const createStyles = (colors: ReturnType<typeof useColors>) =>
       paddingVertical: 13,
     },
     applyBtnText: { color: '#fff', fontSize: 14.5, fontWeight: '800' },
+    docBtn: {
+      alignSelf: 'flex-start',
+      borderWidth: 1.5,
+      borderColor: colors.primary,
+      borderRadius: 10,
+      paddingHorizontal: 12,
+      paddingVertical: 7,
+      marginTop: 8,
+    },
+    docBtnText: { color: colors.primary, fontSize: 13, fontWeight: '700' },
     empty: { alignItems: 'center', gap: 12, marginTop: 48, paddingHorizontal: 24 },
     emptyText: { fontSize: 14, color: colors.textSecondary, textAlign: 'center', lineHeight: 20 },
     card: {

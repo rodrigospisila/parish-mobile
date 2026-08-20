@@ -1,4 +1,6 @@
-import api, { getErrorMessage } from '../config/api';
+import * as FileSystem from 'expo-file-system/legacy';
+import * as Sharing from 'expo-sharing';
+import api, { getAccessToken, getErrorMessage } from '../config/api';
 
 // ============================================
 // CATEQUESE — app do catequista (Fase 1)
@@ -263,3 +265,35 @@ export const rejectCatechesisEnrollment = async (
     throw new Error(getErrorMessage(error));
   }
 };
+
+// ============================================
+// PAPELADA EM PDF (Fase 4)
+// ============================================
+
+/**
+ * Baixa um PDF autenticado da catequese e abre a folha de compartilhamento
+ * (salvar em Arquivos, enviar no WhatsApp, imprimir).
+ */
+export const downloadCatechesisPdf = async (path: string, filename: string): Promise<void> => {
+  const token = await getAccessToken();
+  const base = api.defaults.baseURL ?? '';
+  const target = `${FileSystem.cacheDirectory}${filename}`;
+  const result = await FileSystem.downloadAsync(`${base}${path}`, target, {
+    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+  });
+  if (result.status !== 200) {
+    throw new Error('Não foi possível gerar o documento — tente novamente.');
+  }
+  if (!(await Sharing.isAvailableAsync())) {
+    throw new Error('Compartilhamento indisponível neste dispositivo.');
+  }
+  await Sharing.shareAsync(result.uri, { mimeType: 'application/pdf', dialogTitle: filename });
+};
+
+/** Certificado de conclusão do catequizando (família ou equipe). */
+export const shareCatechesisCertificate = (enrollmentId: string) =>
+  downloadCatechesisPdf(`/catechesis/enrollments/${enrollmentId}/certificate.pdf`, 'certificado-catequese.pdf');
+
+/** Declaração de matrícula/frequência (família ou equipe). */
+export const shareCatechesisDeclaration = (enrollmentId: string) =>
+  downloadCatechesisPdf(`/catechesis/enrollments/${enrollmentId}/declaration.pdf`, 'declaracao-matricula.pdf');
