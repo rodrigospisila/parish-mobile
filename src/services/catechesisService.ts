@@ -270,17 +270,31 @@ export const rejectCatechesisEnrollment = async (
 // PAPELADA EM PDF (Fase 4)
 // ============================================
 
+const attemptPdfDownload = async (url: string, target: string) => {
+  const token = await getAccessToken();
+  return FileSystem.downloadAsync(url, target, {
+    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+  });
+};
+
 /**
  * Baixa um PDF autenticado da catequese e abre a folha de compartilhamento
  * (salvar em Arquivos, enviar no WhatsApp, imprimir).
  */
 export const downloadCatechesisPdf = async (path: string, filename: string): Promise<void> => {
-  const token = await getAccessToken();
   const base = api.defaults.baseURL ?? '';
   const target = `${FileSystem.cacheDirectory}${filename}`;
-  const result = await FileSystem.downloadAsync(`${base}${path}`, target, {
-    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-  });
+  let result = await attemptPdfDownload(`${base}${path}`, target);
+  if (result.status === 401) {
+    // downloadAsync não passa pelo interceptor do axios — força o refresh da
+    // sessão com uma chamada leve e tenta uma única vez com o token novo
+    try {
+      await api.get('/catechesis/my-family');
+    } catch {
+      throw new Error('Sessão expirada — faça login novamente.');
+    }
+    result = await attemptPdfDownload(`${base}${path}`, target);
+  }
   if (result.status !== 200) {
     throw new Error('Não foi possível gerar o documento — tente novamente.');
   }
@@ -290,10 +304,24 @@ export const downloadCatechesisPdf = async (path: string, filename: string): Pro
   await Sharing.shareAsync(result.uri, { mimeType: 'application/pdf', dialogTitle: filename });
 };
 
+const pdfSlug = (value: string) =>
+  value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-zA-Z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .toLowerCase() || 'catequizando';
+
 /** Certificado de conclusão do catequizando (família ou equipe). */
-export const shareCatechesisCertificate = (enrollmentId: string) =>
-  downloadCatechesisPdf(`/catechesis/enrollments/${enrollmentId}/certificate.pdf`, 'certificado-catequese.pdf');
+export const shareCatechesisCertificate = (enrollmentId: string, memberName?: string) =>
+  downloadCatechesisPdf(
+    `/catechesis/enrollments/${enrollmentId}/certificate.pdf`,
+    `certificado-${memberName ? pdfSlug(memberName) : enrollmentId.slice(-8)}.pdf`,
+  );
 
 /** Declaração de matrícula/frequência (família ou equipe). */
-export const shareCatechesisDeclaration = (enrollmentId: string) =>
-  downloadCatechesisPdf(`/catechesis/enrollments/${enrollmentId}/declaration.pdf`, 'declaracao-matricula.pdf');
+export const shareCatechesisDeclaration = (enrollmentId: string, memberName?: string) =>
+  downloadCatechesisPdf(
+    `/catechesis/enrollments/${enrollmentId}/declaration.pdf`,
+    `declaracao-${memberName ? pdfSlug(memberName) : enrollmentId.slice(-8)}.pdf`,
+  );

@@ -40,11 +40,13 @@ export default function CatechesisClassesScreen() {
   const handleShareDocument = async (
     enrollmentId: string,
     kind: 'certificate' | 'declaration',
+    memberName: string,
   ) => {
+    if (downloadingId) return; // um download por vez — evita misturar arquivos
     setDownloadingId(enrollmentId);
     try {
-      if (kind === 'certificate') await shareCatechesisCertificate(enrollmentId);
-      else await shareCatechesisDeclaration(enrollmentId);
+      if (kind === 'certificate') await shareCatechesisCertificate(enrollmentId, memberName);
+      else await shareCatechesisDeclaration(enrollmentId, memberName);
     } catch (error: any) {
       Alert.alert('Documento', error?.message ?? 'Não foi possível gerar o documento.');
     } finally {
@@ -169,7 +171,7 @@ export default function CatechesisClassesScreen() {
                     <TouchableOpacity
                       style={styles.docBtn}
                       disabled={downloadingId === item.enrollmentId}
-                      onPress={() => void handleShareDocument(item.enrollmentId, 'certificate')}
+                      onPress={() => void handleShareDocument(item.enrollmentId, 'certificate', item.member.fullName)}
                     >
                       <Text style={styles.docBtnText}>
                         {downloadingId === item.enrollmentId ? 'Gerando...' : '🎓 Baixar certificado'}
@@ -180,7 +182,7 @@ export default function CatechesisClassesScreen() {
                     <TouchableOpacity
                       style={styles.docBtn}
                       disabled={downloadingId === item.enrollmentId}
-                      onPress={() => void handleShareDocument(item.enrollmentId, 'declaration')}
+                      onPress={() => void handleShareDocument(item.enrollmentId, 'declaration', item.member.fullName)}
                     >
                       <Text style={styles.docBtnText}>
                         {downloadingId === item.enrollmentId ? 'Gerando...' : '📄 Declaração de matrícula'}
