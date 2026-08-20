@@ -49,6 +49,8 @@ export interface CatechesisStudentReport {
 }
 
 export interface CatechesisClassReport {
+  /** Equipe da turma (catequistas e auxiliares) */
+  catechists: Array<{ memberId: string; fullName: string; role: string }>;
   total: number;
   active: number;
   dropouts: number;
