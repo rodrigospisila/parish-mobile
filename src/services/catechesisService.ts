@@ -91,6 +91,14 @@ export interface FamilyCatechesisItem {
     community: { id: string; name: string };
   };
   nextSession: { date: string; topic?: string | null } | null;
+  /** Taxas de material da turma com a situação desta matrícula (Fase 5) */
+  fees?: Array<{
+    id: string;
+    description: string;
+    amount: number;
+    dueDate?: string | null;
+    status: 'PENDING' | 'PAID' | 'WAIVED';
+  }>;
 }
 
 /** Catequese da FAMÍLIA: matrículas próprias e dos dependentes. */
@@ -261,6 +269,52 @@ export const rejectCatechesisEnrollment = async (
 ): Promise<void> => {
   try {
     await api.patch(`/catechesis/enrollments/${enrollmentId}/reject`, { reason });
+  } catch (error) {
+    throw new Error(getErrorMessage(error));
+  }
+};
+
+// ============================================
+// PARECERES POR PERÍODO (Fase 5)
+// ============================================
+
+export type CatechesisRating = 'EXCELLENT' | 'GOOD' | 'REGULAR' | 'NEEDS_ATTENTION';
+
+export const RATING_LABELS: Record<CatechesisRating, string> = {
+  EXCELLENT: 'Ótimo',
+  GOOD: 'Bom',
+  REGULAR: 'Regular',
+  NEEDS_ATTENTION: 'Precisa de atenção',
+};
+
+export interface CatechesisAssessment {
+  id: string;
+  period: string;
+  rating?: CatechesisRating | null;
+  notes: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Pareceres da matrícula (equipe da turma ou a própria família). */
+export const getEnrollmentAssessments = async (
+  enrollmentId: string,
+): Promise<CatechesisAssessment[]> => {
+  try {
+    const { data } = await api.get(`/catechesis/enrollments/${enrollmentId}/assessments`);
+    return data ?? [];
+  } catch (error) {
+    throw new Error(getErrorMessage(error));
+  }
+};
+
+/** Cria/atualiza o parecer do período (catequista da turma). */
+export const upsertEnrollmentAssessment = async (
+  enrollmentId: string,
+  dto: { period: string; rating?: CatechesisRating; notes: string },
+): Promise<void> => {
+  try {
+    await api.post(`/catechesis/enrollments/${enrollmentId}/assessments`, dto);
   } catch (error) {
     throw new Error(getErrorMessage(error));
   }

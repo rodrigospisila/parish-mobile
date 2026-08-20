@@ -21,6 +21,9 @@ import {
   MyCatechesisClass,
   shareCatechesisCertificate,
   shareCatechesisDeclaration,
+  CatechesisAssessment,
+  RATING_LABELS,
+  getEnrollmentAssessments,
 } from '../../src/services/catechesisService';
 
 const WEEKDAYS = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
@@ -36,6 +39,20 @@ export default function CatechesisClassesScreen() {
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
+  const [assessView, setAssessView] = useState<{ name: string; items: CatechesisAssessment[] } | null>(null);
+
+  const openFamilyAssessments = async (enrollmentId: string, name: string) => {
+    try {
+      const items = await getEnrollmentAssessments(enrollmentId);
+      if (!items.length) {
+        Alert.alert('Pareceres', 'Nenhum parecer registrado ainda.');
+        return;
+      }
+      setAssessView({ name, items });
+    } catch (error: any) {
+      Alert.alert('Pareceres', error?.message ?? 'Não foi possível carregar.');
+    }
+  };
 
   const handleShareDocument = async (
     enrollmentId: string,
@@ -167,6 +184,22 @@ export default function CatechesisClassesScreen() {
                       📄 Documentos pendentes: {item.pendingDocuments}
                     </Text>
                   ) : null}
+                  {(item.fees ?? [])
+                    .filter((fee) => fee.status === 'PENDING')
+                    .map((fee) => (
+                      <Text key={fee.id} style={styles.pendingLine} numberOfLines={2}>
+                        💰 {fee.description}: R$ {fee.amount.toFixed(2).replace('.', ',')} — pendente
+                        (procure a coordenação)
+                      </Text>
+                    ))}
+                  {(item.status === 'ACTIVE' || item.status === 'COMPLETED') && (
+                    <TouchableOpacity
+                      style={styles.docBtn}
+                      onPress={() => void openFamilyAssessments(item.enrollmentId, item.member.isSelf ? 'Você' : item.member.fullName)}
+                    >
+                      <Text style={styles.docBtnText}>📝 Pareceres do catequista</Text>
+                    </TouchableOpacity>
+                  )}
                   {item.status === 'COMPLETED' && (
                     <TouchableOpacity
                       style={styles.docBtn}
@@ -238,6 +271,29 @@ export default function CatechesisClassesScreen() {
           </>
         )}
       </ScrollView>
+
+      {/* Pareceres (leitura da família) */}
+      {assessView && (
+        <View style={styles.assessOverlay}>
+          <View style={styles.assessSheet}>
+            <Text style={styles.assessTitle}>Pareceres · {assessView.name}</Text>
+            <ScrollView style={{ maxHeight: 380 }} showsVerticalScrollIndicator={false}>
+              {assessView.items.map((assessment) => (
+                <View key={assessment.id} style={styles.assessCard}>
+                  <Text style={styles.assessPeriod}>
+                    {assessment.period}
+                    {assessment.rating ? ` · ${RATING_LABELS[assessment.rating]}` : ''}
+                  </Text>
+                  <Text style={styles.assessNotes}>{assessment.notes}</Text>
+                </View>
+              ))}
+            </ScrollView>
+            <TouchableOpacity style={styles.assessClose} onPress={() => setAssessView(null)}>
+              <Text style={styles.assessCloseText}>Fechar</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
     </SafeAreaView>
   );
 }
@@ -289,6 +345,38 @@ const createStyles = (colors: ReturnType<typeof useColors>) =>
       marginTop: 8,
     },
     docBtnText: { color: colors.primary, fontSize: 13, fontWeight: '700' },
+    assessOverlay: {
+      position: 'absolute',
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      backgroundColor: 'rgba(0,0,0,0.45)',
+      justifyContent: 'center',
+      padding: 24,
+    },
+    assessSheet: { backgroundColor: colors.card, borderRadius: 16, padding: 18 },
+    assessTitle: { fontSize: 16.5, fontWeight: '800', color: colors.text, marginBottom: 10 },
+    assessCard: {
+      backgroundColor: colors.surface,
+      borderRadius: 12,
+      borderLeftWidth: 3,
+      borderLeftColor: colors.primary,
+      borderWidth: 1,
+      borderColor: colors.border,
+      padding: 12,
+      marginBottom: 8,
+    },
+    assessPeriod: { fontSize: 13.5, fontWeight: '800', color: colors.text },
+    assessNotes: { fontSize: 13.5, color: colors.textSecondary, marginTop: 4, lineHeight: 19 },
+    assessClose: {
+      backgroundColor: colors.primary,
+      borderRadius: 12,
+      paddingVertical: 12,
+      alignItems: 'center',
+      marginTop: 10,
+    },
+    assessCloseText: { color: '#fff', fontSize: 14.5, fontWeight: '800' },
     empty: { alignItems: 'center', gap: 12, marginTop: 48, paddingHorizontal: 24 },
     emptyText: { fontSize: 14, color: colors.textSecondary, textAlign: 'center', lineHeight: 20 },
     card: {

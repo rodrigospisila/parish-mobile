@@ -29,6 +29,11 @@ import {
   notifyClassFamilies,
   approveCatechesisEnrollment,
   rejectCatechesisEnrollment,
+  CatechesisAssessment,
+  CatechesisRating,
+  RATING_LABELS,
+  getEnrollmentAssessments,
+  upsertEnrollmentAssessment,
 } from '../../src/services/catechesisService';
 
 /** Estado cíclico da chamada: null (sem marcação) → presente → atrasado → ausente. */
@@ -84,6 +89,57 @@ export default function CatechesisClassScreen() {
   const [showNotify, setShowNotify] = useState(false);
   const [notifyText, setNotifyText] = useState('');
   const [notifying, setNotifying] = useState(false);
+
+  // Parecer por período (Fase 5)
+  const [assessTarget, setAssessTarget] = useState<{ enrollmentId: string; fullName: string } | null>(null);
+  const [assessList, setAssessList] = useState<CatechesisAssessment[]>([]);
+  const [assessPeriod, setAssessPeriod] = useState('');
+  const [assessRating, setAssessRating] = useState<CatechesisRating | null>(null);
+  const [assessNotes, setAssessNotes] = useState('');
+  const [savingAssess, setSavingAssess] = useState(false);
+
+  const openAssessments = async (enrollmentId: string, fullName: string) => {
+    try {
+      const list = await getEnrollmentAssessments(enrollmentId);
+      setAssessList(list);
+      setAssessPeriod('');
+      setAssessRating(null);
+      setAssessNotes('');
+      setAssessTarget({ enrollmentId, fullName });
+    } catch (error: any) {
+      Alert.alert('Pareceres', error?.message ?? 'Não foi possível carregar.');
+    }
+  };
+
+  const handleSaveAssessment = async () => {
+    if (!assessTarget) return;
+    if (assessPeriod.trim().length < 3) {
+      Alert.alert('Período', 'Informe o período (ex.: 1º semestre 2026).');
+      return;
+    }
+    if (assessNotes.trim().length < 5) {
+      Alert.alert('Parecer', 'Escreva o parecer (mínimo 5 caracteres).');
+      return;
+    }
+    setSavingAssess(true);
+    try {
+      await upsertEnrollmentAssessment(assessTarget.enrollmentId, {
+        period: assessPeriod.trim(),
+        rating: assessRating ?? undefined,
+        notes: assessNotes.trim(),
+      });
+      const list = await getEnrollmentAssessments(assessTarget.enrollmentId);
+      setAssessList(list);
+      setAssessPeriod('');
+      setAssessRating(null);
+      setAssessNotes('');
+      Alert.alert('Parecer salvo ✓', 'A família foi avisada.');
+    } catch (error: any) {
+      Alert.alert('Erro', error?.message ?? 'Não foi possível salvar.');
+    } finally {
+      setSavingAssess(false);
+    }
+  };
 
   // Chamada
   const [attendance, setAttendance] = useState<SessionAttendance | null>(null);
@@ -399,8 +455,14 @@ export default function CatechesisClassScreen() {
 
             {/* Catequizandos */}
             <Text style={[styles.sectionTitle, { marginTop: 18 }]}>Catequizandos</Text>
+            <Text style={styles.emptyLine}>Toque no catequizando para ver/escrever o parecer.</Text>
             {activeStudents.map((student) => (
-              <View key={student.enrollmentId} style={styles.studentRow}>
+              <TouchableOpacity
+                key={student.enrollmentId}
+                style={styles.studentRow}
+                activeOpacity={0.75}
+                onPress={() => void openAssessments(student.enrollmentId, student.member.fullName)}
+              >
                 <View style={{ flex: 1 }}>
                   <Text style={styles.studentName} numberOfLines={1}>
                     {student.member.fullName}
@@ -421,7 +483,7 @@ export default function CatechesisClassScreen() {
                 >
                   {student.attendanceRate === null ? '—' : `${student.attendanceRate}%`}
                 </Text>
-              </View>
+              </TouchableOpacity>
             ))}
           </>
         )}
@@ -488,6 +550,84 @@ export default function CatechesisClassScreen() {
             </TouchableOpacity>
           </Pressable>
         </Pressable>
+      </Modal>
+
+      {/* Parecer por período */}
+      <Modal
+        visible={!!assessTarget}
+        animationType="slide"
+        onRequestClose={() => setAssessTarget(null)}
+      >
+        <SafeAreaView style={styles.safe} edges={['top']}>
+          <View style={styles.header}>
+            <TouchableOpacity style={styles.headerBtn} onPress={() => setAssessTarget(null)} hitSlop={10}>
+              <FontAwesome5 name="times" size={18} color={colors.text} />
+            </TouchableOpacity>
+            <Text style={styles.headerTitle} numberOfLines={1}>
+              Parecer · {assessTarget?.fullName ?? ''}
+            </Text>
+            <View style={styles.headerBtn} />
+          </View>
+          <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+            {assessList.length === 0 ? (
+              <Text style={styles.emptyLine}>Nenhum parecer registrado ainda.</Text>
+            ) : (
+              assessList.map((assessment) => (
+                <View key={assessment.id} style={styles.assessCard}>
+                  <Text style={styles.assessPeriod}>
+                    {assessment.period}
+                    {assessment.rating ? ` · ${RATING_LABELS[assessment.rating]}` : ''}
+                  </Text>
+                  <Text style={styles.assessNotes}>{assessment.notes}</Text>
+                </View>
+              ))
+            )}
+
+            <Text style={[styles.sectionTitle, { marginTop: 16, marginBottom: 8 }]}>Novo parecer</Text>
+            <Text style={styles.fieldLabel}>Período *</Text>
+            <TextInput
+              style={styles.input}
+              value={assessPeriod}
+              onChangeText={setAssessPeriod}
+              placeholder="1º semestre 2026"
+              placeholderTextColor={colors.textTertiary}
+            />
+            <Text style={styles.fieldLabel}>Conceito (opcional)</Text>
+            <View style={styles.ratingRow}>
+              {(Object.keys(RATING_LABELS) as CatechesisRating[]).map((value) => (
+                <TouchableOpacity
+                  key={value}
+                  style={[styles.ratingChip, assessRating === value && styles.ratingChipSelected]}
+                  onPress={() => setAssessRating(assessRating === value ? null : value)}
+                >
+                  <Text
+                    style={[styles.ratingChipText, assessRating === value && { color: '#fff' }]}
+                    numberOfLines={1}
+                  >
+                    {RATING_LABELS[value]}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            <Text style={styles.fieldLabel}>Parecer * (a família vê no app)</Text>
+            <TextInput
+              style={[styles.input, { minHeight: 110, textAlignVertical: 'top' }]}
+              value={assessNotes}
+              onChangeText={setAssessNotes}
+              placeholder="Como o catequizando caminhou neste período..."
+              placeholderTextColor={colors.textTertiary}
+              multiline
+              maxLength={2000}
+            />
+            <TouchableOpacity
+              style={[styles.primaryBtn, savingAssess && { opacity: 0.6 }]}
+              disabled={savingAssess}
+              onPress={() => void handleSaveAssessment()}
+            >
+              <Text style={styles.primaryBtnText}>{savingAssess ? 'Salvando...' : 'Salvar parecer'}</Text>
+            </TouchableOpacity>
+          </ScrollView>
+        </SafeAreaView>
       </Modal>
 
       {/* Chamada */}
@@ -682,6 +822,29 @@ const createStyles = (colors: ReturnType<typeof useColors>) =>
       marginTop: 12,
     },
     primaryBtnText: { color: '#fff', fontSize: 15, fontWeight: '800' },
+
+    assessCard: {
+      backgroundColor: colors.card,
+      borderRadius: 12,
+      borderLeftWidth: 3,
+      borderLeftColor: colors.primary,
+      borderWidth: 1,
+      borderColor: colors.border,
+      padding: 12,
+      marginBottom: 8,
+    },
+    assessPeriod: { fontSize: 13.5, fontWeight: '800', color: colors.text },
+    assessNotes: { fontSize: 13.5, color: colors.textSecondary, marginTop: 4, lineHeight: 19 },
+    ratingRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 4, marginBottom: 4 },
+    ratingChip: {
+      borderWidth: 1.5,
+      borderColor: colors.border,
+      borderRadius: 999,
+      paddingHorizontal: 11,
+      paddingVertical: 6,
+    },
+    ratingChipSelected: { backgroundColor: colors.primary, borderColor: colors.primary },
+    ratingChipText: { fontSize: 12.5, fontWeight: '700', color: colors.textSecondary },
 
     callRow: {
       flexDirection: 'row',
