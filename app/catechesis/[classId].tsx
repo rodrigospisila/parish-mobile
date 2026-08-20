@@ -230,6 +230,33 @@ export default function CatechesisClassScreen() {
     }, [load]),
   );
 
+  // Com agenda anual gerada a lista fica longa — colapsada mostra só o que
+  // importa agora: os próximos encontros e os últimos realizados.
+  const [showAllSessions, setShowAllSessions] = useState(false);
+  const [studentFilter, setStudentFilter] = useState('');
+
+  const sessionGroups = useMemo(() => {
+    const now = new Date();
+    const todayUtc = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+    const upcoming = sessions
+      .filter((session) => new Date(session.date).getTime() >= todayUtc)
+      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+    const past = sessions
+      .filter((session) => new Date(session.date).getTime() < todayUtc)
+      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    return { upcoming, past };
+  }, [sessions]);
+
+  const collapsedSessions = useMemo(
+    () => ({
+      upcoming: sessionGroups.upcoming.slice(0, 2),
+      past: sessionGroups.past.slice(0, 2),
+    }),
+    [sessionGroups],
+  );
+  const hiddenCount =
+    sessions.length - collapsedSessions.upcoming.length - collapsedSessions.past.length;
+
   const activeStudents = useMemo(
     () =>
       (report?.students ?? []).filter(
@@ -241,6 +268,13 @@ export default function CatechesisClassScreen() {
     () => (report?.students ?? []).filter((student) => student.status === 'PENDING_APPROVAL'),
     [report],
   );
+  const filteredStudents = useMemo(() => {
+    const query = studentFilter.trim().toLowerCase();
+    if (!query) return activeStudents;
+    return activeStudents.filter((student) =>
+      student.member.fullName.toLowerCase().includes(query),
+    );
+  }, [activeStudents, studentFilter]);
   const [decidingId, setDecidingId] = useState<string | null>(null);
 
   const handleApprove = (enrollmentId: string, name: string) => {
@@ -298,6 +332,34 @@ export default function CatechesisClassScreen() {
     if (!rates.length) return null;
     return Math.round(rates.reduce((sum, rate) => sum + rate, 0) / rates.length);
   }, [activeStudents]);
+
+  const renderSessionCard = (session: CatechesisSessionSummary) => (
+    <TouchableOpacity
+      key={session.id}
+      style={styles.sessionCard}
+      activeOpacity={0.85}
+      onPress={() => void openAttendance(session.id)}
+    >
+      <View style={{ flex: 1 }}>
+        <Text style={styles.sessionDate}>
+          {dateLabel(session.date)}
+          {session.topic ? ` · ${session.topic}` : ''}
+        </Text>
+        <Text style={styles.sessionMeta}>
+          {session.marked === 0
+            ? 'Chamada não realizada'
+            : `${session.present}/${session.marked} presentes${
+                session.late ? ` · ${session.late} atrasado(s)` : ''
+              }`}
+        </Text>
+      </View>
+      <FontAwesome5
+        name={session.marked === 0 ? 'clipboard-list' : 'clipboard-check'}
+        size={16}
+        color={session.marked === 0 ? colors.warning : colors.success}
+      />
+    </TouchableOpacity>
+  );
 
   const openAttendance = async (sessionId: string) => {
     try {
@@ -495,34 +557,37 @@ export default function CatechesisClassScreen() {
               <Text style={styles.emptyLine}>
                 Nenhum encontro registrado — crie o primeiro e faça a chamada.
               </Text>
-            ) : (
-              sessions.map((session) => (
-                <TouchableOpacity
-                  key={session.id}
-                  style={styles.sessionCard}
-                  activeOpacity={0.85}
-                  onPress={() => void openAttendance(session.id)}
-                >
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.sessionDate}>
-                      {dateLabel(session.date)}
-                      {session.topic ? ` · ${session.topic}` : ''}
-                    </Text>
-                    <Text style={styles.sessionMeta}>
-                      {session.marked === 0
-                        ? 'Chamada não realizada'
-                        : `${session.present}/${session.marked} presentes${
-                            session.late ? ` · ${session.late} atrasado(s)` : ''
-                          }`}
-                    </Text>
-                  </View>
-                  <FontAwesome5
-                    name={session.marked === 0 ? 'clipboard-list' : 'clipboard-check'}
-                    size={16}
-                    color={session.marked === 0 ? colors.warning : colors.success}
-                  />
+            ) : showAllSessions ? (
+              <>
+                {[...sessionGroups.upcoming, ...sessionGroups.past].map((session) =>
+                  renderSessionCard(session),
+                )}
+                <TouchableOpacity style={styles.showAllBtn} onPress={() => setShowAllSessions(false)}>
+                  <Text style={styles.showAllText}>▲ Mostrar menos</Text>
                 </TouchableOpacity>
-              ))
+              </>
+            ) : (
+              <>
+                {collapsedSessions.upcoming.length > 0 && (
+                  <>
+                    <Text style={styles.groupLabel}>Próximos</Text>
+                    {collapsedSessions.upcoming.map((session) => renderSessionCard(session))}
+                  </>
+                )}
+                {collapsedSessions.past.length > 0 && (
+                  <>
+                    <Text style={styles.groupLabel}>Recentes</Text>
+                    {collapsedSessions.past.map((session) => renderSessionCard(session))}
+                  </>
+                )}
+                {hiddenCount > 0 && (
+                  <TouchableOpacity style={styles.showAllBtn} onPress={() => setShowAllSessions(true)}>
+                    <Text style={styles.showAllText}>
+                      ▼ Ver todos os {sessions.length} encontros
+                    </Text>
+                  </TouchableOpacity>
+                )}
+              </>
             )}
 
             {/* Catequizandos */}
@@ -536,7 +601,20 @@ export default function CatechesisClassScreen() {
               )}
             </View>
             <Text style={styles.emptyLine}>Toque no catequizando para ver/escrever o parecer.</Text>
-            {activeStudents.map((student) => (
+            {activeStudents.length > 8 && (
+              <TextInput
+                style={[styles.input, { marginBottom: 8 }]}
+                value={studentFilter}
+                onChangeText={setStudentFilter}
+                placeholder={`Buscar entre ${activeStudents.length} catequizandos...`}
+                placeholderTextColor={colors.textTertiary}
+                autoCapitalize="none"
+              />
+            )}
+            {filteredStudents.length === 0 && studentFilter.trim() !== '' && (
+              <Text style={styles.emptyLine}>Nenhum catequizando com esse nome.</Text>
+            )}
+            {filteredStudents.map((student) => (
               <TouchableOpacity
                 key={student.enrollmentId}
                 style={styles.studentRow}
@@ -945,6 +1023,25 @@ const createStyles = (colors: ReturnType<typeof useColors>) =>
       marginBottom: 8,
     },
     sessionDate: { fontSize: 14, fontWeight: '700', color: colors.text },
+    groupLabel: {
+      fontSize: 11.5,
+      fontWeight: '800',
+      color: colors.textTertiary,
+      textTransform: 'uppercase',
+      letterSpacing: 0.5,
+      marginBottom: 6,
+      marginTop: 2,
+    },
+    showAllBtn: {
+      alignItems: 'center',
+      paddingVertical: 10,
+      borderWidth: 1.5,
+      borderColor: colors.border,
+      borderStyle: 'dashed',
+      borderRadius: 12,
+      marginTop: 2,
+    },
+    showAllText: { fontSize: 13, fontWeight: '700', color: colors.textSecondary },
     sessionMeta: { fontSize: 12.5, color: colors.textSecondary, marginTop: 2 },
 
     pendingCard: {
