@@ -310,6 +310,19 @@ export const getEnrollmentAssessments = async (
   }
 };
 
+/** Parecer em LOTE: mesmo período/conceito/texto para vários da turma. */
+export const upsertClassAssessmentsBatch = async (
+  classId: string,
+  dto: { period: string; rating?: CatechesisRating; notes: string; enrollmentIds: string[] },
+): Promise<{ saved: number }> => {
+  try {
+    const { data } = await api.post(`/catechesis/classes/${classId}/assessments`, dto);
+    return data;
+  } catch (error) {
+    throw new Error(getErrorMessage(error));
+  }
+};
+
 /** Cria/atualiza o parecer do período (catequista da turma). */
 export const upsertEnrollmentAssessment = async (
   enrollmentId: string,

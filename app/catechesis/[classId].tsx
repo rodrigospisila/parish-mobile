@@ -34,6 +34,7 @@ import {
   RATING_LABELS,
   getEnrollmentAssessments,
   upsertEnrollmentAssessment,
+  upsertClassAssessmentsBatch,
 } from '../../src/services/catechesisService';
 
 /** Estado cíclico da chamada: null (sem marcação) → presente → atrasado → ausente. */
@@ -138,6 +139,62 @@ export default function CatechesisClassScreen() {
       Alert.alert('Erro', error?.message ?? 'Não foi possível salvar.');
     } finally {
       setSavingAssess(false);
+    }
+  };
+
+  // Parecer em lote (mesmo texto para vários)
+  const [showBatch, setShowBatch] = useState(false);
+  const [batchSelected, setBatchSelected] = useState<Record<string, boolean>>({});
+  const [batchPeriod, setBatchPeriod] = useState('');
+  const [batchRating, setBatchRating] = useState<CatechesisRating | null>(null);
+  const [batchNotes, setBatchNotes] = useState('');
+  const [savingBatch, setSavingBatch] = useState(false);
+
+  const openBatch = () => {
+    const selection: Record<string, boolean> = {};
+    (report?.students ?? [])
+      .filter((student) => student.status === 'ACTIVE' || student.status === 'COMPLETED')
+      .forEach((student) => {
+        selection[student.enrollmentId] = student.status === 'ACTIVE';
+      });
+    setBatchSelected(selection);
+    setBatchPeriod('');
+    setBatchRating(null);
+    setBatchNotes('');
+    setShowBatch(true);
+  };
+
+  const handleSaveBatch = async () => {
+    if (!classId) return;
+    const enrollmentIds = Object.entries(batchSelected)
+      .filter(([, checked]) => checked)
+      .map(([id]) => id);
+    if (!enrollmentIds.length) {
+      Alert.alert('Seleção', 'Toque nos nomes para escolher os catequizandos.');
+      return;
+    }
+    if (batchPeriod.trim().length < 3) {
+      Alert.alert('Período', 'Informe o período (ex.: 1º semestre 2026).');
+      return;
+    }
+    if (batchNotes.trim().length < 5) {
+      Alert.alert('Parecer', 'Escreva o parecer (mínimo 5 caracteres).');
+      return;
+    }
+    setSavingBatch(true);
+    try {
+      const result = await upsertClassAssessmentsBatch(classId, {
+        period: batchPeriod.trim(),
+        rating: batchRating ?? undefined,
+        notes: batchNotes.trim(),
+        enrollmentIds,
+      });
+      setShowBatch(false);
+      Alert.alert('Parecer salvo ✓', `${result.saved} catequizando(s) — as famílias foram avisadas.`);
+    } catch (error: any) {
+      Alert.alert('Erro', error?.message ?? 'Não foi possível salvar.');
+    } finally {
+      setSavingBatch(false);
     }
   };
 
@@ -469,7 +526,15 @@ export default function CatechesisClassScreen() {
             )}
 
             {/* Catequizandos */}
-            <Text style={[styles.sectionTitle, { marginTop: 18 }]}>Catequizandos</Text>
+            <View style={[styles.sectionHead, { marginTop: 18 }]}>
+              <Text style={styles.sectionTitle}>Catequizandos</Text>
+              {activeStudents.length > 0 && (
+                <TouchableOpacity style={styles.newBtn} onPress={openBatch}>
+                  <FontAwesome5 name="users" size={11} color="#fff" />
+                  <Text style={styles.newBtnText}>Parecer em lote</Text>
+                </TouchableOpacity>
+              )}
+            </View>
             <Text style={styles.emptyLine}>Toque no catequizando para ver/escrever o parecer.</Text>
             {activeStudents.map((student) => (
               <TouchableOpacity
@@ -566,6 +631,96 @@ export default function CatechesisClassScreen() {
             </TouchableOpacity>
           </Pressable>
         </Pressable>
+      </Modal>
+
+      {/* Parecer em lote */}
+      <Modal visible={showBatch} animationType="slide" onRequestClose={() => setShowBatch(false)}>
+        <SafeAreaView style={styles.safe} edges={['top']}>
+          <View style={styles.header}>
+            <TouchableOpacity style={styles.headerBtn} onPress={() => setShowBatch(false)} hitSlop={10}>
+              <FontAwesome5 name="times" size={18} color={colors.text} />
+            </TouchableOpacity>
+            <Text style={styles.headerTitle}>Parecer em lote</Text>
+            <View style={styles.headerBtn} />
+          </View>
+          <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+            <Text style={styles.subtitle}>
+              O mesmo período, conceito e texto valem para todos os selecionados — quem já tem
+              parecer no período terá o texto substituído. Toque nos nomes para marcar/desmarcar.
+            </Text>
+            {activeStudents.map((student) => {
+              const selected = !!batchSelected[student.enrollmentId];
+              return (
+                <TouchableOpacity
+                  key={student.enrollmentId}
+                  style={[styles.callRow, selected && styles.callPresent]}
+                  activeOpacity={0.8}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected }}
+                  onPress={() =>
+                    setBatchSelected((prev) => ({ ...prev, [student.enrollmentId]: !prev[student.enrollmentId] }))
+                  }
+                >
+                  <Text style={styles.callName} numberOfLines={1}>
+                    {student.member.fullName}
+                    {student.status === 'COMPLETED' ? '  ✅' : ''}
+                  </Text>
+                  <Text style={styles.callMark}>{selected ? '✓ Incluído' : '·'}</Text>
+                </TouchableOpacity>
+              );
+            })}
+
+            <Text style={styles.fieldLabel}>Período *</Text>
+            <TextInput
+              style={styles.input}
+              value={batchPeriod}
+              onChangeText={setBatchPeriod}
+              placeholder="1º semestre 2026"
+              placeholderTextColor={colors.textTertiary}
+            />
+            <Text style={styles.fieldLabel}>Conceito (opcional)</Text>
+            <View style={styles.ratingRow}>
+              {(Object.keys(RATING_LABELS) as CatechesisRating[]).map((value) => (
+                <TouchableOpacity
+                  key={value}
+                  style={[styles.ratingChip, batchRating === value && styles.ratingChipSelected]}
+                  onPress={() => setBatchRating(batchRating === value ? null : value)}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: batchRating === value }}
+                  accessibilityLabel={`Conceito ${RATING_LABELS[value]}`}
+                >
+                  <Text
+                    style={[styles.ratingChipText, batchRating === value && { color: '#fff' }]}
+                    numberOfLines={1}
+                  >
+                    {RATING_LABELS[value]}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            <Text style={styles.fieldLabel}>Parecer * (as famílias veem no app)</Text>
+            <TextInput
+              style={[styles.input, { minHeight: 110, textAlignVertical: 'top' }]}
+              value={batchNotes}
+              onChangeText={setBatchNotes}
+              placeholder="Como a turma caminhou neste período..."
+              placeholderTextColor={colors.textTertiary}
+              multiline
+              maxLength={2000}
+            />
+            <TouchableOpacity
+              style={[styles.primaryBtn, savingBatch && { opacity: 0.6 }]}
+              disabled={savingBatch}
+              onPress={() => void handleSaveBatch()}
+            >
+              <Text style={styles.primaryBtnText}>
+                {savingBatch
+                  ? 'Salvando...'
+                  : `Salvar para ${Object.values(batchSelected).filter(Boolean).length} catequizando(s)`}
+              </Text>
+            </TouchableOpacity>
+          </ScrollView>
+        </SafeAreaView>
       </Modal>
 
       {/* Parecer por período */}
