@@ -15,6 +15,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Stack, useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import { FontAwesome5 } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
 import { useColors } from '../../src/context/ThemeContext';
 import {
   FamilyCatechesisItem,
@@ -26,6 +27,7 @@ import {
   CatechesisAssessment,
   RATING_LABELS,
   getEnrollmentAssessments,
+  submitCatechesisDocument,
 } from '../../src/services/catechesisService';
 
 const WEEKDAYS = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
@@ -42,6 +44,42 @@ export default function CatechesisClassesScreen() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [assessView, setAssessView] = useState<{ name: string; items: CatechesisAssessment[] } | null>(null);
+  const [uploadingDoc, setUploadingDoc] = useState<string | null>(null);
+
+  const pickAndSubmitDocument = async (enrollmentId: string, kind: string, useCamera: boolean) => {
+    const permission = useCamera
+      ? await ImagePicker.requestCameraPermissionsAsync()
+      : await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      Alert.alert('Permissão', 'Autorize o acesso para enviar a foto do documento.');
+      return;
+    }
+    const result = useCamera
+      ? await ImagePicker.launchCameraAsync({ quality: 0.7 })
+      : await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.7 });
+    if (result.canceled || !result.assets?.length) return;
+    setUploadingDoc(enrollmentId + kind);
+    try {
+      await submitCatechesisDocument(enrollmentId, kind, result.assets[0]);
+      Alert.alert(
+        'Documento enviado ✓',
+        'A coordenação vai conferir e dar baixa na pendência — você recebe o aviso por aqui. O arquivo é apagado após a conferência.',
+      );
+      await load(true);
+    } catch (error: any) {
+      Alert.alert('Envio', error?.message ?? 'Não foi possível enviar. Tente novamente.');
+    } finally {
+      setUploadingDoc(null);
+    }
+  };
+
+  const handleSendDocument = (enrollmentId: string, kind: string) => {
+    Alert.alert(`Enviar ${kind}`, 'Fotografe o documento ou escolha da galeria.', [
+      { text: 'Cancelar', style: 'cancel' },
+      { text: '📷 Tirar foto', onPress: () => void pickAndSubmitDocument(enrollmentId, kind, true) },
+      { text: '🖼 Galeria', onPress: () => void pickAndSubmitDocument(enrollmentId, kind, false) },
+    ]);
+  };
 
   const openFamilyAssessments = async (enrollmentId: string, name: string) => {
     try {
@@ -181,11 +219,41 @@ export default function CatechesisClassesScreen() {
                       </Text>
                     ) : null}
                   </View>
-                  {item.pendingDocuments ? (
-                    <Text style={styles.pendingLine} numberOfLines={2}>
-                      📄 Documentos pendentes: {item.pendingDocuments}
-                    </Text>
-                  ) : null}
+                  {(item.pendingDocuments ?? '')
+                    .split(/[;,]/)
+                    .map((kind) => kind.trim())
+                    .filter(Boolean)
+                    .map((kind) => {
+                      const latest = (item.documents ?? []).find(
+                        (doc) => doc.kind.toLowerCase() === kind.toLowerCase(),
+                      );
+                      const busy = uploadingDoc === item.enrollmentId + kind;
+                      if (latest?.status === 'SUBMITTED') {
+                        return (
+                          <Text key={kind} style={styles.pendingLine} numberOfLines={2}>
+                            📎 {kind}: em conferência pela coordenação
+                          </Text>
+                        );
+                      }
+                      return (
+                        <View key={kind}>
+                          {latest?.status === 'REJECTED' && (
+                            <Text style={styles.pendingLine} numberOfLines={2}>
+                              ⚠️ {kind} recusado{latest.reviewNotes ? `: ${latest.reviewNotes}` : ''} — envie novamente
+                            </Text>
+                          )}
+                          <TouchableOpacity
+                            style={styles.docBtn}
+                            disabled={busy}
+                            onPress={() => handleSendDocument(item.enrollmentId, kind)}
+                          >
+                            <Text style={styles.docBtnText}>
+                              {busy ? 'Enviando...' : `📎 Enviar ${kind}`}
+                            </Text>
+                          </TouchableOpacity>
+                        </View>
+                      );
+                    })}
                   {(item.fees ?? [])
                     .filter((fee) => fee.status === 'PENDING')
                     .map((fee) => (

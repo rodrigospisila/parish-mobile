@@ -101,6 +101,14 @@ export interface FamilyCatechesisItem {
     dueDate?: string | null;
     status: 'PENDING' | 'PAID' | 'WAIVED';
   }>;
+  /** Documentos enviados pelo app (mais recente primeiro) */
+  documents?: Array<{
+    id: string;
+    kind: string;
+    status: 'SUBMITTED' | 'VERIFIED' | 'REJECTED';
+    reviewNotes?: string | null;
+    createdAt: string;
+  }>;
 }
 
 /** Catequese da FAMÍLIA: matrículas próprias e dos dependentes. */
@@ -330,6 +338,35 @@ export const upsertEnrollmentAssessment = async (
 ): Promise<void> => {
   try {
     await api.post(`/catechesis/enrollments/${enrollmentId}/assessments`, dto);
+  } catch (error) {
+    throw new Error(getErrorMessage(error));
+  }
+};
+
+// ============================================
+// DOCUMENTOS DA MATRÍCULA (envio pela família)
+// ============================================
+
+/**
+ * Envia a foto do documento pendente (ex.: Certidão de Batismo).
+ * O arquivo vive só até a conferência da coordenação (retenção mínima).
+ */
+export const submitCatechesisDocument = async (
+  enrollmentId: string,
+  kind: string,
+  asset: { uri: string; mimeType?: string | null; fileName?: string | null },
+): Promise<void> => {
+  try {
+    const form = new FormData();
+    form.append('kind', kind);
+    form.append('file', {
+      uri: asset.uri,
+      type: asset.mimeType ?? 'image/jpeg',
+      name: asset.fileName ?? 'documento.jpg',
+    } as any);
+    await api.post(`/catechesis/enrollments/${enrollmentId}/documents`, form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
   } catch (error) {
     throw new Error(getErrorMessage(error));
   }
