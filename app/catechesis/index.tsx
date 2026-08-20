@@ -219,7 +219,8 @@ export default function CatechesisClassesScreen() {
                       </Text>
                     ) : null}
                   </View>
-                  {(item.pendingDocuments ?? '')
+                  {(item.status === 'ACTIVE' || item.status === 'PENDING_APPROVAL') &&
+                  (item.pendingDocuments ?? '')
                     .split(/[;,]/)
                     .map((kind) => kind.trim())
                     .filter(Boolean)
