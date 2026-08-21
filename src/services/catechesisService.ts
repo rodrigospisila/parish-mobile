@@ -109,6 +109,8 @@ export interface FamilyCatechesisItem {
     reviewNotes?: string | null;
     createdAt: string;
   }>;
+  /** Quantos pareceres do catequista já foram registrados */
+  assessmentsCount?: number;
 }
 
 /** Catequese da FAMÍLIA: matrículas próprias e dos dependentes. */
@@ -338,6 +340,49 @@ export const upsertEnrollmentAssessment = async (
 ): Promise<void> => {
   try {
     await api.post(`/catechesis/enrollments/${enrollmentId}/assessments`, dto);
+  } catch (error) {
+    throw new Error(getErrorMessage(error));
+  }
+};
+
+// ============================================
+// ACOMPANHAMENTO DETALHADO (família)
+// ============================================
+
+export interface EnrollmentAttendanceItem {
+  date: string;
+  topic?: string | null;
+  present: boolean;
+  late: boolean;
+}
+
+/** Frequência detalhada por encontro (família ou equipe). */
+export const getEnrollmentAttendance = async (
+  enrollmentId: string,
+): Promise<EnrollmentAttendanceItem[]> => {
+  try {
+    const { data } = await api.get(`/catechesis/enrollments/${enrollmentId}/attendance`);
+    return data ?? [];
+  } catch (error) {
+    throw new Error(getErrorMessage(error));
+  }
+};
+
+export interface AppNotification {
+  id: string;
+  type: string;
+  title: string;
+  body: string;
+  createdAt: string;
+}
+
+/** Histórico de avisos recebidos (para reler o que chegou por push). */
+export const getMyNotifications = async (type?: string): Promise<AppNotification[]> => {
+  try {
+    const { data } = await api.get('/notifications/mine', {
+      params: type ? { type } : undefined,
+    });
+    return data ?? [];
   } catch (error) {
     throw new Error(getErrorMessage(error));
   }

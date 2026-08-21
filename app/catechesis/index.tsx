@@ -28,6 +28,10 @@ import {
   RATING_LABELS,
   getEnrollmentAssessments,
   submitCatechesisDocument,
+  getEnrollmentAttendance,
+  getMyNotifications,
+  EnrollmentAttendanceItem,
+  AppNotification,
 } from '../../src/services/catechesisService';
 
 const WEEKDAYS = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
@@ -45,6 +49,34 @@ export default function CatechesisClassesScreen() {
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [assessView, setAssessView] = useState<{ name: string; items: CatechesisAssessment[] } | null>(null);
   const [uploadingDoc, setUploadingDoc] = useState<string | null>(null);
+  const [noticeView, setNoticeView] = useState<AppNotification[] | null>(null);
+  const [attendanceView, setAttendanceView] = useState<{ name: string; items: EnrollmentAttendanceItem[] } | null>(null);
+
+  const openNotices = async () => {
+    try {
+      const items = await getMyNotifications('CATECHESIS');
+      if (!items.length) {
+        Alert.alert('Avisos', 'Nenhum aviso da catequese recebido ainda.');
+        return;
+      }
+      setNoticeView(items);
+    } catch (error: any) {
+      Alert.alert('Avisos', error?.message ?? 'Não foi possível carregar.');
+    }
+  };
+
+  const openAttendanceDetail = async (enrollmentId: string, name: string) => {
+    try {
+      const items = await getEnrollmentAttendance(enrollmentId);
+      if (!items.length) {
+        Alert.alert('Frequência', 'Nenhuma chamada registrada ainda.');
+        return;
+      }
+      setAttendanceView({ name, items });
+    } catch (error: any) {
+      Alert.alert('Frequência', error?.message ?? 'Não foi possível carregar.');
+    }
+  };
 
   const pickAndSubmitDocument = async (enrollmentId: string, kind: string, useCamera: boolean) => {
     const permission = useCamera
@@ -162,6 +194,10 @@ export default function CatechesisClassesScreen() {
             <FontAwesome5 name="user-plus" size={14} color="#fff" />
             <Text style={styles.applyBtnText}>Inscrever na catequese</Text>
           </TouchableOpacity>
+          <TouchableOpacity style={styles.noticesBtn} activeOpacity={0.8} onPress={() => void openNotices()}>
+            <FontAwesome5 name="bell" size={13} color={colors.primary} />
+            <Text style={styles.noticesBtnText}>Histórico de avisos</Text>
+          </TouchableOpacity>
 
           {classes.length === 0 && family.length === 0 && (
             <View style={styles.empty}>
@@ -209,9 +245,20 @@ export default function CatechesisClassesScreen() {
                     {item.class.time ? ` às ${item.class.time}` : ''}
                   </Text>
                   <View style={styles.cardStats}>
-                    <Text style={styles.cardStat}>
-                      ✅ Presença: {item.attendanceRate === null ? '—' : `${item.attendanceRate}%`}
-                    </Text>
+                    <TouchableOpacity
+                      onPress={() =>
+                        void openAttendanceDetail(
+                          item.enrollmentId,
+                          item.member.isSelf ? 'Você' : item.member.fullName,
+                        )
+                      }
+                      hitSlop={8}
+                    >
+                      <Text style={styles.cardStat}>
+                        ✅ Presença: {item.attendanceRate === null ? '—' : `${item.attendanceRate}%`}
+                        {item.sessions > 0 ? ' ›' : ''}
+                      </Text>
+                    </TouchableOpacity>
                     {item.nextSession ? (
                       <Text style={styles.cardStat}>
                         📅 Próximo: {new Date(item.nextSession.date).getUTCDate().toString().padStart(2, '0')}/
@@ -268,7 +315,9 @@ export default function CatechesisClassesScreen() {
                       style={styles.docBtn}
                       onPress={() => void openFamilyAssessments(item.enrollmentId, item.member.isSelf ? 'Você' : item.member.fullName)}
                     >
-                      <Text style={styles.docBtnText}>📝 Pareceres do catequista</Text>
+                      <Text style={styles.docBtnText}>
+                        📝 Pareceres do catequista ({item.assessmentsCount ?? 0})
+                      </Text>
                     </TouchableOpacity>
                   )}
                   {item.status === 'COMPLETED' && (
@@ -342,6 +391,80 @@ export default function CatechesisClassesScreen() {
           </>
         )}
       </ScrollView>
+
+      {/* Histórico de avisos */}
+      <Modal
+        visible={!!noticeView}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setNoticeView(null)}
+      >
+        <Pressable style={styles.assessOverlay} onPress={() => setNoticeView(null)}>
+          <Pressable style={styles.assessSheet} onPress={() => {}}>
+            <Text style={styles.assessTitle}>🔔 Avisos da catequese</Text>
+            <ScrollView style={{ maxHeight: 420 }} showsVerticalScrollIndicator={false}>
+              {(noticeView ?? []).map((notice) => (
+                <View key={notice.id} style={styles.assessCard}>
+                  <Text style={styles.assessPeriod}>
+                    {notice.title}
+                    {'  '}
+                    <Text style={styles.noticeDate}>
+                      {new Date(notice.createdAt).toLocaleDateString('pt-BR', {
+                        day: '2-digit',
+                        month: '2-digit',
+                      })}
+                    </Text>
+                  </Text>
+                  <Text style={styles.assessNotes}>{notice.body}</Text>
+                </View>
+              ))}
+            </ScrollView>
+            <TouchableOpacity style={styles.assessClose} onPress={() => setNoticeView(null)}>
+              <Text style={styles.assessCloseText}>Fechar</Text>
+            </TouchableOpacity>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* Frequência detalhada */}
+      <Modal
+        visible={!!attendanceView}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setAttendanceView(null)}
+      >
+        <Pressable style={styles.assessOverlay} onPress={() => setAttendanceView(null)}>
+          <Pressable style={styles.assessSheet} onPress={() => {}}>
+            <Text style={styles.assessTitle}>🗓 Frequência · {attendanceView?.name ?? ''}</Text>
+            <ScrollView style={{ maxHeight: 420 }} showsVerticalScrollIndicator={false}>
+              {(attendanceView?.items ?? []).map((item, index) => (
+                <View key={index} style={styles.attendanceRow}>
+                  <Text style={styles.attendanceDate}>
+                    {new Date(item.date).toLocaleDateString('pt-BR', {
+                      timeZone: 'UTC',
+                      day: '2-digit',
+                      month: '2-digit',
+                      year: 'numeric',
+                    })}
+                    {item.topic ? ` · ${item.topic}` : ''}
+                  </Text>
+                  <Text
+                    style={[
+                      styles.attendanceMark,
+                      { color: item.present ? (item.late ? colors.warning : colors.success) : colors.error },
+                    ]}
+                  >
+                    {item.present ? (item.late ? '🕒 Atrasado' : '✓ Presente') : '✗ Ausente'}
+                  </Text>
+                </View>
+              ))}
+            </ScrollView>
+            <TouchableOpacity style={styles.assessClose} onPress={() => setAttendanceView(null)}>
+              <Text style={styles.assessCloseText}>Fechar</Text>
+            </TouchableOpacity>
+          </Pressable>
+        </Pressable>
+      </Modal>
 
       {/* Pareceres (leitura da família) — Modal trata o voltar do Android */}
       <Modal
@@ -453,6 +576,30 @@ const createStyles = (colors: ReturnType<typeof useColors>) =>
       marginTop: 10,
     },
     assessCloseText: { color: '#fff', fontSize: 14.5, fontWeight: '800' },
+    noticesBtn: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 8,
+      borderWidth: 1.5,
+      borderColor: colors.primary,
+      borderRadius: 12,
+      paddingVertical: 11,
+      marginTop: 8,
+    },
+    noticesBtnText: { color: colors.primary, fontSize: 14, fontWeight: '700' },
+    noticeDate: { fontSize: 11.5, color: colors.textTertiary, fontWeight: '600' },
+    attendanceRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 10,
+      paddingVertical: 9,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: colors.border,
+    },
+    attendanceDate: { flex: 1, fontSize: 13.5, color: colors.text },
+    attendanceMark: { fontSize: 13, fontWeight: '800' },
     empty: { alignItems: 'center', gap: 12, marginTop: 48, paddingHorizontal: 24 },
     emptyText: { fontSize: 14, color: colors.textSecondary, textAlign: 'center', lineHeight: 20 },
     card: {
