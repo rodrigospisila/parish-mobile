@@ -12,7 +12,7 @@ import {
   Alert,
   Pressable,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import { FontAwesome5 } from '@expo/vector-icons';
@@ -74,6 +74,9 @@ export default function CatechesisClassScreen() {
   const router = useRouter();
   const colors = useColors();
   const styles = createStyles(colors);
+  // Dentro de <Modal> o SafeAreaView não recebe os insets nativos (árvore
+  // separada) — o header colidia com a status bar; o hook resolve.
+  const insets = useSafeAreaInsets();
 
   const [report, setReport] = useState<CatechesisClassReport | null>(null);
   const [sessions, setSessions] = useState<CatechesisSessionSummary[]>([]);
@@ -713,7 +716,7 @@ export default function CatechesisClassScreen() {
 
       {/* Parecer em lote */}
       <Modal visible={showBatch} animationType="slide" onRequestClose={() => setShowBatch(false)}>
-        <SafeAreaView style={styles.safe} edges={['top']}>
+        <View style={[styles.safe, { paddingTop: insets.top }]}>
           <View style={styles.header}>
             <TouchableOpacity style={styles.headerBtn} onPress={() => setShowBatch(false)} hitSlop={10}>
               <FontAwesome5 name="times" size={18} color={colors.text} />
@@ -798,7 +801,7 @@ export default function CatechesisClassScreen() {
               </Text>
             </TouchableOpacity>
           </ScrollView>
-        </SafeAreaView>
+        </View>
       </Modal>
 
       {/* Parecer por período */}
@@ -807,7 +810,7 @@ export default function CatechesisClassScreen() {
         animationType="slide"
         onRequestClose={() => setAssessTarget(null)}
       >
-        <SafeAreaView style={styles.safe} edges={['top']}>
+        <View style={[styles.safe, { paddingTop: insets.top }]}>
           <View style={styles.header}>
             <TouchableOpacity style={styles.headerBtn} onPress={() => setAssessTarget(null)} hitSlop={10}>
               <FontAwesome5 name="times" size={18} color={colors.text} />
@@ -879,7 +882,7 @@ export default function CatechesisClassScreen() {
               <Text style={styles.primaryBtnText}>{savingAssess ? 'Salvando...' : 'Salvar parecer'}</Text>
             </TouchableOpacity>
           </ScrollView>
-        </SafeAreaView>
+        </View>
       </Modal>
 
       {/* Chamada */}
@@ -888,7 +891,7 @@ export default function CatechesisClassScreen() {
         animationType="slide"
         onRequestClose={() => setAttendance(null)}
       >
-        <SafeAreaView style={styles.safe} edges={['top']}>
+        <View style={[styles.safe, { paddingTop: insets.top }]}>
           <View style={styles.header}>
             <TouchableOpacity style={styles.headerBtn} onPress={() => setAttendance(null)} hitSlop={10}>
               <FontAwesome5 name="times" size={18} color={colors.text} />
@@ -941,7 +944,7 @@ export default function CatechesisClassScreen() {
               </Text>
             </TouchableOpacity>
           </ScrollView>
-        </SafeAreaView>
+        </View>
       </Modal>
     </SafeAreaView>
   );
