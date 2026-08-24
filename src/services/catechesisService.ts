@@ -98,6 +98,8 @@ export interface FamilyCatechesisItem {
     community: { id: string; name: string };
   };
   nextSession: { date: string; topic?: string | null } | null;
+  /** Agenda dos próximos encontros da turma (até 12) — só matrículas ativas */
+  upcomingSessions?: Array<{ date: string; topic?: string | null }>;
   /** Taxas de material da turma com a situação desta matrícula (Fase 5) */
   fees?: Array<{
     id: string;
@@ -105,6 +107,9 @@ export interface FamilyCatechesisItem {
     amount: number;
     dueDate?: string | null;
     status: 'PENDING' | 'PAID' | 'WAIVED';
+    paymentId?: string | null;
+    paidAt?: string | null;
+    method?: string | null;
   }>;
   /** Documentos enviados pelo app (mais recente primeiro) */
   documents?: Array<{
@@ -513,6 +518,13 @@ const pdfSlug = (value: string) =>
     .toLowerCase() || 'catequizando';
 
 /** Certificado de conclusão do catequizando (família ou equipe). */
+/** Recibo em PDF do pagamento da taxa (comprovante da família). */
+export const shareFeeReceipt = (paymentId: string, description?: string) =>
+  downloadCatechesisPdf(
+    `/catechesis/fees/payments/${paymentId}/receipt.pdf`,
+    `recibo_${(description ?? 'taxa').replace(/\s+/g, '_').toLowerCase().slice(0, 40)}.pdf`,
+  );
+
 export const shareCatechesisCertificate = (enrollmentId: string, memberName?: string) =>
   downloadCatechesisPdf(
     `/catechesis/enrollments/${enrollmentId}/certificate.pdf`,

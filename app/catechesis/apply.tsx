@@ -10,7 +10,7 @@ import {
   Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Stack, useRouter } from 'expo-router';
+import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import { FontAwesome5, Ionicons } from '@expo/vector-icons';
 import { useColors } from '../../src/context/ThemeContext';
@@ -50,6 +50,8 @@ export default function CatechesisApplyScreen() {
   const router = useRouter();
   const colors = useColors();
   const { activeCommunityId } = useCommunity();
+  // Reinscrição: chega com ?memberId= para já selecionar o catequizando
+  const { memberId: presetMemberId } = useLocalSearchParams<{ memberId?: string }>();
   const styles = createStyles(colors);
 
   const [classes, setClasses] = useState<CatechesisOpenClass[]>([]);
@@ -74,6 +76,10 @@ export default function CatechesisApplyScreen() {
       ]);
       setClasses(openClasses);
       setDependents(myDependents);
+      if (presetMemberId) {
+        const preset = myDependents.find((dependent) => dependent.id === presetMemberId);
+        if (preset) setWho({ kind: 'dependent', id: preset.id, name: preset.fullName });
+      }
     } catch (error: any) {
       console.error('Erro ao carregar turmas abertas:', error);
       setClasses([]);
@@ -81,7 +87,7 @@ export default function CatechesisApplyScreen() {
     } finally {
       setIsLoading(false);
     }
-  }, [activeCommunityId]);
+  }, [activeCommunityId, presetMemberId]);
 
   useFocusEffect(
     useCallback(() => {

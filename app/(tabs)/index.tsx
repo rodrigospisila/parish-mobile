@@ -812,6 +812,14 @@ export default function HomeScreen() {
               </Text>
             </View>
             <TouchableOpacity
+              style={styles.heroBell}
+              activeOpacity={0.8}
+              onPress={() => router.push('/notifications' as never)}
+              hitSlop={6}
+            >
+              <FontAwesome5 name="bell" size={16} color="#fff" />
+            </TouchableOpacity>
+            <TouchableOpacity
               style={styles.heroAvatar}
               activeOpacity={0.8}
               onPress={() => router.push('/(tabs)/profile' as never)}
@@ -993,6 +1001,24 @@ export default function HomeScreen() {
           <FontAwesome5 name="chevron-right" size={14} color={colors.textTertiary} />
         </TouchableOpacity>
 
+        {/* MURAL DE ORAÇÃO */}
+        <TouchableOpacity
+          style={styles.nearbyBanner}
+          activeOpacity={0.9}
+          onPress={() => router.push('/prayer-requests' as never)}
+        >
+          <View style={styles.nearbyIcon}>
+            <FontAwesome5 name="praying-hands" size={18} color={colors.primary} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.nearbyTitle}>Mural de oração</Text>
+            <Text style={styles.nearbySub} numberOfLines={1}>
+              Reze pelas intenções da comunidade e faça seu pedido
+            </Text>
+          </View>
+          <FontAwesome5 name="chevron-right" size={14} color={colors.textTertiary} />
+        </TouchableOpacity>
+
         {/* CATEQUESE — inscrição aberta a todos; turmas/chamada para catequistas */}
         {(
           <TouchableOpacity
@@ -1117,6 +1143,15 @@ const createStyles = (colors: ReturnType<typeof useColors>) =>
       color: 'rgba(255,255,255,0.8)',
       marginTop: 3,
       textTransform: 'capitalize',
+    },
+    heroBell: {
+      width: 36,
+      height: 36,
+      borderRadius: 18,
+      backgroundColor: 'rgba(255,255,255,0.18)',
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginRight: 10,
     },
     heroAvatar: {
       width: 52,

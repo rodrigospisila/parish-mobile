@@ -33,6 +33,7 @@ import {
   getMyNotifications,
   EnrollmentAttendanceItem,
   AppNotification,
+  shareFeeReceipt,
 } from '../../src/services/catechesisService';
 
 const WEEKDAYS = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
@@ -52,6 +53,7 @@ export default function CatechesisClassesScreen() {
   const [uploadingDoc, setUploadingDoc] = useState<string | null>(null);
   const [noticeView, setNoticeView] = useState<AppNotification[] | null>(null);
   const [attendanceView, setAttendanceView] = useState<{ name: string; items: EnrollmentAttendanceItem[] } | null>(null);
+  const [agendaView, setAgendaView] = useState<{ name: string; items: Array<{ date: string; topic?: string | null }> } | null>(null);
 
   const openNotices = async () => {
     try {
@@ -288,10 +290,22 @@ export default function CatechesisClassesScreen() {
                       </Text>
                     </TouchableOpacity>
                     {item.nextSession ? (
-                      <Text style={styles.cardStat}>
-                        📅 Próximo: {new Date(item.nextSession.date).getUTCDate().toString().padStart(2, '0')}/
-                        {(new Date(item.nextSession.date).getUTCMonth() + 1).toString().padStart(2, '0')}
-                      </Text>
+                      <TouchableOpacity
+                        disabled={!(item.upcomingSessions ?? []).length}
+                        onPress={() =>
+                          setAgendaView({
+                            name: item.class.name,
+                            items: item.upcomingSessions ?? [],
+                          })
+                        }
+                        hitSlop={8}
+                      >
+                        <Text style={styles.cardStat}>
+                          📅 Próximo: {new Date(item.nextSession.date).getUTCDate().toString().padStart(2, '0')}/
+                          {(new Date(item.nextSession.date).getUTCMonth() + 1).toString().padStart(2, '0')}
+                          {(item.upcomingSessions ?? []).length > 1 ? ' ›' : ''}
+                        </Text>
+                      </TouchableOpacity>
                     ) : null}
                   </View>
                   {item.status === 'REJECTED' && (
@@ -303,7 +317,13 @@ export default function CatechesisClassesScreen() {
                       ) : null}
                       <TouchableOpacity
                         style={styles.docBtn}
-                        onPress={() => router.push('/catechesis/apply' as never)}
+                        onPress={() =>
+                          router.push(
+                            (item.member.isSelf
+                              ? '/catechesis/apply'
+                              : `/catechesis/apply?memberId=${item.member.id}`) as never,
+                          )
+                        }
                       >
                         <Text style={styles.docBtnText}>🔄 Inscrever novamente</Text>
                       </TouchableOpacity>
@@ -352,6 +372,29 @@ export default function CatechesisClassesScreen() {
                         💰 {fee.description}: R$ {fee.amount.toFixed(2).replace('.', ',')} — pendente
                         (procure a coordenação)
                       </Text>
+                    ))}
+                  {(item.fees ?? [])
+                    .filter((fee) => fee.status === 'PAID' && fee.paymentId)
+                    .map((fee) => (
+                      <TouchableOpacity
+                        key={fee.id}
+                        style={styles.docBtn}
+                        disabled={downloadingId === fee.paymentId}
+                        onPress={async () => {
+                          setDownloadingId(fee.paymentId!);
+                          try {
+                            await shareFeeReceipt(fee.paymentId!, fee.description);
+                          } catch (error: any) {
+                            Alert.alert('Recibo', error?.message ?? 'Não foi possível gerar.');
+                          } finally {
+                            setDownloadingId(null);
+                          }
+                        }}
+                      >
+                        <Text style={styles.docBtnText}>
+                          {downloadingId === fee.paymentId ? 'Gerando...' : `🧾 Recibo · ${fee.description}`}
+                        </Text>
+                      </TouchableOpacity>
                     ))}
                   {(item.status === 'ACTIVE' || item.status === 'COMPLETED') && (
                     <TouchableOpacity
@@ -463,6 +506,40 @@ export default function CatechesisClassesScreen() {
               ))}
             </ScrollView>
             <TouchableOpacity style={styles.assessClose} onPress={() => setNoticeView(null)}>
+              <Text style={styles.assessCloseText}>Fechar</Text>
+            </TouchableOpacity>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* Agenda dos próximos encontros da turma */}
+      <Modal
+        visible={!!agendaView}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setAgendaView(null)}
+      >
+        <Pressable style={styles.assessOverlay} onPress={() => setAgendaView(null)}>
+          <Pressable style={styles.assessSheet} onPress={() => {}}>
+            <Text style={styles.assessTitle}>📅 Agenda · {agendaView?.name ?? ''}</Text>
+            <ScrollView style={{ maxHeight: 420 }} showsVerticalScrollIndicator={false}>
+              {(agendaView?.items ?? []).map((session, index) => (
+                <View key={index} style={styles.attendanceRow}>
+                  <Text style={styles.attendanceDate}>
+                    {new Date(session.date).toLocaleDateString('pt-BR', {
+                      timeZone: 'UTC',
+                      weekday: 'short',
+                      day: '2-digit',
+                      month: '2-digit',
+                    })}
+                  </Text>
+                  <Text style={styles.agendaTopic} numberOfLines={1}>
+                    {session.topic || 'Tema a definir'}
+                  </Text>
+                </View>
+              ))}
+            </ScrollView>
+            <TouchableOpacity style={styles.assessClose} onPress={() => setAgendaView(null)}>
               <Text style={styles.assessCloseText}>Fechar</Text>
             </TouchableOpacity>
           </Pressable>
@@ -641,6 +718,7 @@ const createStyles = (colors: ReturnType<typeof useColors>) =>
       borderBottomWidth: StyleSheet.hairlineWidth,
       borderBottomColor: colors.border,
     },
+    agendaTopic: { flex: 1, fontSize: 13, color: colors.textSecondary, textAlign: 'right' },
     attendanceDate: { flex: 1, fontSize: 13.5, color: colors.text },
     attendanceMark: { fontSize: 13, fontWeight: '800' },
     empty: { alignItems: 'center', gap: 12, marginTop: 48, paddingHorizontal: 24 },
