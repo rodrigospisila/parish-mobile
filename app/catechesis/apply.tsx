@@ -25,6 +25,24 @@ import {
 
 const WEEKDAYS = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
 
+/** Máscara DD/MM/AAAA enquanto digita (aceita só dígitos e insere as barras). */
+const maskBirthDate = (value: string) => {
+  const digits = value.replace(/\D/g, '').slice(0, 8);
+  if (digits.length <= 2) return digits;
+  if (digits.length <= 4) return `${digits.slice(0, 2)}/${digits.slice(2)}`;
+  return `${digits.slice(0, 2)}/${digits.slice(2, 4)}/${digits.slice(4)}`;
+};
+
+/** DD/MM/AAAA -> AAAA-MM-DD validada (null quando inválida/incompleta). */
+const birthToIso = (value: string): string | null => {
+  const match = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(value.trim());
+  if (!match) return null;
+  const iso = `${match[3]}-${match[2]}-${match[1]}`;
+  const parsed = new Date(iso);
+  if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== iso) return null;
+  return iso;
+};
+
 type Who = { kind: 'self' } | { kind: 'dependent'; id: string; name: string } | { kind: 'new' };
 
 /** Inscrição online na catequese (responsável ou o próprio adulto). */
@@ -82,14 +100,9 @@ export default function CatechesisApplyScreen() {
         return;
       }
       if (childBirth.trim()) {
-        const raw = childBirth.trim();
-        const parsed = new Date(raw);
-        const valid =
-          /^\d{4}-\d{2}-\d{2}$/.test(raw) &&
-          !Number.isNaN(parsed.getTime()) &&
-          parsed.toISOString().slice(0, 10) === raw;
-        if (!valid) {
-          Alert.alert('Data de nascimento', 'Data inválida — use AAAA-MM-DD (ou deixe em branco).');
+        const iso = birthToIso(childBirth);
+        if (!iso) {
+          Alert.alert('Data de nascimento', 'Data inválida — use DD/MM/AAAA (ou deixe em branco).');
           return;
         }
       }
@@ -108,7 +121,7 @@ export default function CatechesisApplyScreen() {
         forMemberId: who.kind === 'dependent' ? who.id : undefined,
         newChild:
           who.kind === 'new'
-            ? { fullName: childName.trim(), birthDate: childBirth.trim() || undefined }
+            ? { fullName: childName.trim(), birthDate: birthToIso(childBirth) || undefined }
             : undefined,
         consentGiven: true,
       });
@@ -227,14 +240,15 @@ export default function CatechesisApplyScreen() {
                   placeholder="Nome do catequizando"
                   placeholderTextColor={colors.textTertiary}
                 />
-                <Text style={styles.fieldLabel}>Nascimento (AAAA-MM-DD, opcional)</Text>
+                <Text style={styles.fieldLabel}>Nascimento (opcional)</Text>
                 <TextInput
                   style={styles.input}
                   value={childBirth}
-                  onChangeText={setChildBirth}
-                  placeholder="2017-05-10"
+                  onChangeText={(value) => setChildBirth(maskBirthDate(value))}
+                  placeholder="DD/MM/AAAA"
                   placeholderTextColor={colors.textTertiary}
-                  autoCapitalize="none"
+                  keyboardType="number-pad"
+                  maxLength={10}
                 />
               </View>
             )}

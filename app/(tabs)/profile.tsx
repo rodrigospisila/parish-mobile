@@ -19,6 +19,8 @@ import { authService } from '../../src/services/authService';
 import { useCommunity } from '../../src/context/CommunityContext';
 import { removeMyCommunity } from '../../src/services/memberCommunitiesService';
 import { getMyCatechesisClasses, getMyFamilyCatechesis } from '../../src/services/catechesisService';
+import { getParishById } from '../../src/services/churchService';
+import { Linking } from 'react-native';
 
 export default function ProfileScreen() {
   const { user, signOut, updateCommunity, refreshUser } = useAuth();
@@ -45,6 +47,22 @@ export default function ProfileScreen() {
   // Fallback: usuários antigos podem ter parishId nulo no cadastro — o vínculo
   // principal de comunidade resolve a paróquia para exibição
   const primaryLink = links.find((link) => link.isPrimary) ?? links[0];
+
+  // Contato da secretaria paroquial (telefone/e-mail da paróquia)
+  const [parishContact, setParishContact] = React.useState<{
+    phone?: string | null;
+    email?: string | null;
+    website?: string | null;
+  } | null>(null);
+  const parishIdForContact = user?.parishId ?? (primaryLink?.community as any)?.parish?.id;
+  React.useEffect(() => {
+    if (!parishIdForContact) return;
+    getParishById(parishIdForContact)
+      .then((parish: any) =>
+        setParishContact({ phone: parish?.phone, email: parish?.email, website: parish?.website }),
+      )
+      .catch(() => setParishContact(null));
+  }, [parishIdForContact]);
   const router = useRouter();
   const colors = useColors();
   const { theme, setTheme, isDark } = useTheme();
@@ -189,6 +207,44 @@ export default function ProfileScreen() {
                 {user?.parish?.name || primaryLink?.community?.parish?.name || 'Não informada'}
               </Text>
             </View>
+            {parishContact?.phone || parishContact?.email ? (
+              <>
+                <View style={styles.divider} />
+                <TouchableOpacity
+                  style={styles.infoRow}
+                  activeOpacity={0.7}
+                  onPress={() => {
+                    const options: any[] = [{ text: 'Fechar', style: 'cancel' }];
+                    if (parishContact?.phone) {
+                      options.unshift({
+                        text: `📞 Ligar (${parishContact.phone})`,
+                        onPress: () => Linking.openURL(`tel:${parishContact.phone}`),
+                      });
+                      options.unshift({
+                        text: '💬 WhatsApp',
+                        onPress: () =>
+                          Linking.openURL(
+                            `https://wa.me/55${(parishContact.phone ?? '').replace(/\D/g, '')}`,
+                          ),
+                      });
+                    }
+                    if (parishContact?.email) {
+                      options.unshift({
+                        text: `✉️ E-mail`,
+                        onPress: () => Linking.openURL(`mailto:${parishContact.email}`),
+                      });
+                    }
+                    Alert.alert('Falar com a secretaria', 'Como prefere entrar em contato?', options);
+                  }}
+                >
+                  <Text style={styles.infoLabel}>Secretaria</Text>
+                  <View style={styles.infoValueLink}>
+                    <Text style={[styles.infoValue, { color: colors.primary }]}>Falar com a secretaria</Text>
+                    <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />
+                  </View>
+                </TouchableOpacity>
+              </>
+            ) : null}
             <View style={styles.divider} />
             <TouchableOpacity
               style={styles.infoRow}

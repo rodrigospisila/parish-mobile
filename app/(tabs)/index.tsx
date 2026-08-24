@@ -1023,7 +1023,12 @@ export default function HomeScreen() {
 
         {/* PALAVRA PASTORAL */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>📜 Palavra Pastoral</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+            <Text style={styles.sectionTitle}>📜 Palavra Pastoral</Text>
+            <TouchableOpacity onPress={() => router.push('/clergy-messages' as never)} hitSlop={8}>
+              <Text style={{ color: colors.primary, fontWeight: '700', fontSize: 13 }}>Ver histórico ›</Text>
+            </TouchableOpacity>
+          </View>
           <View style={styles.sectionCard}>{renderClergyMessages()}</View>
         </View>
 

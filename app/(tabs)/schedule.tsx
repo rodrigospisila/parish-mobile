@@ -353,7 +353,7 @@ export default function ScheduleScreen() {
         <View style={styles.rosterContent}>
           <View style={styles.rosterHeader}>
             <Text style={styles.rosterEventTitle} numberOfLines={1}>
-              {roster.eventTitle}
+              {roster.coupleWith ? '💍 ' : ''}{roster.eventTitle}
             </Text>
             <View style={[styles.statusBadge, { backgroundColor: statusColor + '20' }]}>
               <View style={[styles.statusDot, { backgroundColor: statusColor }]} />
@@ -362,6 +362,11 @@ export default function ScheduleScreen() {
               </Text>
             </View>
           </View>
+          {roster.coupleWith ? (
+            <Text style={{ fontSize: 12, color: colors.textSecondary, marginTop: 2 }}>
+              💍 Servindo em casal com {roster.coupleWith}
+            </Text>
+          ) : null}
 
           <Text style={styles.rosterDate}>
             {rosterWhenLabel(roster)}

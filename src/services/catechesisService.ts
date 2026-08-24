@@ -44,6 +44,11 @@ export interface CatechesisStudentReport {
   member: { id: string; fullName: string };
   status: CatechesisEnrollmentStatus;
   pendingDocuments?: string | null;
+  rejectionReason?: string | null;
+  /** Contato da família (mesmo dado da lista em PDF) — só para a equipe */
+  contact?: { name: string | null; phone: string | null } | null;
+  submittedDocs?: number;
+  docsCount?: number;
   attendanceRate: number | null;
   sessions: number;
 }
@@ -111,6 +116,8 @@ export interface FamilyCatechesisItem {
   }>;
   /** Quantos pareceres do catequista já foram registrados */
   assessmentsCount?: number;
+  /** Motivo da recusa (matrículas REJECTED) */
+  rejectionReason?: string | null;
 }
 
 /** Catequese da FAMÍLIA: matrículas próprias e dos dependentes. */
@@ -260,6 +267,45 @@ export const applyCatechesis = async (dto: {
   try {
     const { data } = await api.post('/catechesis/apply', dto);
     return data;
+  } catch (error) {
+    throw new Error(getErrorMessage(error));
+  }
+};
+
+/** Aviso direcionado a UMA família (equipe da turma). */
+export const notifyEnrollmentFamily = async (
+  enrollmentId: string,
+  message: string,
+): Promise<{ notified: number }> => {
+  try {
+    const { data } = await api.post(`/catechesis/enrollments/${enrollmentId}/notify`, { message });
+    return data;
+  } catch (error) {
+    throw new Error(getErrorMessage(error));
+  }
+};
+
+export interface ClassFeeSummary {
+  id: string;
+  description: string;
+  amount: number;
+  dueDate?: string | null;
+  collected: number;
+  paidCount: number;
+  waivedCount: number;
+  pendingCount: number;
+  students: Array<{
+    enrollmentId: string;
+    fullName: string;
+    status: 'PAID' | 'WAIVED' | 'PENDING';
+  }>;
+}
+
+/** Taxas da turma (leitura para a equipe; registrar pagamento é na web). */
+export const getClassFees = async (classId: string): Promise<ClassFeeSummary[]> => {
+  try {
+    const { data } = await api.get(`/catechesis/classes/${classId}/fees`);
+    return data ?? [];
   } catch (error) {
     throw new Error(getErrorMessage(error));
   }

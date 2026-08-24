@@ -177,6 +177,8 @@ export interface UserRoster {
   /** HH:MM da escala sem evento (agenda fixa) — hora exibida sem fuso */
   startTime?: string | null;
   responsibilities: string;
+  /** Nome do cônjuge escalado JUNTO nesta mesma escala (regra casais juntos) */
+  coupleWith?: string | null;
   confirmationStatus: RosterConfirmationStatus;
   checkedIn?: boolean;
   confirmedAt?: string;
@@ -756,6 +758,7 @@ export const getUserUpcomingRosters = async (userId: string): Promise<UserRoster
             null,
           startTime: assignment.schedule?.startTime ?? null,
           responsibilities: assignment.role || 'Participação',
+          coupleWith: assignment.coupleWith ?? null,
           confirmationStatus,
           checkedIn: !!assignment.checkedIn,
           confirmedAt: assignment.checkedInAt,

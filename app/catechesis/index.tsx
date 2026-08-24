@@ -16,6 +16,7 @@ import { Stack, useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import { FontAwesome5 } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
+import * as DocumentPicker from 'expo-document-picker';
 import { useColors } from '../../src/context/ThemeContext';
 import {
   FamilyCatechesisItem,
@@ -105,11 +106,38 @@ export default function CatechesisClassesScreen() {
     }
   };
 
+  const pickPdfAndSubmit = async (enrollmentId: string, kind: string) => {
+    const result = await DocumentPicker.getDocumentAsync({
+      type: ['application/pdf', 'image/*'],
+      copyToCacheDirectory: true,
+    });
+    if (result.canceled || !result.assets?.length) return;
+    const asset = result.assets[0];
+    setUploadingDoc(enrollmentId + kind);
+    try {
+      await submitCatechesisDocument(enrollmentId, kind, {
+        uri: asset.uri,
+        mimeType: asset.mimeType ?? 'application/pdf',
+        fileName: asset.name ?? 'documento.pdf',
+      });
+      Alert.alert(
+        'Documento enviado ✓',
+        'A coordenação vai conferir e dar baixa na pendência — você recebe o aviso por aqui.',
+      );
+      await load(true);
+    } catch (error: any) {
+      Alert.alert('Envio', error?.message ?? 'Não foi possível enviar. Tente novamente.');
+    } finally {
+      setUploadingDoc(null);
+    }
+  };
+
   const handleSendDocument = (enrollmentId: string, kind: string) => {
-    Alert.alert(`Enviar ${kind}`, 'Fotografe o documento ou escolha da galeria.', [
+    Alert.alert(`Enviar ${kind}`, 'Fotografe, escolha da galeria ou anexe um PDF.', [
       { text: 'Cancelar', style: 'cancel' },
       { text: '📷 Tirar foto', onPress: () => void pickAndSubmitDocument(enrollmentId, kind, true) },
       { text: '🖼 Galeria', onPress: () => void pickAndSubmitDocument(enrollmentId, kind, false) },
+      { text: '📄 Arquivo/PDF', onPress: () => void pickPdfAndSubmit(enrollmentId, kind) },
     ]);
   };
 
@@ -266,6 +294,21 @@ export default function CatechesisClassesScreen() {
                       </Text>
                     ) : null}
                   </View>
+                  {item.status === 'REJECTED' && (
+                    <>
+                      {item.rejectionReason ? (
+                        <Text style={styles.pendingLine} numberOfLines={3}>
+                          ℹ️ Motivo: {item.rejectionReason}
+                        </Text>
+                      ) : null}
+                      <TouchableOpacity
+                        style={styles.docBtn}
+                        onPress={() => router.push('/catechesis/apply' as never)}
+                      >
+                        <Text style={styles.docBtnText}>🔄 Inscrever novamente</Text>
+                      </TouchableOpacity>
+                    </>
+                  )}
                   {(item.status === 'ACTIVE' || item.status === 'PENDING_APPROVAL') &&
                   (item.pendingDocuments ?? '')
                     .split(/[;,]/)

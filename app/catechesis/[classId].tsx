@@ -35,6 +35,9 @@ import {
   getEnrollmentAssessments,
   upsertEnrollmentAssessment,
   upsertClassAssessmentsBatch,
+  notifyEnrollmentFamily,
+  getClassFees,
+  ClassFeeSummary,
 } from '../../src/services/catechesisService';
 
 /** Estado cíclico da chamada: null (sem marcação) → presente → atrasado → ausente. */
@@ -302,31 +305,66 @@ export default function CatechesisClassScreen() {
     ]);
   };
 
+  // Recusa com MOTIVO direto no app (a família vê o porquê no card)
+  const [rejectTarget, setRejectTarget] = useState<{ enrollmentId: string; name: string } | null>(null);
+  const [rejectReason, setRejectReason] = useState('');
+  const [rejecting, setRejecting] = useState(false);
   const handleReject = (enrollmentId: string, name: string) => {
-    Alert.alert(
-      'Recusar inscrição',
-      `A família de ${name} será avisada. Para registrar o motivo, use a área da coordenação na web.`,
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Recusar',
-          style: 'destructive',
-          onPress: () => {
-            void (async () => {
-              setDecidingId(enrollmentId);
-              try {
-                await rejectCatechesisEnrollment(enrollmentId);
-                await load(true);
-              } catch (error: any) {
-                Alert.alert('Erro', error?.message ?? 'Não foi possível recusar.');
-              } finally {
-                setDecidingId(null);
-              }
-            })();
-          },
-        },
-      ],
-    );
+    setRejectReason('');
+    setRejectTarget({ enrollmentId, name });
+  };
+  const submitReject = async () => {
+    if (!rejectTarget) return;
+    setRejecting(true);
+    try {
+      await rejectCatechesisEnrollment(rejectTarget.enrollmentId, rejectReason.trim() || undefined);
+      setRejectTarget(null);
+      await load(true);
+    } catch (error: any) {
+      Alert.alert('Erro', error?.message ?? 'Não foi possível recusar.');
+    } finally {
+      setRejecting(false);
+    }
+  };
+
+  // Aviso direcionado a UMA família
+  const [noticeTarget, setNoticeTarget] = useState<{ enrollmentId: string; name: string } | null>(null);
+  const [noticeText, setNoticeText] = useState('');
+  const [sendingNotice, setSendingNotice] = useState(false);
+  const submitNotice = async () => {
+    if (!noticeTarget || !noticeText.trim()) return;
+    setSendingNotice(true);
+    try {
+      const result = await notifyEnrollmentFamily(noticeTarget.enrollmentId, noticeText.trim());
+      setNoticeTarget(null);
+      setNoticeText('');
+      Alert.alert(
+        result.notified > 0 ? 'Aviso enviado ✓' : 'Sem destinatários',
+        result.notified > 0
+          ? `Enviado para ${result.notified} conta(s) da família.`
+          : 'A família não tem conta no app para receber o aviso.',
+      );
+    } catch (error: any) {
+      Alert.alert('Erro', error?.message ?? 'Não foi possível enviar.');
+    } finally {
+      setSendingNotice(false);
+    }
+  };
+
+  // Taxas da turma — leitura para a equipe (pagamentos ficam na web)
+  const [feesView, setFeesView] = useState<ClassFeeSummary[] | null>(null);
+  const openFees = async () => {
+    if (!classId) return;
+    try {
+      const fees = await getClassFees(classId);
+      if (!fees.length) {
+        Alert.alert('Taxas', 'Nenhuma taxa de material nesta turma.');
+        return;
+      }
+      setFeesView(fees);
+    } catch (error: any) {
+      Alert.alert('Taxas', error?.message ?? 'Não foi possível carregar.');
+    }
   };
   const averageAttendance = useMemo(() => {
     const rates = activeStudents
@@ -596,12 +634,21 @@ export default function CatechesisClassScreen() {
             {/* Catequizandos */}
             <View style={[styles.sectionHead, { marginTop: 18 }]}>
               <Text style={styles.sectionTitle}>Catequizandos</Text>
-              {activeStudents.length > 0 && (
-                <TouchableOpacity style={styles.newBtn} onPress={openBatch}>
-                  <FontAwesome5 name="users" size={11} color="#fff" />
-                  <Text style={styles.newBtnText}>Parecer em lote</Text>
+              <View style={{ flexDirection: 'row', gap: 8 }}>
+                <TouchableOpacity
+                  style={[styles.newBtn, { backgroundColor: colors.warning }]}
+                  onPress={() => void openFees()}
+                >
+                  <FontAwesome5 name="coins" size={11} color="#fff" />
+                  <Text style={styles.newBtnText}>Taxas</Text>
                 </TouchableOpacity>
-              )}
+                {activeStudents.length > 0 && (
+                  <TouchableOpacity style={styles.newBtn} onPress={openBatch}>
+                    <FontAwesome5 name="users" size={11} color="#fff" />
+                    <Text style={styles.newBtnText}>Parecer em lote</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
             </View>
             <Text style={styles.emptyLine}>Toque no catequizando para ver/escrever o parecer.</Text>
             {activeStudents.length > 8 && (
@@ -634,7 +681,21 @@ export default function CatechesisClassScreen() {
                       📄 Pendente: {student.pendingDocuments}
                     </Text>
                   ) : null}
+                  {(student.submittedDocs ?? 0) > 0 ? (
+                    <Text style={styles.studentPending} numberOfLines={1}>
+                      📎 {student.submittedDocs} documento(s) aguardando conferência (web)
+                    </Text>
+                  ) : null}
                 </View>
+                <TouchableOpacity
+                  hitSlop={8}
+                  onPress={() => {
+                    setNoticeText('');
+                    setNoticeTarget({ enrollmentId: student.enrollmentId, name: student.member.fullName });
+                  }}
+                >
+                  <FontAwesome5 name="envelope" size={14} color={colors.textSecondary} />
+                </TouchableOpacity>
                 <Text
                   style={[
                     styles.studentRate,
@@ -709,6 +770,104 @@ export default function CatechesisClassScreen() {
               onPress={() => void handleNotifyFamilies()}
             >
               <Text style={styles.primaryBtnText}>{notifying ? 'Enviando...' : 'Enviar aviso'}</Text>
+            </TouchableOpacity>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* Recusar com motivo */}
+      <Modal visible={!!rejectTarget} transparent animationType="fade" onRequestClose={() => setRejectTarget(null)}>
+        <Pressable style={styles.modalOverlay} onPress={() => setRejectTarget(null)}>
+          <Pressable style={styles.modalCard} onPress={() => {}}>
+            <Text style={styles.modalTitle}>Recusar inscrição · {rejectTarget?.name ?? ''}</Text>
+            <Text style={styles.fieldLabel}>
+              Motivo (opcional — a família vê no card e no aviso)
+            </Text>
+            <TextInput
+              style={[styles.input, { minHeight: 80, textAlignVertical: 'top' }]}
+              value={rejectReason}
+              onChangeText={setRejectReason}
+              placeholder="Ex.: turma incompatível com a idade — procure a turma infantil"
+              placeholderTextColor={colors.textTertiary}
+              multiline
+              maxLength={300}
+            />
+            <TouchableOpacity
+              style={[styles.primaryBtn, { backgroundColor: colors.error ?? '#d9534f' }, rejecting && { opacity: 0.6 }]}
+              disabled={rejecting}
+              onPress={() => void submitReject()}
+            >
+              <Text style={styles.primaryBtnText}>{rejecting ? 'Recusando...' : 'Recusar inscrição'}</Text>
+            </TouchableOpacity>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* Aviso a UMA família */}
+      <Modal visible={!!noticeTarget} transparent animationType="fade" onRequestClose={() => setNoticeTarget(null)}>
+        <Pressable style={styles.modalOverlay} onPress={() => setNoticeTarget(null)}>
+          <Pressable style={styles.modalCard} onPress={() => {}}>
+            <Text style={styles.modalTitle}>✉ Avisar a família · {noticeTarget?.name ?? ''}</Text>
+            <TextInput
+              style={[styles.input, { minHeight: 90, textAlignVertical: 'top' }]}
+              value={noticeText}
+              onChangeText={setNoticeText}
+              placeholder="Ex.: Notamos as faltas do João — está tudo bem? Podemos ajudar?"
+              placeholderTextColor={colors.textTertiary}
+              multiline
+              maxLength={500}
+            />
+            <TouchableOpacity
+              style={[styles.primaryBtn, sendingNotice && { opacity: 0.6 }]}
+              disabled={sendingNotice}
+              onPress={() => void submitNotice()}
+            >
+              <Text style={styles.primaryBtnText}>{sendingNotice ? 'Enviando...' : 'Enviar aviso'}</Text>
+            </TouchableOpacity>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* Taxas (leitura) */}
+      <Modal visible={!!feesView} transparent animationType="fade" onRequestClose={() => setFeesView(null)}>
+        <Pressable style={styles.modalOverlay} onPress={() => setFeesView(null)}>
+          <Pressable style={styles.modalCard} onPress={() => {}}>
+            <Text style={styles.modalTitle}>💰 Taxas da turma</Text>
+            <ScrollView style={{ maxHeight: 420 }} showsVerticalScrollIndicator={false}>
+              {(feesView ?? []).map((fee) => (
+                <View key={fee.id} style={{ marginBottom: 14 }}>
+                  <Text style={styles.sessionDate}>
+                    {fee.description} · R$ {fee.amount.toFixed(2).replace('.', ',')}
+                  </Text>
+                  <Text style={styles.sessionMeta}>
+                    Arrecadado R$ {fee.collected.toFixed(2).replace('.', ',')} · {fee.paidCount} pago(s) ·{' '}
+                    {fee.waivedCount} isento(s) · {fee.pendingCount} pendente(s)
+                  </Text>
+                  {fee.students.map((student) => (
+                    <View key={student.enrollmentId} style={styles.attendanceRowLike}>
+                      <Text style={styles.attendanceDateLike}>{student.fullName}</Text>
+                      <Text
+                        style={{
+                          fontSize: 12.5,
+                          fontWeight: '800',
+                          color:
+                            student.status === 'PAID'
+                              ? colors.success
+                              : student.status === 'WAIVED'
+                                ? colors.textTertiary
+                                : colors.warning,
+                        }}
+                      >
+                        {student.status === 'PAID' ? 'Pago' : student.status === 'WAIVED' ? 'Isento' : 'Pendente'}
+                      </Text>
+                    </View>
+                  ))}
+                </View>
+              ))}
+              <Text style={styles.sessionMeta}>Registrar pagamento/isenção é na área da coordenação (web).</Text>
+            </ScrollView>
+            <TouchableOpacity style={[styles.primaryBtn, { marginTop: 10 }]} onPress={() => setFeesView(null)}>
+              <Text style={styles.primaryBtnText}>Fechar</Text>
             </TouchableOpacity>
           </Pressable>
         </Pressable>
@@ -1111,6 +1270,16 @@ const createStyles = (colors: ReturnType<typeof useColors>) =>
     },
     primaryBtnText: { color: '#fff', fontSize: 15, fontWeight: '800' },
 
+    attendanceRowLike: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 10,
+      paddingVertical: 7,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: colors.border,
+    },
+    attendanceDateLike: { flex: 1, fontSize: 13.5, color: colors.text },
     assessCard: {
       backgroundColor: colors.card,
       borderRadius: 12,
