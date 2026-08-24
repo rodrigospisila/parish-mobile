@@ -30,14 +30,21 @@ export default function ProfileScreen() {
   useFocusEffect(
     React.useCallback(() => {
       void refreshLinks();
+      // Após o login a resposta traz só os IDs — sem isto a Comunidade fica
+      // "Definir" até o app ir a background e voltar
+      void refreshUser();
       Promise.all([
         getMyCatechesisClasses().catch(() => []),
         getMyFamilyCatechesis().catch(() => []),
       ])
         .then(([classes, family]) => setCatechesisClassCount(classes.length + family.length))
         .catch(() => setCatechesisClassCount(0));
-    }, [refreshLinks]),
+    }, [refreshLinks, refreshUser]),
   );
+
+  // Fallback: usuários antigos podem ter parishId nulo no cadastro — o vínculo
+  // principal de comunidade resolve a paróquia para exibição
+  const primaryLink = links.find((link) => link.isPrimary) ?? links[0];
   const router = useRouter();
   const colors = useColors();
   const { theme, setTheme, isDark } = useTheme();
@@ -178,7 +185,9 @@ export default function ProfileScreen() {
             <View style={styles.divider} />
             <View style={styles.infoRow}>
               <Text style={styles.infoLabel}>Paróquia</Text>
-              <Text style={styles.infoValue} numberOfLines={1}>{user?.parish?.name || 'Não informada'}</Text>
+              <Text style={styles.infoValue} numberOfLines={1}>
+                {user?.parish?.name || primaryLink?.community?.parish?.name || 'Não informada'}
+              </Text>
             </View>
             <View style={styles.divider} />
             <TouchableOpacity
@@ -189,7 +198,7 @@ export default function ProfileScreen() {
               <Text style={styles.infoLabel}>Comunidade</Text>
               <View style={styles.infoValueLink}>
                 <Text style={[styles.infoValue, { color: colors.primary }]} numberOfLines={1}>
-                  {user?.community?.name || 'Definir'}
+                  {user?.community?.name || primaryLink?.community?.name || 'Definir'}
                 </Text>
                 <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />
               </View>

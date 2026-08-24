@@ -109,11 +109,13 @@ export default function LoginScreen() {
             </Link>
           </View>
 
-          <View style={styles.testCredentials}>
-            <Text style={styles.testTitle}>Credenciais de Teste:</Text>
-            <Text style={styles.testText}>Com comunidade: adm@santarita.com.br / 12345678</Text>
-            <Text style={styles.testText}>Sem comunidade: user@test.com / 123456</Text>
-          </View>
+          {__DEV__ && (
+            <View style={styles.testCredentials}>
+              <Text style={styles.testTitle}>Credenciais de Teste:</Text>
+              <Text style={styles.testText}>Com comunidade: adm@santarita.com.br / 12345678</Text>
+              <Text style={styles.testText}>Sem comunidade: user@test.com / 123456</Text>
+            </View>
+          )}
         </View>
       </ScrollView>
     </KeyboardAvoidingView>

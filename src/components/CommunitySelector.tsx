@@ -44,7 +44,20 @@ const CommunitySelector: React.FC<Props> = ({
   useEffect(() => {
     (async () => {
       try {
-        setDioceses(await getDioceses());
+        const data = await getDioceses();
+        setDioceses(data);
+        // Usuários antigos têm communityId sem diocese/paróquia no cadastro —
+        // deriva os ancestrais pela árvore para a cascata abrir pré-selecionada
+        if (initialCommunityId && (!initialDioceseId || !initialParishId)) {
+          for (const diocese of data) {
+            for (const parish of diocese.parishes ?? []) {
+              if ((parish.communities ?? []).some((c) => c.id === initialCommunityId)) {
+                setDioceseId((current) => current || diocese.id);
+                setParishId((current) => current || parish.id);
+              }
+            }
+          }
+        }
       } catch (e) {
         Alert.alert('Erro', 'Não foi possível carregar os dados da Igreja.');
         console.error(e);
