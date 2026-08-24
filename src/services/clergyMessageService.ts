@@ -34,7 +34,9 @@ export const getClergyMessages = async (
   communityId?: string,
 ): Promise<{ messages: ClergyMessage[]; fromCache: boolean }> => {
   try {
-    const cacheKey = communityId ? `clergy-messages:${communityId}` : 'clergy-messages';
+    const cacheKey = communityId
+      ? `clergy-messages:${communityId}:${limit}`
+      : `clergy-messages:${limit}`;
     const result = await cachedFetch<ClergyMessage[]>(cacheKey, async () => {
       const response = await api.get<ClergyMessage[]>('/clergy-messages', {
         params: { limit, ...(communityId ? { communityId } : {}) },

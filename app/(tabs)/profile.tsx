@@ -214,26 +214,26 @@ export default function ProfileScreen() {
                   style={styles.infoRow}
                   activeOpacity={0.7}
                   onPress={() => {
-                    const options: any[] = [{ text: 'Fechar', style: 'cancel' }];
+                    // Android mostra no máximo 3 botões num Alert — priorize
+                    const options: any[] = [];
                     if (parishContact?.phone) {
-                      options.unshift({
-                        text: `📞 Ligar (${parishContact.phone})`,
+                      const digits = (parishContact.phone ?? '').replace(/\D/g, '');
+                      const intl = digits.startsWith('55') ? digits : `55${digits}`;
+                      options.push({
+                        text: '💬 WhatsApp',
+                        onPress: () => Linking.openURL(`https://wa.me/${intl}`),
+                      });
+                      options.push({
+                        text: `📞 Ligar`,
                         onPress: () => Linking.openURL(`tel:${parishContact.phone}`),
                       });
-                      options.unshift({
-                        text: '💬 WhatsApp',
-                        onPress: () =>
-                          Linking.openURL(
-                            `https://wa.me/55${(parishContact.phone ?? '').replace(/\D/g, '')}`,
-                          ),
-                      });
-                    }
-                    if (parishContact?.email) {
-                      options.unshift({
-                        text: `✉️ E-mail`,
+                    } else if (parishContact?.email) {
+                      options.push({
+                        text: '✉️ E-mail',
                         onPress: () => Linking.openURL(`mailto:${parishContact.email}`),
                       });
                     }
+                    options.push({ text: 'Fechar', style: 'cancel' });
                     Alert.alert('Falar com a secretaria', 'Como prefere entrar em contato?', options);
                   }}
                 >

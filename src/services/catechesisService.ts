@@ -291,6 +291,9 @@ export interface ClassFeeSummary {
   amount: number;
   dueDate?: string | null;
   collected: number;
+  /** Pagamentos de quem saiu da turma (transferidos/desistentes) */
+  othersCollected?: number;
+  othersCount?: number;
   paidCount: number;
   waivedCount: number;
   pendingCount: number;

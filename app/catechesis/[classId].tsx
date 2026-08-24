@@ -842,6 +842,9 @@ export default function CatechesisClassScreen() {
                   <Text style={styles.sessionMeta}>
                     Arrecadado R$ {fee.collected.toFixed(2).replace('.', ',')} · {fee.paidCount} pago(s) ·{' '}
                     {fee.waivedCount} isento(s) · {fee.pendingCount} pendente(s)
+                    {(fee.othersCount ?? 0) > 0
+                      ? ` · +R$ ${(fee.othersCollected ?? 0).toFixed(2).replace('.', ',')} de quem saiu da turma`
+                      : ''}
                   </Text>
                   {fee.students.map((student) => (
                     <View key={student.enrollmentId} style={styles.attendanceRowLike}>
