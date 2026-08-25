@@ -123,53 +123,59 @@ export default function PastoralsScreen() {
     return pastoralColors[index % pastoralColors.length];
   };
 
-  const renderPastoralCard = ({ item, index }: { item: Pastoral; index: number }) => (
-    <TouchableOpacity
-      style={styles.pastoralCard}
-      onPress={() => openPastoralDetails(item)}
-      activeOpacity={0.7}
-    >
-      <View style={[styles.pastoralIcon, { backgroundColor: getPastoralColor(index) }]}>
-        <Text style={styles.pastoralIconText}>{item.name.charAt(0)}</Text>
-      </View>
-      <View style={styles.pastoralInfo}>
-        <Text style={styles.pastoralName}>{item.name}</Text>
-        {item.description && (
-          <Text style={styles.pastoralDescription} numberOfLines={2}>
-            {item.description}
-          </Text>
-        )}
-        <View style={styles.pastoralMeta}>
-          <Text style={styles.pastoralMetaText}>
-            {item.members.length} {item.members.length === 1 ? 'membro' : 'membros'}
-          </Text>
-          {item.coordinator && (
-            <Text style={styles.pastoralMetaText}>
-              • Coord: {item.coordinator.name.split(' ')[0]}
-            </Text>
-          )}
-        </View>
-        {(() => {
-          const state = joinStateOf(item.id);
-          if (state === 'member') return <Text style={styles.joinState}>✓ Você participa</Text>;
-          if (state === 'pending') return <Text style={styles.joinState}>⏳ Pedido enviado — aguardando a coordenação</Text>;
-          return (
-            <TouchableOpacity
-              style={styles.joinBtn}
-              disabled={joiningId === item.id}
-              onPress={() => handleJoin(item)}
-              hitSlop={6}
-            >
-              <Text style={styles.joinBtnText}>
-                {joiningId === item.id ? 'Enviando...' : state === 'rejected' ? '🙋 Pedir novamente' : '🙋 Quero participar'}
+  const renderPastoralCard = ({ item, index }: { item: Pastoral; index: number }) => {
+    const state = joinStateOf(item.id);
+    return (
+      // Card = View: o botão "quero participar" não pode ficar aninhado no
+      // touchable do card (botão dentro de botão quebra na web e confunde o toque)
+      <View style={styles.pastoralCard}>
+        <TouchableOpacity
+          style={styles.pastoralCardTop}
+          onPress={() => openPastoralDetails(item)}
+          activeOpacity={0.7}
+        >
+          <View style={[styles.pastoralIcon, { backgroundColor: getPastoralColor(index) }]}>
+            <Text style={styles.pastoralIconText}>{item.name.charAt(0)}</Text>
+          </View>
+          <View style={styles.pastoralInfo}>
+            <Text style={styles.pastoralName}>{item.name}</Text>
+            {item.description && (
+              <Text style={styles.pastoralDescription} numberOfLines={2}>
+                {item.description}
               </Text>
-            </TouchableOpacity>
-          );
-        })()}
+            )}
+            <View style={styles.pastoralMeta}>
+              <Text style={styles.pastoralMetaText}>
+                {item.members.length} {item.members.length === 1 ? 'membro' : 'membros'}
+              </Text>
+              {item.coordinator && (
+                <Text style={styles.pastoralMetaText}>
+                  • Coord: {item.coordinator.name.split(' ')[0]}
+                </Text>
+              )}
+            </View>
+          </View>
+          <Text style={styles.chevron}>›</Text>
+        </TouchableOpacity>
+        {state === 'member' ? (
+          <Text style={styles.joinState}>✓ Você participa</Text>
+        ) : state === 'pending' ? (
+          <Text style={styles.joinState}>⏳ Pedido enviado — aguardando a coordenação</Text>
+        ) : (
+          <TouchableOpacity
+            style={styles.joinBtn}
+            disabled={joiningId === item.id}
+            onPress={() => handleJoin(item)}
+            hitSlop={6}
+          >
+            <Text style={styles.joinBtnText}>
+              {joiningId === item.id ? 'Enviando...' : state === 'rejected' ? '🙋 Pedir novamente' : '🙋 Quero participar'}
+            </Text>
+          </TouchableOpacity>
+        )}
       </View>
-      <Text style={styles.chevron}>›</Text>
-    </TouchableOpacity>
-  );
+    );
+  };
 
   const renderMemberItem = (member: Member, isCoordinator: boolean = false) => (
     <View key={member.id} style={styles.memberItem}>
@@ -344,8 +350,6 @@ const createStyles = (colors: ReturnType<typeof useColors>) =>
       padding: 15,
     },
     pastoralCard: {
-      flexDirection: 'row',
-      alignItems: 'center',
       backgroundColor: colors.card,
       borderRadius: 12,
       padding: 15,
@@ -392,10 +396,12 @@ const createStyles = (colors: ReturnType<typeof useColors>) =>
       color: colors.textTertiary,
       marginRight: 5,
     },
-    joinState: { marginTop: 6, fontSize: 12, fontWeight: '600', color: colors.textSecondary },
+    pastoralCardTop: { flexDirection: 'row', alignItems: 'center' },
+    joinState: { marginTop: 8, marginLeft: 62, fontSize: 12, fontWeight: '600', color: colors.textSecondary },
     joinBtn: {
       alignSelf: 'flex-start',
       marginTop: 8,
+      marginLeft: 62,
       borderWidth: 1,
       borderColor: colors.primary,
       borderRadius: 999,
