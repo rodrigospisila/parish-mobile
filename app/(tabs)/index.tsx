@@ -1068,6 +1068,24 @@ export default function HomeScreen() {
           </View>
         )}
 
+        {/* DÍZIMO E OFERTAS */}
+        <TouchableOpacity
+          style={styles.nearbyBanner}
+          activeOpacity={0.9}
+          onPress={() => router.push('/tithe' as never)}
+        >
+          <View style={styles.nearbyIcon}>
+            <FontAwesome5 name="hand-holding-heart" size={18} color={colors.primary} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.nearbyTitle}>Dízimo e ofertas</Text>
+            <Text style={styles.nearbySub} numberOfLines={1}>
+              Contribua pelo Pix da paróquia direto do app
+            </Text>
+          </View>
+          <FontAwesome5 name="chevron-right" size={14} color={colors.textTertiary} />
+        </TouchableOpacity>
+
         {/* MURAL DE ORAÇÃO */}
         <TouchableOpacity
           style={styles.nearbyBanner}

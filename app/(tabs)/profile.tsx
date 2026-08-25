@@ -246,6 +246,14 @@ export default function ProfileScreen() {
               </>
             ) : null}
             <View style={styles.divider} />
+            <TouchableOpacity style={styles.infoRow} onPress={() => router.push('/tithe' as never)}>
+              <Text style={styles.infoLabel}>Dízimo</Text>
+              <View style={styles.infoValueLink}>
+                <Text style={[styles.infoValue, { color: colors.primary }]}>Dízimo e ofertas pelo Pix</Text>
+                <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />
+              </View>
+            </TouchableOpacity>
+            <View style={styles.divider} />
             <TouchableOpacity
               style={styles.infoRow}
               onPress={() => router.push('/change-community' as never)}
