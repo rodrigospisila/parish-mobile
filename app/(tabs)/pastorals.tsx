@@ -1,16 +1,6 @@
+import { useFocusEffect } from '@react-navigation/native';
 import React, { useState, useEffect, useCallback } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  ActivityIndicator,
-  Alert,
-  TouchableOpacity,
-  Modal,
-  ScrollView,
-  FlatList,
-  SafeAreaView,
-} from 'react-native';
+import { View, Text, StyleSheet, ActivityIndicator, Alert, TouchableOpacity, Modal, ScrollView, FlatList, SafeAreaView, RefreshControl } from 'react-native';
 import { useAuth } from '../../src/context/AuthContext';
 import { useCommunity } from '../../src/context/CommunityContext';
 import { useColors } from '../../src/context/ThemeContext';
@@ -75,15 +65,16 @@ export default function PastoralsScreen() {
   const { activeCommunityId } = useCommunity();
   const communityId = activeCommunityId ?? user?.communityId;
 
-  // Carregar Pastorais
-  useEffect(() => {
-    if (!communityId) {
-      setIsLoading(false);
-      return;
-    }
-
-    const loadPastorals = async () => {
-      setIsLoading(true);
+  // Carregar Pastorais — ao focar a aba (pedido aprovado/recusado reflete na volta)
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const loadPastorals = useCallback(
+    async (refresh = false) => {
+      if (!communityId) {
+        setIsLoading(false);
+        return;
+      }
+      if (refresh) setIsRefreshing(true);
+      else setIsLoading(true);
       try {
         const data = await getPastorals(communityId);
         setPastorals(data);
@@ -92,11 +83,17 @@ export default function PastoralsScreen() {
         console.error(error);
       } finally {
         setIsLoading(false);
+        setIsRefreshing(false);
       }
-    };
-
-    loadPastorals();
-  }, [communityId]);
+    },
+    [communityId],
+  );
+  useFocusEffect(
+    useCallback(() => {
+      void loadPastorals();
+      void loadJoinInfo();
+    }, [loadPastorals, loadJoinInfo]),
+  );
 
   const openPastoralDetails = (pastoral: Pastoral) => {
     setSelectedPastoral(pastoral);
@@ -238,6 +235,15 @@ export default function PastoralsScreen() {
           renderItem={renderPastoralCard}
           contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl
+              refreshing={isRefreshing}
+              onRefresh={() => {
+                void loadPastorals(true);
+                void loadJoinInfo();
+              }}
+            />
+          }
           ListEmptyComponent={
             <View style={styles.emptyState}>
               <Text style={styles.emptyStateText}>Nenhuma pastoral cadastrada.</Text>

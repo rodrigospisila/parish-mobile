@@ -601,3 +601,29 @@ export const getClassConversations = async (classId: string): Promise<ClassConve
     throw new Error(getErrorMessage(error));
   }
 };
+
+/**
+ * Turmas da comunidade (coordenação): quem coordena mas não é catequista de
+ * nenhuma turma ainda consegue abrir as turmas para aprovar/conversar.
+ */
+export const getCommunityCatechesisClasses = async (): Promise<MyCatechesisClass[]> => {
+  try {
+    const { data } = await api.get('/catechesis/classes');
+    return (data ?? []).map((c: any) => ({
+      classId: c.id,
+      role: 'Coordenação',
+      name: c.name,
+      year: c.year,
+      weekday: c.weekday,
+      time: c.time,
+      room: c.room,
+      status: c.status,
+      stage: c.stage,
+      community: c.community,
+      activeEnrollments: c._count?.enrollments ?? 0,
+      sessionsCount: c._count?.sessions ?? 0,
+    }));
+  } catch {
+    return [];
+  }
+};

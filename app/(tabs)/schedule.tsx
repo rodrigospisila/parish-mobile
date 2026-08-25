@@ -16,17 +16,7 @@ import {
 import { useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '../../src/context/AuthContext';
 import { useColors } from '../../src/context/ThemeContext';
-import {
-  UserRoster,
-  ScheduleTeamMember,
-  getUserUpcomingRosters,
-  getUserRosterHistory,
-  confirmRosterPresence,
-  declineRosterPresence,
-  respondGroupPresence,
-  getScheduleTeam,
-  RosterConfirmationStatus,
-} from '../../src/services/pastoralService';
+import { UserRoster, ScheduleTeamMember, getUserUpcomingRosters, getUserRosterHistory, confirmRosterPresence, declineRosterPresence, respondGroupPresence, getScheduleTeam, RosterConfirmationStatus, declineRosterPresenceWithCouple } from '../../src/services/pastoralService';
 import {
   MySwaps,
   SwapRequest,
@@ -204,12 +194,22 @@ export default function ScheduleScreen() {
     }
   };
 
+  type RosterWriteOutcome = 'ok' | 'queued' | 'error';
+
   const handleDeclinePresence = (roster: UserRoster) => {
     const wasConfirmed = roster.confirmationStatus === 'confirmed';
     const doDecline = async (declineCouple: boolean) => {
       setProcessingRosterId(roster.id);
       try {
-        const outcome = await declineRosterPresence(roster.id, undefined, declineCouple);
+        let coupleDeclined: string | null = null;
+        let outcome: RosterWriteOutcome;
+        if (declineCouple) {
+          const result = await declineRosterPresenceWithCouple(roster.id);
+          outcome = result.outcome;
+          coupleDeclined = result.coupleDeclined;
+        } else {
+          outcome = await declineRosterPresence(roster.id);
+        }
         if (outcome !== 'error') {
           setUserRosters((prev) =>
             prev.map((r) =>
@@ -221,8 +221,14 @@ export default function ScheduleScreen() {
               'Sem conexão',
               'Sua resposta foi salva no aparelho e será enviada automaticamente quando a internet voltar.',
             );
-          } else if (declineCouple && roster.coupleWith) {
-            Alert.alert('Recusa em casal', `A escala foi recusada por você e por ${roster.coupleWith}. O coordenador foi avisado.`);
+          } else if (declineCouple) {
+            // Só confirma o par quando o backend de fato recusou o cônjuge
+            Alert.alert(
+              'Recusa em casal',
+              coupleDeclined
+                ? `A escala foi recusada por você e por ${coupleDeclined}. O coordenador foi avisado.`
+                : `Só a sua presença foi recusada — ${roster.coupleWith} continua escalado(a).`,
+            );
           }
         } else {
           Alert.alert('Erro', 'Não foi possível registrar sua resposta. Tente novamente.');

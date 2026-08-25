@@ -34,7 +34,9 @@ import {
   EnrollmentAttendanceItem,
   AppNotification,
   shareFeeReceipt,
+  getCommunityCatechesisClasses,
 } from '../../src/services/catechesisService';
+import { useAuth } from '../../src/context/AuthContext';
 
 const WEEKDAYS = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
 
@@ -43,6 +45,10 @@ export default function CatechesisClassesScreen() {
   const router = useRouter();
   const colors = useColors();
   const styles = createStyles(colors);
+  const { user } = useAuth();
+  const isCoordinatorRole = ['PASTORAL_COORDINATOR', 'COMMUNITY_COORDINATOR', 'PARISH_ADMIN', 'DIOCESAN_ADMIN', 'SYSTEM_ADMIN'].includes(
+    String(user?.role ?? ''),
+  );
 
   const [classes, setClasses] = useState<MyCatechesisClass[]>([]);
   const [family, setFamily] = useState<FamilyCatechesisItem[]>([]);
@@ -180,7 +186,10 @@ export default function CatechesisClassesScreen() {
         getMyCatechesisClasses(),
         getMyFamilyCatechesis().catch(() => [] as FamilyCatechesisItem[]),
       ]);
-      setClasses(mine);
+      // Coordenação sem turma própria: lista as turmas da comunidade (o backend
+      // já autoriza aprovar/conversar por papel + escopo)
+      const coordination = mine.length === 0 && isCoordinatorRole ? await getCommunityCatechesisClasses() : [];
+      setClasses([...mine, ...coordination]);
       setFamily(familyItems);
     } catch (error) {
       console.error('Erro ao carregar turmas de catequese:', error);
@@ -188,7 +197,7 @@ export default function CatechesisClassesScreen() {
       setIsLoading(false);
       setIsRefreshing(false);
     }
-  }, []);
+  }, [isCoordinatorRole]);
 
   useFocusEffect(
     useCallback(() => {
@@ -445,7 +454,11 @@ export default function CatechesisClassesScreen() {
 
           {classes.length > 0 && (
             <Text style={styles.sectionLabel}>
-              {family.length > 0 ? 'Minhas turmas (catequista)' : 'Suas turmas como catequista ou auxiliar'}
+              {classes.every((klass) => klass.role === 'Coordenação')
+                ? 'Turmas da comunidade (coordenação)'
+                : family.length > 0
+                  ? 'Minhas turmas (catequista)'
+                  : 'Suas turmas como catequista ou auxiliar'}
             </Text>
           )}
           {classes.length > 0 && (

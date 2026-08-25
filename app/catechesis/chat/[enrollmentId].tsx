@@ -37,14 +37,24 @@ export default function CatechesisChatScreen() {
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
   const scrollRef = useRef<ScrollView>(null);
+  // Só a resposta da ÚLTIMA carga vale; e uma carga em voo não apaga o que
+  // acabou de ser enviado (merge por id)
+  const loadSeq = useRef(0);
 
   const load = useCallback(
     async (silent = false) => {
       if (!enrollmentId) return;
+      const seq = ++loadSeq.current;
       if (!silent) setIsLoading(true);
       try {
         const data = await getEnrollmentMessages(enrollmentId);
-        setThread(data);
+        if (seq !== loadSeq.current) return;
+        setThread((prev) => {
+          if (!prev) return data;
+          const known = new Set(data.messages.map((m) => m.id));
+          const extra = prev.messages.filter((m) => !known.has(m.id));
+          return { ...data, messages: [...data.messages, ...extra] };
+        });
       } catch (error: any) {
         if (!silent) Alert.alert('Conversa', error?.message ?? 'Não foi possível abrir a conversa.');
       } finally {
@@ -75,7 +85,11 @@ export default function CatechesisChatScreen() {
     setSending(true);
     try {
       const message = await sendEnrollmentMessage(enrollmentId, body);
-      setThread((current) => (current ? { ...current, messages: [...current.messages, message] } : current));
+      setThread((current) =>
+        current && !current.messages.some((m) => m.id === message.id)
+          ? { ...current, messages: [...current.messages, message] }
+          : current,
+      );
       setText('');
     } catch (error: any) {
       Alert.alert('Não enviada', error?.message ?? 'Tente novamente.');

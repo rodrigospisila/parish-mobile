@@ -558,6 +558,20 @@ export default function CatechesisClassScreen() {
                       ) : null}
                     </View>
                     <TouchableOpacity
+                      hitSlop={8}
+                      style={{ marginRight: 10, flexDirection: 'row', alignItems: 'center', gap: 3 }}
+                      onPress={() => router.push(`/catechesis/chat/${student.enrollmentId}` as never)}
+                    >
+                      <FontAwesome5
+                        name="comments"
+                        size={14}
+                        color={student.unreadMessages ? colors.primary : colors.textSecondary}
+                      />
+                      {student.unreadMessages ? (
+                        <Text style={{ fontSize: 11, fontWeight: '800', color: colors.primary }}>{student.unreadMessages}</Text>
+                      ) : null}
+                    </TouchableOpacity>
+                    <TouchableOpacity
                       style={[styles.decisionBtn, { backgroundColor: colors.success }]}
                       disabled={decidingId === student.enrollmentId}
                       onPress={() => handleApprove(student.enrollmentId, student.member.fullName)}

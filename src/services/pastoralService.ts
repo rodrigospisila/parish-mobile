@@ -960,6 +960,7 @@ export interface CoordinatorOverview {
   swaps: { pending: number };
   pastorals: { joinRequests: number };
   prayers: { pendingModeration: number };
+  canModeratePrayers?: boolean;
   total: number;
 }
 
@@ -970,5 +971,31 @@ export const getCoordinatorOverview = async (communityId?: string | null): Promi
     return data ?? null;
   } catch {
     return null;
+  }
+};
+
+/**
+ * Recusa em casal: devolve quem mais foi recusado (null = só a própria presença;
+ * o backend só recusa o cônjuge na MESMA pastoral e quando ela escala casais juntos).
+ */
+export const declineRosterPresenceWithCouple = async (
+  rosterId: string,
+): Promise<{ outcome: WriteOutcome; coupleDeclined: string | null }> => {
+  const payload = { declineCouple: true };
+  try {
+    const res = await api.patch(`/schedules/assignments/${rosterId}/decline`, payload);
+    return { outcome: 'ok', coupleDeclined: res.data?.coupleDeclined ?? null };
+  } catch (error) {
+    if (isNetworkError(error)) {
+      await enqueueWrite({
+        method: 'patch',
+        path: `/schedules/assignments/${rosterId}/decline`,
+        body: payload,
+        description: 'Declinar presença na escala (casal)',
+      });
+      return { outcome: 'queued', coupleDeclined: null };
+    }
+    console.error('Erro ao declinar presença em casal:', error);
+    return { outcome: 'error', coupleDeclined: null };
   }
 };

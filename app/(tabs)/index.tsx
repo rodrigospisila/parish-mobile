@@ -1043,7 +1043,7 @@ export default function HomeScreen() {
               </TouchableOpacity>
             )}
             {overview.schedules.pendingResponses + overview.schedules.declinedToReplace + overview.swaps.pending > 0 && (
-              <TouchableOpacity style={styles.pendRow} onPress={() => router.push('/(tabs)/schedule' as never)}>
+              <TouchableOpacity style={styles.pendRow} onPress={() => router.push('/(tabs)/coordination' as never)}>
                 <Text style={styles.pendRowText}>
                   📋 Escalas: {[
                     overview.schedules.pendingResponses ? `${overview.schedules.pendingResponses} sem resposta` : '',
@@ -1054,12 +1054,12 @@ export default function HomeScreen() {
                 <FontAwesome5 name="chevron-right" size={12} color={colors.textTertiary} />
               </TouchableOpacity>
             )}
-            {overview.pastorals.joinRequests + overview.prayers.pendingModeration > 0 && (
+            {overview.pastorals.joinRequests + (overview.canModeratePrayers === false ? 0 : overview.prayers.pendingModeration) > 0 && (
               <TouchableOpacity style={styles.pendRow} onPress={() => router.push('/(tabs)/pastorals' as never)}>
                 <Text style={styles.pendRowText}>
                   🙋 Comunidade: {[
-                    overview.pastorals.joinRequests ? `${overview.pastorals.joinRequests} pedido(s) para entrar em pastoral` : '',
-                    overview.prayers.pendingModeration ? `${overview.prayers.pendingModeration} oração(ões) para moderar (web)` : '',
+                    overview.pastorals.joinRequests ? `${overview.pastorals.joinRequests} pedido(s) para entrar em pastoral (aprovar na web)` : '',
+                    overview.canModeratePrayers !== false && overview.prayers.pendingModeration ? `${overview.prayers.pendingModeration} oração(ões) para moderar (web)` : '',
                   ].filter(Boolean).join(' · ')}
                 </Text>
                 <FontAwesome5 name="chevron-right" size={12} color={colors.textTertiary} />
