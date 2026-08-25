@@ -1,4 +1,4 @@
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -51,6 +51,19 @@ const PRESETS = [20, 50, 100, 200];
 const REMINDER_DAYS = [5, 10, 15, 20, 25];
 
 const money = (value: number) => `R$ ${value.toFixed(2).replace('.', ',')}`;
+const decimalBR = (value: number) => value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const providerLabel = (provider?: string | null) =>
+  provider === 'MERCADOPAGO' ? 'Mercado Pago' : provider === 'ASAAS' ? 'Asaas' : 'provedor de pagamento';
+/** "R$ 0,99 + 1,99%" — só as partes maiores que zero; vazio se ambas forem 0 */
+const feeText = (feeFixed: number, feePercent: number) => {
+  const parts: string[] = [];
+  if (feeFixed > 0) parts.push(`R$ ${decimalBR(feeFixed)}`);
+  if (feePercent > 0) parts.push(`${decimalBR(feePercent)}%`);
+  return parts.join(' + ');
+};
+// GATEWAY em CREATED: consulta o provedor a cada 8 s por até 5 min enquanto o modal está aberto
+const GATEWAY_POLL_MS = 8_000;
+const GATEWAY_POLL_MAX_MS = 5 * 60 * 1000;
 const monthLabel = (iso: string, short = false) => {
   const [y, m] = iso.split('-').map(Number);
   return new Date(Date.UTC(y, (m || 1) - 1, 1)).toLocaleDateString('pt-BR', {
@@ -168,9 +181,13 @@ export default function TitheScreen() {
 
   const shareCode = async (intent: TitheIntent) => {
     if (!intent.brCode) return;
+    const origin =
+      intent.method === 'GATEWAY'
+        ? `Cobrança emitida por ${providerLabel(data?.gateway?.provider)} em nome de ${data?.parish?.name}`
+        : `Recebedor: ${data?.parish?.merchantName ?? data?.parish?.name}`;
     try {
       await Share.share({
-        message: `Pix ${intent.kind === 'TITHE' ? 'do dízimo' : 'de oferta'} · ${money(intent.amount)} · ${monthLabel(intent.referenceMonth)}\nRecebedor: ${data?.parish?.merchantName ?? data?.parish?.name}\nIdentificador: ${intent.txid}\n\nPix copia e cola:\n${intent.brCode}`,
+        message: `Pix ${intent.kind === 'TITHE' ? 'do dízimo' : 'de oferta'} · ${money(intent.amount)} · ${monthLabel(intent.referenceMonth)}\n${origin}\nIdentificador: ${intent.txid}\n\nPix copia e cola:\n${intent.brCode}`,
       });
     } catch {
       // usuário cancelou
@@ -198,6 +215,75 @@ export default function TitheScreen() {
       setBusyId(null);
     }
   };
+
+  /** Fecha o modal e avisa conforme o estado final vindo do provedor. */
+  const settleGatewayIntent = useCallback(
+    (fresh: TitheIntent) => {
+      setActive(null);
+      void load(true);
+      if (fresh.status === 'CONFIRMED') {
+        Alert.alert('Contribuição confirmada 🙏', 'O banco confirmou o seu Pix e ele já está registrado.');
+      } else {
+        Alert.alert('Pix encerrado', fresh.note ?? 'Este Pix foi encerrado.');
+      }
+    },
+    [load],
+  );
+
+  // GATEWAY: quem confirma é o provedor — só consultamos o estado real (nunca "declare")
+  const handleVerifyGateway = async (intent: TitheIntent) => {
+    setBusyId(intent.id);
+    try {
+      const fresh = await getTitheIntent(intent.id);
+      if (fresh.status === 'CONFIRMED' || fresh.status === 'CANCELLED') {
+        settleGatewayIntent(fresh);
+        return;
+      }
+      setActive((current) => (current && current.id === intent.id ? { ...current, ...fresh } : current));
+      Alert.alert(
+        'Aguardando o banco',
+        'Ainda não chegou a confirmação do banco — normalmente leva alguns segundos. Se você pagou, ela aparece sozinha aqui.',
+      );
+    } catch (error: any) {
+      Alert.alert('Dízimo', error?.message ?? 'Não foi possível verificar.');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const pollingId = active && active.method === 'GATEWAY' && active.status === 'CREATED' ? active.id : null;
+  useEffect(() => {
+    if (!pollingId) return;
+    const startedAt = Date.now();
+    let cancelled = false;
+    let inFlight = false;
+    const timer = setInterval(async () => {
+      if (cancelled || inFlight) return;
+      if (Date.now() - startedAt > GATEWAY_POLL_MAX_MS) {
+        clearInterval(timer);
+        return;
+      }
+      inFlight = true;
+      try {
+        const fresh = await getTitheIntent(pollingId);
+        if (cancelled) return;
+        if (fresh.status === 'CONFIRMED' || fresh.status === 'CANCELLED') {
+          clearInterval(timer);
+          settleGatewayIntent(fresh);
+        } else if (fresh.status !== 'CREATED') {
+          setActive((current) => (current && current.id === pollingId ? { ...current, ...fresh } : current));
+        }
+      } catch {
+        // rede instável: tenta de novo no próximo ciclo
+      } finally {
+        inFlight = false;
+      }
+    }, GATEWAY_POLL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [pollingId, settleGatewayIntent]);
 
   const handleCancel = (intent: TitheIntent) => {
     Alert.alert('Cancelar este Pix?', 'Só cancele se você NÃO fez o pagamento.', [
@@ -245,7 +331,18 @@ export default function TitheScreen() {
   const openIntent = async (intent: TitheIntent) => {
     if (intent.status !== 'CREATED' && intent.status !== 'DECLARED') return;
     try {
-      setActive(await getTitheIntent(intent.id));
+      const fresh = await getTitheIntent(intent.id);
+      if (fresh.status === 'CREATED' || fresh.status === 'DECLARED') {
+        setActive(fresh);
+        return;
+      }
+      // O servidor já sabe o desfecho (ex.: provedor confirmou): atualiza a lista em vez de abrir o QR
+      await load(true);
+      if (fresh.status === 'CONFIRMED') {
+        Alert.alert('Dízimo', 'Este Pix já foi confirmado. 🙏');
+      } else {
+        Alert.alert('Dízimo', fresh.note ? `Este Pix foi encerrado: ${fresh.note}` : 'Este Pix foi encerrado.');
+      }
     } catch (error: any) {
       Alert.alert('Dízimo', error?.message ?? 'Não foi possível abrir.');
       await load(true);
@@ -286,10 +383,19 @@ export default function TitheScreen() {
       const created = await createTitheSchedule({ amount, dayOfMonth: scheduleDay, mode: scheduleMode });
       setScheduleModal(false);
       await load(true);
-      if (created.status === 'PENDING_AUTHORIZATION' && created.qrDataUrl) {
-        setAuthQr(created);
-      } else {
+      if (created.status === 'ACTIVE') {
         Alert.alert('Dízimo automático ativado', 'Todo mês o Pix do seu dízimo aparece aqui no app, no dia escolhido.');
+      } else if (created.status === 'PENDING_AUTHORIZATION') {
+        if (created.qrDataUrl) {
+          setAuthQr(created);
+        } else {
+          Alert.alert(
+            'Dízimo automático',
+            "Não foi possível gerar o QR de autorização agora — toque em 'Autorizar no banco' para tentar de novo ou cancele e ative outra vez",
+          );
+        }
+      } else {
+        Alert.alert('Dízimo automático', created.lastError ?? `Situação: ${SCHEDULE_STATUS_LABELS[created.status]}`);
       }
     } catch (error: any) {
       Alert.alert('Dízimo automático', error?.message ?? 'Não foi possível ativar.');
@@ -345,6 +451,12 @@ export default function TitheScreen() {
     ? Array.from({ length: data.monthsBack + data.monthsAhead + 1 }, (_, i) => shiftMonth(data.currentMonth, data.monthsAhead - i))
     : [];
   const currentYear = new Date().getFullYear();
+  const gatewayFee = data?.gateway ? feeText(data.gateway.feeFixed, data.gateway.feePercent) : '';
+  const scheduleAuthExpired =
+    !!data?.schedule &&
+    (data.schedule.authorizationExpired === true ||
+      (!!data.schedule.authorizationExpires && Date.parse(data.schedule.authorizationExpires) < Date.now()));
+  const qrExpired = !!active && active.status === 'CREATED' && !!active.qrExpiresAt && Date.parse(active.qrExpiresAt) < Date.now();
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
@@ -463,9 +575,7 @@ export default function TitheScreen() {
                 <Text style={styles.hint}>
                   Pix com confirmação automática: assim que o banco aprovar, seu dízimo é registrado sem você precisar
                   avisar.
-                  {data.gateway.feePolicy === 'PASS_THROUGH'
-                    ? ` A taxa do provedor (R$ ${data.gateway.feeFixed.toFixed(2).replace('.', ',')}${data.gateway.feePercent ? ` + ${data.gateway.feePercent}%` : ''}) é somada ao Pix.`
-                    : ''}
+                  {data.gateway.feePolicy === 'PASS_THROUGH' && gatewayFee ? ` A taxa do provedor (${gatewayFee}) é somada ao Pix.` : ''}
                 </Text>
               ) : (
                 <Text style={styles.hint}>
@@ -474,9 +584,15 @@ export default function TitheScreen() {
                 </Text>
               )}
               {data.gateway?.needsCpf && (
-                <TouchableOpacity onPress={() => router.push('/(tabs)/profile' as never)}>
-                  <Text style={styles.link}>Cadastre seu CPF no perfil para ter confirmação automática e dízimo automático ›</Text>
-                </TouchableOpacity>
+                <Text style={styles.notice}>
+                  Peça à secretaria para cadastrar seu CPF — é o que libera a confirmação automática e o dízimo
+                  automático.
+                </Text>
+              )}
+              {data.gateway?.needsEmail && (
+                <Text style={styles.notice}>
+                  Cadastre um e-mail no seu perfil para ter confirmação automática — a secretaria faz isso para você.
+                </Text>
               )}
             </View>
 
@@ -493,8 +609,11 @@ export default function TitheScreen() {
                       {SCHEDULE_STATUS_LABELS[data.schedule.status]}
                     </Text>
                     {data.schedule.lastError ? <Text style={styles.hint}>{data.schedule.lastError}</Text> : null}
+                    {data.schedule.status === 'PENDING_AUTHORIZATION' && scheduleAuthExpired ? (
+                      <Text style={styles.expiredHint}>Autorização vencida — cancele e ative de novo</Text>
+                    ) : null}
                     <View style={styles.rowGap}>
-                      {data.schedule.status === 'PENDING_AUTHORIZATION' && (
+                      {data.schedule.status === 'PENDING_AUTHORIZATION' && !scheduleAuthExpired && (
                         <TouchableOpacity style={styles.secondaryBtnSm} onPress={() => void openAuthorization()}>
                           <Text style={styles.secondaryBtnSmText}>Autorizar no banco</Text>
                         </TouchableOpacity>
@@ -675,12 +794,28 @@ export default function TitheScreen() {
                   {active.kind === 'TITHE' ? 'Dízimo' : 'Oferta'} · {money(active.amount)}
                 </Text>
                 <Text style={styles.sheetMeta}>{monthLabel(active.referenceMonth)}</Text>
-                <View style={styles.beneficiary}>
-                  <Text style={styles.beneficiaryLabel}>Confira no seu banco antes de pagar</Text>
-                  <Text style={styles.beneficiaryText}>Recebedor: {parish?.merchantName ?? parish?.name}</Text>
-                  {parish?.pixKey ? <Text style={styles.beneficiaryText}>Chave: {parish.pixKey}</Text> : null}
-                  <Text style={styles.beneficiaryText}>Identificador: {active.txid}</Text>
-                </View>
+                {active.method === 'GATEWAY' ? (
+                  <View style={styles.beneficiary}>
+                    <Text style={styles.beneficiaryLabel}>Pix com confirmação automática</Text>
+                    <Text style={styles.beneficiaryText}>
+                      Cobrança emitida por {providerLabel(data?.gateway?.provider)} em nome de {parish?.name}
+                    </Text>
+                    <Text style={styles.beneficiaryText}>Identificador: {active.txid}</Text>
+                    {active.chargedAmount != null && active.chargedAmount !== active.amount ? (
+                      <Text style={styles.beneficiaryText}>
+                        Valor do Pix: {money(active.chargedAmount)} (inclui taxa de{' '}
+                        {money(active.feeAmount ?? active.chargedAmount - active.amount)})
+                      </Text>
+                    ) : null}
+                  </View>
+                ) : (
+                  <View style={styles.beneficiary}>
+                    <Text style={styles.beneficiaryLabel}>Confira no seu banco antes de pagar</Text>
+                    <Text style={styles.beneficiaryText}>Recebedor: {parish?.merchantName ?? parish?.name}</Text>
+                    {parish?.pixKey ? <Text style={styles.beneficiaryText}>Chave: {parish.pixKey}</Text> : null}
+                    <Text style={styles.beneficiaryText}>Identificador: {active.txid}</Text>
+                  </View>
+                )}
                 {active.qrDataUrl ? (
                   <Image source={{ uri: active.qrDataUrl }} style={styles.qr} resizeMode="contain" />
                 ) : null}
@@ -690,17 +825,42 @@ export default function TitheScreen() {
                     <Text style={styles.code} numberOfLines={3} selectable>
                       {active.brCode}
                     </Text>
+                    {qrExpired ? <Text style={styles.expiredText}>⌛ QR vencido — gere outro Pix</Text> : null}
                     <View style={styles.rowGap}>
-                      <TouchableOpacity style={[styles.primaryBtn, { flex: 1 }]} onPress={() => void copyCode(active.brCode!)}>
+                      <TouchableOpacity
+                        style={[styles.primaryBtn, { flex: 1 }, qrExpired && styles.btnDisabled]}
+                        disabled={qrExpired}
+                        onPress={() => void copyCode(active.brCode!)}
+                      >
                         <Text style={styles.primaryBtnText}>📋 Copiar</Text>
                       </TouchableOpacity>
-                      <TouchableOpacity style={[styles.secondaryBtnSm, { flex: 1, marginTop: 4 }]} onPress={() => void shareCode(active)}>
+                      <TouchableOpacity
+                        style={[styles.secondaryBtnSm, { flex: 1, marginTop: 4 }, qrExpired && styles.btnDisabled]}
+                        disabled={qrExpired}
+                        onPress={() => void shareCode(active)}
+                      >
                         <Text style={styles.secondaryBtnSmText}>Compartilhar</Text>
                       </TouchableOpacity>
                     </View>
                   </>
                 ) : null}
-                {active.status === 'CREATED' && (
+                {active.status === 'CREATED' && active.method === 'GATEWAY' && (
+                  <>
+                    <TouchableOpacity
+                      style={styles.secondaryBtn}
+                      disabled={busyId === active.id}
+                      onPress={() => void handleVerifyGateway(active)}
+                    >
+                      <Text style={styles.secondaryBtnText}>
+                        {busyId === active.id ? 'Verificando...' : '✅ Já paguei — verificar'}
+                      </Text>
+                    </TouchableOpacity>
+                    <Text style={[styles.hint, { textAlign: 'center', marginTop: 8 }]}>
+                      Assim que o banco aprovar, a confirmação aparece aqui sozinha.
+                    </Text>
+                  </>
+                )}
+                {active.status === 'CREATED' && active.method !== 'GATEWAY' && (
                   <TouchableOpacity
                     style={styles.secondaryBtn}
                     disabled={busyId === active.id}
@@ -712,7 +872,11 @@ export default function TitheScreen() {
                   </TouchableOpacity>
                 )}
                 {active.status === 'DECLARED' && (
-                  <Text style={styles.declared}>⏳ Pix informado — aguardando a conferência da tesouraria.</Text>
+                  <Text style={styles.declared}>
+                    {active.method === 'GATEWAY'
+                      ? '⏳ Pix informado — aguardando a confirmação do banco.'
+                      : '⏳ Pix informado — aguardando a conferência da tesouraria.'}
+                  </Text>
                 )}
                 {(active.status === 'CREATED' || active.status === 'DECLARED') && (
                   <TouchableOpacity disabled={busyId === active.id} onPress={() => handleCancel(active)}>
@@ -956,6 +1120,10 @@ const createStyles = (colors: ReturnType<typeof useColors>) =>
     sbadge_CANCELLED: { backgroundColor: '#fdecec', color: '#b91c1c' },
     sbadge_FAILED: { backgroundColor: '#fdecec', color: '#b91c1c' },
     link: { fontSize: 12.5, fontWeight: '700', color: colors.primary, marginTop: 2 },
+    notice: { fontSize: 12.5, fontWeight: '600', color: colors.textSecondary, lineHeight: 18, marginTop: 2 },
+    expiredHint: { fontSize: 12.5, fontWeight: '700', color: '#b91c1c' },
+    expiredText: { textAlign: 'center', fontSize: 13, color: '#b91c1c', marginTop: 12, fontWeight: '700' },
+    btnDisabled: { opacity: 0.45 },
     overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'center', padding: 18 },
     sheet: { backgroundColor: colors.card, borderRadius: 18, padding: 18, maxHeight: '92%' },
     sheetTitle: { fontSize: 18, fontWeight: '800', color: colors.text, textAlign: 'center' },

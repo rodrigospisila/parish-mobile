@@ -65,6 +65,8 @@ export interface MyTithe {
     provider: string | null;
     available: boolean;
     needsCpf: boolean;
+    /** Mercado Pago exige e-mail do pagador; sem ele o gateway fica indisponível */
+    needsEmail: boolean;
     feePolicy: string;
     feeFixed: number;
     feePercent: number;
@@ -82,6 +84,8 @@ export interface TitheSchedule {
   nextDueDate?: string | null;
   authorizationPayload?: string | null;
   authorizationExpires?: string | null;
+  /** Autorização vencida: authorizationPayload/qrDataUrl vêm null — cancelar e ativar de novo */
+  authorizationExpired?: boolean;
   lastError?: string | null;
   qrDataUrl?: string | null;
 }
