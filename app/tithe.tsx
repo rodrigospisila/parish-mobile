@@ -12,6 +12,8 @@ import {
   TextInput,
   Modal,
   Pressable,
+  Share,
+  Switch,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Stack, useRouter } from 'expo-router';
@@ -23,26 +25,43 @@ import {
   MyTithe,
   TitheIntent,
   TitheIntentKind,
+  PersistentQr,
   STATUS_LABELS,
   getMyTithe,
   createTitheIntent,
   declareTitheIntent,
   cancelTitheIntent,
+  contestTitheIntent,
+  updateTithePreferences,
+  getPersistentQr,
+  sharePersistentQrPdf,
+  shareAnnualStatement,
   shareTitheReceipt,
   getTitheIntent,
 } from '../src/services/titheService';
 
 const PRESETS = [20, 50, 100, 200];
+const REMINDER_DAYS = [5, 10, 15, 20, 25];
 
 const money = (value: number) => `R$ ${value.toFixed(2).replace('.', ',')}`;
-const monthLabel = (iso: string) => {
+const monthLabel = (iso: string, short = false) => {
   const [y, m] = iso.split('-').map(Number);
-  return new Date(Date.UTC(y, (m || 1) - 1, 1)).toLocaleDateString('pt-BR', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+  return new Date(Date.UTC(y, (m || 1) - 1, 1)).toLocaleDateString('pt-BR', {
+    month: short ? 'short' : 'long',
+    year: short ? '2-digit' : 'numeric',
+    timeZone: 'UTC',
+  });
+};
+const shiftMonth = (iso: string, delta: number) => {
+  const [y, m] = iso.split('-').map(Number);
+  const idx = y * 12 + (m - 1) + delta;
+  return `${Math.floor(idx / 12)}-${String((idx % 12) + 1).padStart(2, '0')}`;
 };
 
 /**
- * Dízimo e ofertas pelo app (Fase 1): Pix copia-e-cola com a chave da
- * paróquia. O fiel paga no próprio banco e avisa; a tesouraria confirma.
+ * Dízimo e ofertas pelo app (Fase 1 + Onda D2): Pix copia-e-cola com a chave da
+ * paróquia, mês de referência, oferta anônima, contestação, lembrete mensal,
+ * QR fixo do dizimista e extrato anual.
  */
 export default function TitheScreen() {
   const router = useRouter();
@@ -54,11 +73,16 @@ export default function TitheScreen() {
   const [isRefreshing, setIsRefreshing] = useState(false);
 
   const [kind, setKind] = useState<TitheIntentKind>('TITHE');
+  const [referenceMonth, setReferenceMonth] = useState<string | null>(null);
+  const [anonymous, setAnonymous] = useState(false);
   const [amountText, setAmountText] = useState('');
   const [creating, setCreating] = useState(false);
   const [active, setActive] = useState<TitheIntent | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
-  // Sugere o último valor UMA vez — depois o campo é do usuário (inclusive vazio)
+  const [contestTarget, setContestTarget] = useState<TitheIntent | null>(null);
+  const [contestText, setContestText] = useState('');
+  const [persistent, setPersistent] = useState<PersistentQr | null>(null);
+  const [savingReminder, setSavingReminder] = useState(false);
   const prefilledRef = useRef(false);
 
   const load = useCallback(async (refresh = false) => {
@@ -66,6 +90,7 @@ export default function TitheScreen() {
     try {
       const result = await getMyTithe();
       setData(result);
+      setReferenceMonth((current) => current ?? result.currentMonth);
       if (!prefilledRef.current && result.suggestedAmount) {
         prefilledRef.current = true;
         setAmountText(String(result.suggestedAmount.toFixed(2)).replace('.', ','));
@@ -107,7 +132,12 @@ export default function TitheScreen() {
     }
     setCreating(true);
     try {
-      const intent = await createTitheIntent({ amount, kind, referenceMonth: data?.currentMonth });
+      const intent = await createTitheIntent({
+        amount,
+        kind,
+        referenceMonth: kind === 'TITHE' ? referenceMonth ?? data?.currentMonth : data?.currentMonth,
+        anonymous: kind === 'OFFERING' ? anonymous : false,
+      });
       setActive(intent);
       await load(true);
     } catch (error: any) {
@@ -120,6 +150,17 @@ export default function TitheScreen() {
   const copyCode = async (code: string) => {
     await Clipboard.setStringAsync(code);
     Alert.alert('Copiado ✓', 'Abra o app do seu banco, escolha "Pix copia e cola" e cole o código.');
+  };
+
+  const shareCode = async (intent: TitheIntent) => {
+    if (!intent.brCode) return;
+    try {
+      await Share.share({
+        message: `Pix ${intent.kind === 'TITHE' ? 'do dízimo' : 'de oferta'} · ${money(intent.amount)} · ${monthLabel(intent.referenceMonth)}\nRecebedor: ${data?.parish?.merchantName ?? data?.parish?.name}\nIdentificador: ${intent.txid}\n\nPix copia e cola:\n${intent.brCode}`,
+      });
+    } catch {
+      // usuário cancelou
+    }
   };
 
   const handleDeclare = async (intent: TitheIntent) => {
@@ -158,12 +199,34 @@ export default function TitheScreen() {
     ]);
   };
 
+  const submitContest = async () => {
+    if (!contestTarget) return;
+    const note = contestText.trim();
+    if (note.length < 5) {
+      Alert.alert('Contestar', 'Conte onde e quando você pagou (data, banco, valor).');
+      return;
+    }
+    setBusyId(contestTarget.id);
+    try {
+      await contestTitheIntent(contestTarget.id, note);
+      setContestTarget(null);
+      setContestText('');
+      await load(true);
+      Alert.alert('Enviado', 'A tesouraria vai conferir de novo com as suas informações.');
+    } catch (error: any) {
+      Alert.alert('Contestar', error?.message ?? 'Não foi possível enviar.');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   const openIntent = async (intent: TitheIntent) => {
     if (intent.status !== 'CREATED' && intent.status !== 'DECLARED') return;
     try {
       setActive(await getTitheIntent(intent.id));
     } catch (error: any) {
       Alert.alert('Dízimo', error?.message ?? 'Não foi possível abrir.');
+      await load(true);
     }
   };
 
@@ -178,8 +241,34 @@ export default function TitheScreen() {
     }
   };
 
+  const setReminder = async (day: number | null) => {
+    setSavingReminder(true);
+    try {
+      await updateTithePreferences(day);
+      setData((current) => (current ? { ...current, reminderDay: day } : current));
+    } catch (error: any) {
+      Alert.alert('Lembrete', error?.message ?? 'Não foi possível salvar.');
+    } finally {
+      setSavingReminder(false);
+    }
+  };
+
+  const openPersistentQr = async () => {
+    try {
+      setPersistent(await getPersistentQr());
+    } catch (error: any) {
+      Alert.alert('QR fixo', error?.message ?? 'Não foi possível gerar.');
+    }
+  };
+
   const parish = data?.parish;
   const enabled = !!parish?.titheEnabled;
+  const monthOptions = data
+    ? Array.from({ length: 4 }, (_, i) => shiftMonth(data.currentMonth, i - 2)).filter(
+        (m) => m <= shiftMonth(data.currentMonth, data.monthsAhead),
+      )
+    : [];
+  const currentYear = new Date().getFullYear();
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
@@ -233,11 +322,39 @@ export default function TitheScreen() {
                     onPress={() => setKind(option)}
                   >
                     <Text style={[styles.kindChipText, kind === option && styles.kindChipTextOn]}>
-                      {option === 'TITHE' ? `Dízimo · ${monthLabel(data.currentMonth)}` : 'Oferta avulsa'}
+                      {option === 'TITHE' ? 'Dízimo' : 'Oferta avulsa'}
                     </Text>
                   </TouchableOpacity>
                 ))}
               </View>
+              {kind === 'TITHE' ? (
+                <>
+                  <Text style={styles.label}>Mês de referência</Text>
+                  <View style={styles.kindRow}>
+                    {monthOptions.map((m) => (
+                      <TouchableOpacity
+                        key={m}
+                        style={[styles.monthChip, (referenceMonth ?? data.currentMonth) === m && styles.kindChipOn]}
+                        onPress={() => setReferenceMonth(m)}
+                      >
+                        <Text style={[styles.kindChipText, (referenceMonth ?? data.currentMonth) === m && styles.kindChipTextOn]}>
+                          {monthLabel(m, true)}
+                          {m === data.currentMonth ? ' · atual' : ''}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </>
+              ) : (
+                <TouchableOpacity style={styles.anonRow} onPress={() => setAnonymous(!anonymous)}>
+                  <FontAwesome5
+                    name={anonymous ? 'check-square' : 'square'}
+                    size={18}
+                    color={anonymous ? colors.primary : colors.textTertiary}
+                  />
+                  <Text style={styles.anonText}>Oferta anônima — meu nome não aparece para a tesouraria</Text>
+                </TouchableOpacity>
+              )}
               <View style={styles.presetRow}>
                 {PRESETS.map((preset) => (
                   <TouchableOpacity
@@ -260,17 +377,77 @@ export default function TitheScreen() {
                   placeholderTextColor={colors.textTertiary}
                   value={amountText}
                   onChangeText={setAmountText}
-                  maxLength={9}
+                  maxLength={10}
                 />
               </View>
               <TouchableOpacity style={styles.primaryBtn} disabled={creating} onPress={() => void handleCreate()}>
                 <Text style={styles.primaryBtnText}>{creating ? 'Gerando...' : 'Gerar Pix'}</Text>
               </TouchableOpacity>
               <Text style={styles.hint}>
-                Você paga no app do seu banco (QR ou copia e cola). Depois toque em “Já fiz o Pix” — a tesouraria
-                confere e confirma.
+                Você paga no app do seu banco (QR ou copia e cola) — confira o nome do recebedor antes de confirmar.
+                Depois toque em “Já fiz o Pix”: a tesouraria confere e confirma. Sem taxa para você nem para a paróquia.
               </Text>
             </View>
+
+            <View style={styles.card}>
+              <View style={styles.rowBetween}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.sectionTitle}>Lembrete mensal</Text>
+                  <Text style={styles.hint}>Um aviso no dia escolhido, só se o mês ainda estiver em aberto.</Text>
+                </View>
+                <Switch
+                  value={data.reminderDay !== null}
+                  disabled={savingReminder}
+                  onValueChange={(on) => void setReminder(on ? 10 : null)}
+                  trackColor={{ true: colors.primary }}
+                />
+              </View>
+              {data.reminderDay !== null && (
+                <View style={styles.kindRow}>
+                  {REMINDER_DAYS.map((day) => (
+                    <TouchableOpacity
+                      key={day}
+                      style={[styles.kindChip, data.reminderDay === day && styles.kindChipOn]}
+                      disabled={savingReminder}
+                      onPress={() => void setReminder(day)}
+                    >
+                      <Text style={[styles.kindChipText, data.reminderDay === day && styles.kindChipTextOn]}>dia {day}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              )}
+              <Text style={styles.hint}>
+                Prefere não depender de lembrete? No seu banco, agende um Pix mensal para a chave da paróquia usando o
+                seu QR fixo abaixo.
+              </Text>
+            </View>
+
+            {data.persistentQrAvailable && (
+              <View style={styles.card}>
+                <Text style={styles.sectionTitle}>Meu QR fixo</Text>
+                <Text style={styles.hint}>
+                  Um código só seu, sem valor: serve para o envelope, o carnê e para agendar o Pix no banco. A tesouraria
+                  identifica você pelo número de dizimista.
+                </Text>
+                <View style={styles.rowGap}>
+                  <TouchableOpacity style={styles.secondaryBtnSm} onPress={() => void openPersistentQr()}>
+                    <Text style={styles.secondaryBtnSmText}>Ver meu QR</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.secondaryBtnSm}
+                    onPress={async () => {
+                      try {
+                        await sharePersistentQrPdf();
+                      } catch (error: any) {
+                        Alert.alert('QR fixo', error?.message ?? 'Não foi possível gerar.');
+                      }
+                    }}
+                  >
+                    <Text style={styles.secondaryBtnSmText}>🖨 Etiqueta (PDF)</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            )}
 
             {data.intents.length > 0 && (
               <View style={styles.card}>
@@ -284,12 +461,27 @@ export default function TitheScreen() {
                   >
                     <View style={{ flex: 1 }}>
                       <Text style={styles.intentTitle}>
-                        {intent.kind === 'TITHE' ? 'Dízimo' : 'Oferta'} · {monthLabel(intent.referenceMonth)}
+                        {intent.kind === 'TITHE' ? 'Dízimo' : intent.anonymous ? 'Oferta anônima' : 'Oferta'} ·{' '}
+                        {monthLabel(intent.referenceMonth)}
                       </Text>
                       <Text style={styles.intentMeta}>
-                        {money(intent.amount)} · {new Date(intent.createdAt).toLocaleDateString('pt-BR')}
+                        {money(intent.amountPaid ?? intent.amount)}
+                        {intent.amountPaid != null && intent.amountPaid !== intent.amount ? ` (gerado ${money(intent.amount)})` : ''} ·{' '}
+                        {new Date(intent.createdAt).toLocaleDateString('pt-BR')}
                         {intent.note && intent.status === 'CANCELLED' ? ` · ${intent.note}` : ''}
+                        {intent.contestNote ? ' · contestado' : ''}
                       </Text>
+                      {intent.canContest && (
+                        <TouchableOpacity
+                          onPress={() => {
+                            setContestText('');
+                            setContestTarget(intent);
+                          }}
+                          hitSlop={6}
+                        >
+                          <Text style={styles.link}>Paguei — contestar</Text>
+                        </TouchableOpacity>
+                      )}
                     </View>
                     <View style={{ alignItems: 'flex-end', gap: 6 }}>
                       <Text style={[styles.badge, styles[`badge_${intent.status}` as const]]}>{STATUS_LABELS[intent.status]}</Text>
@@ -304,19 +496,36 @@ export default function TitheScreen() {
               </View>
             )}
 
-            {data.contributions.length > 0 && (
-              <View style={styles.card}>
+            <View style={styles.card}>
+              <View style={styles.rowBetween}>
                 <Text style={styles.sectionTitle}>Contribuições registradas</Text>
-                {data.contributions.map((contribution) => (
+                <TouchableOpacity
+                  onPress={async () => {
+                    try {
+                      await shareAnnualStatement(currentYear);
+                    } catch (error: any) {
+                      Alert.alert('Extrato', error?.message ?? 'Não foi possível gerar.');
+                    }
+                  }}
+                  hitSlop={6}
+                >
+                  <Text style={styles.link}>🖨 Extrato {currentYear}</Text>
+                </TouchableOpacity>
+              </View>
+              {data.contributions.length === 0 ? (
+                <Text style={styles.hint}>Nenhuma contribuição confirmada ainda.</Text>
+              ) : (
+                data.contributions.map((contribution) => (
                   <View key={contribution.id} style={styles.intentRow}>
                     <Text style={styles.intentTitle}>{monthLabel(contribution.referenceMonth)}</Text>
                     <Text style={styles.intentMeta}>
                       {money(contribution.amount)} · {contribution.method}
                     </Text>
                   </View>
-                ))}
-              </View>
-            )}
+                ))
+              )}
+              <Text style={styles.hint}>O extrato é para o seu acompanhamento — dízimo não é dedutível no Imposto de Renda.</Text>
+            </View>
           </>
         )}
       </ScrollView>
@@ -330,9 +539,13 @@ export default function TitheScreen() {
                 <Text style={styles.sheetTitle}>
                   {active.kind === 'TITHE' ? 'Dízimo' : 'Oferta'} · {money(active.amount)}
                 </Text>
-                <Text style={styles.sheetMeta}>
-                  {monthLabel(active.referenceMonth)} · {parish?.merchantName ?? parish?.name} · id {active.txid}
-                </Text>
+                <Text style={styles.sheetMeta}>{monthLabel(active.referenceMonth)}</Text>
+                <View style={styles.beneficiary}>
+                  <Text style={styles.beneficiaryLabel}>Confira no seu banco antes de pagar</Text>
+                  <Text style={styles.beneficiaryText}>Recebedor: {parish?.merchantName ?? parish?.name}</Text>
+                  {parish?.pixKey ? <Text style={styles.beneficiaryText}>Chave: {parish.pixKey}</Text> : null}
+                  <Text style={styles.beneficiaryText}>Identificador: {active.txid}</Text>
+                </View>
                 {active.qrDataUrl ? (
                   <Image source={{ uri: active.qrDataUrl }} style={styles.qr} resizeMode="contain" />
                 ) : null}
@@ -342,9 +555,14 @@ export default function TitheScreen() {
                     <Text style={styles.code} numberOfLines={3} selectable>
                       {active.brCode}
                     </Text>
-                    <TouchableOpacity style={styles.primaryBtn} onPress={() => void copyCode(active.brCode!)}>
-                      <Text style={styles.primaryBtnText}>📋 Copiar código</Text>
-                    </TouchableOpacity>
+                    <View style={styles.rowGap}>
+                      <TouchableOpacity style={[styles.primaryBtn, { flex: 1 }]} onPress={() => void copyCode(active.brCode!)}>
+                        <Text style={styles.primaryBtnText}>📋 Copiar</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity style={[styles.secondaryBtnSm, { flex: 1, marginTop: 4 }]} onPress={() => void shareCode(active)}>
+                        <Text style={styles.secondaryBtnSmText}>Compartilhar</Text>
+                      </TouchableOpacity>
+                    </View>
                   </>
                 ) : null}
                 {active.status === 'CREATED' && (
@@ -371,6 +589,69 @@ export default function TitheScreen() {
                 </TouchableOpacity>
               </ScrollView>
             )}
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* QR fixo */}
+      <Modal visible={!!persistent} transparent animationType="fade" onRequestClose={() => setPersistent(null)}>
+        <Pressable style={styles.overlay} onPress={() => setPersistent(null)}>
+          <Pressable style={styles.sheet} onPress={() => {}}>
+            {persistent && (
+              <ScrollView showsVerticalScrollIndicator={false}>
+                <Text style={styles.sheetTitle}>Meu Pix do dízimo</Text>
+                <Text style={styles.sheetMeta}>
+                  Dizimista nº {persistent.registrationNumber} · {persistent.merchantName ?? persistent.parish}
+                </Text>
+                <Image source={{ uri: persistent.qrDataUrl }} style={styles.qr} resizeMode="contain" />
+                <Text style={styles.hint}>Sem valor fixo: informe o valor no banco. Identificador {persistent.txid}.</Text>
+                <View style={styles.rowGap}>
+                  <TouchableOpacity style={[styles.primaryBtn, { flex: 1 }]} onPress={() => void copyCode(persistent.brCode)}>
+                    <Text style={styles.primaryBtnText}>📋 Copiar</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.secondaryBtnSm, { flex: 1, marginTop: 4 }]}
+                    onPress={() => void Share.share({ message: `Meu Pix do dízimo (${persistent.parish}) — identificador ${persistent.txid}:\n${persistent.brCode}` })}
+                  >
+                    <Text style={styles.secondaryBtnSmText}>Compartilhar</Text>
+                  </TouchableOpacity>
+                </View>
+                <TouchableOpacity style={styles.closeBtn} onPress={() => setPersistent(null)}>
+                  <Text style={styles.closeBtnText}>Fechar</Text>
+                </TouchableOpacity>
+              </ScrollView>
+            )}
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* Contestação */}
+      <Modal visible={!!contestTarget} transparent animationType="fade" onRequestClose={() => setContestTarget(null)}>
+        <Pressable style={styles.overlay} onPress={() => setContestTarget(null)}>
+          <Pressable style={styles.sheet} onPress={() => {}}>
+            <Text style={styles.sheetTitle}>Você pagou este Pix?</Text>
+            <Text style={styles.sheetMeta}>
+              {contestTarget ? `${money(contestTarget.amount)} · id ${contestTarget.txid}` : ''}
+            </Text>
+            <Text style={styles.hint}>
+              Conte onde e quando pagou (data, banco, valor). A tesouraria confere de novo. Se preferir, fale com a
+              secretaria pelo Perfil.
+            </Text>
+            <TextInput
+              style={styles.contestInput}
+              placeholder="Ex.: paguei dia 12 pelo Nubank, R$ 33,00"
+              placeholderTextColor={colors.textTertiary}
+              value={contestText}
+              onChangeText={setContestText}
+              maxLength={300}
+              multiline
+            />
+            <TouchableOpacity style={styles.primaryBtn} disabled={busyId !== null} onPress={() => void submitContest()}>
+              <Text style={styles.primaryBtnText}>{busyId ? 'Enviando...' : 'Enviar contestação'}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.closeBtn} onPress={() => setContestTarget(null)}>
+              <Text style={styles.closeBtnText}>Fechar</Text>
+            </TouchableOpacity>
           </Pressable>
         </Pressable>
       </Modal>
@@ -407,20 +688,19 @@ const createStyles = (colors: ReturnType<typeof useColors>) =>
     cardBody: { fontSize: 14, color: colors.textSecondary, lineHeight: 20 },
     meta: { fontSize: 12, color: colors.textTertiary, fontWeight: '600' },
     sectionTitle: { fontSize: 14.5, fontWeight: '800', color: colors.text, marginBottom: 2 },
+    label: { fontSize: 12, fontWeight: '700', color: colors.textTertiary, textTransform: 'uppercase', marginTop: 4 },
+    rowBetween: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
+    rowGap: { flexDirection: 'row', gap: 8, marginTop: 4 },
     kindRow: { flexDirection: 'row', gap: 8, flexWrap: 'wrap' },
     kindChip: { borderWidth: 1, borderColor: colors.border, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 6 },
+    monthChip: { borderWidth: 1, borderColor: colors.border, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 6 },
     kindChipOn: { borderColor: colors.primary, backgroundColor: colors.primary + '18' },
     kindChipText: { fontSize: 12.5, fontWeight: '600', color: colors.textSecondary },
     kindChipTextOn: { color: colors.primary },
+    anonRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 4 },
+    anonText: { flex: 1, fontSize: 13, color: colors.text },
     presetRow: { flexDirection: 'row', gap: 8 },
-    preset: {
-      flex: 1,
-      borderWidth: 1,
-      borderColor: colors.border,
-      borderRadius: 10,
-      paddingVertical: 8,
-      alignItems: 'center',
-    },
+    preset: { flex: 1, borderWidth: 1, borderColor: colors.border, borderRadius: 10, paddingVertical: 8, alignItems: 'center' },
     presetOn: { borderColor: colors.primary, backgroundColor: colors.primary + '18' },
     presetText: { fontSize: 13, fontWeight: '700', color: colors.textSecondary },
     presetTextOn: { color: colors.primary },
@@ -437,15 +717,10 @@ const createStyles = (colors: ReturnType<typeof useColors>) =>
     amountInput: { flex: 1, fontSize: 22, fontWeight: '800', color: colors.text, paddingVertical: 10 },
     primaryBtn: { backgroundColor: colors.primary, borderRadius: 12, paddingVertical: 12, alignItems: 'center', marginTop: 4 },
     primaryBtnText: { color: '#fff', fontWeight: '800', fontSize: 15 },
-    secondaryBtn: {
-      borderWidth: 1.5,
-      borderColor: colors.success,
-      borderRadius: 12,
-      paddingVertical: 11,
-      alignItems: 'center',
-      marginTop: 10,
-    },
+    secondaryBtn: { borderWidth: 1.5, borderColor: colors.success, borderRadius: 12, paddingVertical: 11, alignItems: 'center', marginTop: 10 },
     secondaryBtnText: { color: colors.success, fontWeight: '800', fontSize: 14.5 },
+    secondaryBtnSm: { borderWidth: 1, borderColor: colors.primary, borderRadius: 10, paddingVertical: 9, paddingHorizontal: 12, alignItems: 'center' },
+    secondaryBtnSmText: { color: colors.primary, fontWeight: '700', fontSize: 13 },
     hint: { fontSize: 12, color: colors.textTertiary, lineHeight: 17 },
     intentRow: {
       flexDirection: 'row',
@@ -463,24 +738,31 @@ const createStyles = (colors: ReturnType<typeof useColors>) =>
     badge_DECLARED: { backgroundColor: '#fdf3e4', color: '#b45309' },
     badge_CONFIRMED: { backgroundColor: '#eaf7ef', color: '#15803d' },
     badge_CANCELLED: { backgroundColor: '#fdecec', color: '#b91c1c' },
-    link: { fontSize: 12.5, fontWeight: '700', color: colors.primary },
+    link: { fontSize: 12.5, fontWeight: '700', color: colors.primary, marginTop: 2 },
     overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'center', padding: 18 },
-    sheet: { backgroundColor: colors.card, borderRadius: 18, padding: 18, maxHeight: '90%' },
+    sheet: { backgroundColor: colors.card, borderRadius: 18, padding: 18, maxHeight: '92%' },
     sheetTitle: { fontSize: 18, fontWeight: '800', color: colors.text, textAlign: 'center' },
-    sheetMeta: { fontSize: 12, color: colors.textSecondary, textAlign: 'center', marginTop: 2, marginBottom: 10 },
-    qr: { width: 240, height: 240, alignSelf: 'center', backgroundColor: '#fff', borderRadius: 12 },
+    sheetMeta: { fontSize: 12, color: colors.textSecondary, textAlign: 'center', marginTop: 2, marginBottom: 8 },
+    beneficiary: { backgroundColor: colors.surface, borderRadius: 10, padding: 10, marginBottom: 10, gap: 2 },
+    beneficiaryLabel: { fontSize: 11, fontWeight: '700', color: colors.textTertiary, textTransform: 'uppercase' },
+    beneficiaryText: { fontSize: 12.5, color: colors.text },
+    qr: { width: 230, height: 230, alignSelf: 'center', backgroundColor: '#fff', borderRadius: 12 },
     codeLabel: { fontSize: 11.5, fontWeight: '700', color: colors.textTertiary, marginTop: 12, textTransform: 'uppercase' },
-    code: {
-      fontSize: 11,
-      color: colors.text,
-      backgroundColor: colors.surface,
-      borderRadius: 8,
-      padding: 8,
-      marginTop: 4,
-      fontFamily: undefined,
-    },
+    code: { fontSize: 11, color: colors.text, backgroundColor: colors.surface, borderRadius: 8, padding: 8, marginTop: 4 },
     declared: { textAlign: 'center', fontSize: 13, color: '#b45309', marginTop: 12, fontWeight: '600' },
     cancelLink: { textAlign: 'center', fontSize: 12.5, color: colors.textTertiary, marginTop: 12, textDecorationLine: 'underline' },
     closeBtn: { alignItems: 'center', paddingVertical: 10, marginTop: 6 },
     closeBtnText: { color: colors.textSecondary, fontWeight: '700' },
+    contestInput: {
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: 10,
+      padding: 10,
+      minHeight: 90,
+      textAlignVertical: 'top',
+      fontSize: 14,
+      color: colors.text,
+      backgroundColor: colors.surface,
+      marginTop: 8,
+    },
   });
