@@ -16,6 +16,8 @@ import {
   Switch,
   KeyboardAvoidingView,
   Platform,
+  AppState,
+  AppStateStatus,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Stack, useRouter } from 'expo-router';
@@ -34,6 +36,7 @@ import {
   STATUS_LABELS,
   SCHEDULE_STATUS_LABELS,
   PAYMENT_METHOD_LABELS,
+  PROVIDER_STATUS_HINTS,
   getMyTithe,
   createTitheIntent,
   declareTitheIntent,
@@ -66,6 +69,28 @@ const statusLabel = (intent: TitheIntent) => {
   if (intent.status !== 'CREATED') return STATUS_LABELS[intent.status];
   const method = payMethodOf(intent);
   return method === 'CARD' ? 'Cobrança gerada' : method === 'BOLETO' ? 'Boleto gerado' : STATUS_LABELS.CREATED;
+};
+/** Aviso ao lado do status: cartão em análise de risco (ainda em aberto) ou estorno em disputa (já confirmado) */
+const providerHint = (intent: TitheIntent): string | null => {
+  if (intent.providerStatus === 'in_review' && (intent.status === 'CREATED' || intent.status === 'DECLARED')) {
+    return PROVIDER_STATUS_HINTS.in_review;
+  }
+  if (intent.providerStatus === 'disputed' && intent.status === 'CONFIRMED') return PROVIDER_STATUS_HINTS.disputed;
+  return null;
+};
+/** Contestação: pergunta e exemplo conforme o meio que o fiel usou */
+const CONTEST_COPY: Record<TithePaymentMethod, { title: string; details: string; placeholder: string }> = {
+  PIX: { title: 'Você pagou este Pix?', details: 'data, banco, valor', placeholder: 'Ex.: paguei dia 12 pelo Nubank, R$ 33,00' },
+  CARD: {
+    title: 'Você pagou com cartão?',
+    details: 'data, cartão usado, valor',
+    placeholder: 'Ex.: paguei dia 12 no cartão final 1234, R$ 33,00',
+  },
+  BOLETO: {
+    title: 'Você pagou este boleto?',
+    details: 'data, banco, valor',
+    placeholder: 'Ex.: paguei o boleto dia 12 no app do Itaú, R$ 33,00',
+  },
 };
 const dateTimeBR = (iso: string) =>
   new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
@@ -133,6 +158,8 @@ export default function TitheScreen() {
   const [scheduleBusy, setScheduleBusy] = useState(false);
   const [authQr, setAuthQr] = useState<TitheSchedule | null>(null);
   const prefilledRef = useRef(false);
+  // Último intent GATEWAY encerrado pelo app — evita alerta duplicado quando navegador, AppState e polling respondem juntos
+  const settledIdRef = useRef<string | null>(null);
 
   const load = useCallback(async (refresh = false) => {
     if (refresh) setIsRefreshing(true);
@@ -220,18 +247,21 @@ export default function TitheScreen() {
     Alert.alert('Copiado ✓', 'Abra o app do seu banco, escolha "Pagar boleto" e cole a linha digitável.');
   };
 
-  /** Abre a página segura do provedor (cartão) ou o PDF do boleto no navegador interno. */
-  const openUrl = async (url: string | null | undefined, what: string) => {
+  /**
+   * Abre a página segura do provedor (cartão) ou o PDF do boleto no navegador interno.
+   * Devolve o resultado do navegador (null se não abriu): no iOS a promise só resolve quando o
+   * usuário fecha; no Android resolve na hora com type 'opened', com o navegador ainda aberto.
+   */
+  const openUrl = async (url: string | null | undefined, what: string): Promise<WebBrowser.WebBrowserResult | null> => {
     if (!url) {
       Alert.alert(what, 'Link indisponível — gere outra cobrança.');
-      return false;
+      return null;
     }
     try {
-      await WebBrowser.openBrowserAsync(url);
-      return true;
+      return await WebBrowser.openBrowserAsync(url);
     } catch {
       Alert.alert(what, 'Não foi possível abrir. Tente de novo.');
-      return false;
+      return null;
     }
   };
 
@@ -293,9 +323,11 @@ export default function TitheScreen() {
     }
   };
 
-  /** Fecha o modal e avisa conforme o estado final vindo do provedor. */
+  /** Fecha o modal e avisa conforme o estado final vindo do provedor (uma vez só por intent). */
   const settleGatewayIntent = useCallback(
     (fresh: TitheIntent) => {
+      if (settledIdRef.current === fresh.id) return;
+      settledIdRef.current = fresh.id;
       setActive(null);
       void load(true);
       const method = payMethodOf(fresh);
@@ -318,17 +350,42 @@ export default function TitheScreen() {
     [load],
   );
 
+  /**
+   * Aplica ao modal o estado real vindo do provedor: encerra (confirmado/cancelado) ou atualiza o
+   * intent aberto. Devolve true quando encerrou. Mesma rotina para polling, volta do navegador e
+   * retorno ao app (AppState).
+   */
+  const applyGatewayIntent = useCallback(
+    (id: string, fresh: TitheIntent) => {
+      if (fresh.status === 'CONFIRMED' || fresh.status === 'CANCELLED') {
+        settleGatewayIntent(fresh);
+        return true;
+      }
+      setActive((current) => {
+        if (!current || current.id !== id) return current;
+        // Mesma referência quando nada mudou — evita re-render a cada ciclo do polling
+        if (current.status === fresh.status && (current.providerStatus ?? null) === (fresh.providerStatus ?? null)) return current;
+        return { ...current, ...fresh };
+      });
+      return false;
+    },
+    [settleGatewayIntent],
+  );
+
   // GATEWAY: quem confirma é o provedor — só consultamos o estado real (nunca "declare")
   const handleVerifyGateway = async (intent: TitheIntent) => {
     setBusyId(intent.id);
     try {
       const fresh = await getTitheIntent(intent.id);
-      if (fresh.status === 'CONFIRMED' || fresh.status === 'CANCELLED') {
-        settleGatewayIntent(fresh);
+      if (applyGatewayIntent(intent.id, fresh)) return;
+      const method = payMethodOf(intent);
+      if (fresh.providerStatus === 'in_review') {
+        Alert.alert(
+          'Em análise pelo provedor',
+          'O provedor ainda está analisando este pagamento — não é preciso pagar de novo. Assim que aprovar, a confirmação aparece sozinha aqui.',
+        );
         return;
       }
-      setActive((current) => (current && current.id === intent.id ? { ...current, ...fresh } : current));
-      const method = payMethodOf(intent);
       Alert.alert(
         method === 'BOLETO' ? 'Aguardando a compensação' : 'Aguardando o banco',
         method === 'CARD'
@@ -344,14 +401,16 @@ export default function TitheScreen() {
     }
   };
 
-  /** Ao voltar da página de pagamento (cartão): consulta o provedor sem alerta — o polling segue se ainda estiver aberto. */
+  /**
+   * Cartão: abre a página do provedor e consulta o estado real DEPOIS que o navegador fecha, sem alerta.
+   * iOS: `openBrowserAsync` só resolve no fechamento. Android: resolve na hora ('opened') com o navegador
+   * ainda aberto — aí quem consulta é o listener de AppState, na volta ao app. O polling segue nos dois.
+   */
   const openPaymentPage = async (intent: TitheIntent) => {
-    const opened = await openUrl(intent.paymentUrl, 'Página de pagamento');
-    if (!opened) return;
+    const result = await openUrl(intent.paymentUrl, 'Página de pagamento');
+    if (!result || result.type === WebBrowser.WebBrowserResultType.OPENED) return;
     try {
-      const fresh = await getTitheIntent(intent.id);
-      if (fresh.status === 'CONFIRMED' || fresh.status === 'CANCELLED') settleGatewayIntent(fresh);
-      else setActive((current) => (current && current.id === intent.id ? { ...current, ...fresh } : current));
+      applyGatewayIntent(intent.id, await getTitheIntent(intent.id));
     } catch {
       // rede instável: o polling tenta de novo
     }
@@ -373,12 +432,7 @@ export default function TitheScreen() {
       try {
         const fresh = await getTitheIntent(pollingId);
         if (cancelled) return;
-        if (fresh.status === 'CONFIRMED' || fresh.status === 'CANCELLED') {
-          clearInterval(timer);
-          settleGatewayIntent(fresh);
-        } else if (fresh.status !== 'CREATED') {
-          setActive((current) => (current && current.id === pollingId ? { ...current, ...fresh } : current));
-        }
+        if (applyGatewayIntent(pollingId, fresh)) clearInterval(timer);
       } catch {
         // rede instável: tenta de novo no próximo ciclo
       } finally {
@@ -389,7 +443,28 @@ export default function TitheScreen() {
       cancelled = true;
       clearInterval(timer);
     };
-  }, [pollingId, settleGatewayIntent]);
+  }, [pollingId, applyGatewayIntent]);
+
+  // Retorno ao app (Android/iOS) com o modal de cartão/boleto aberto: o fiel pagou no navegador ou no
+  // app do banco e voltou — consulta o provedor uma vez, sem esperar o próximo ciclo do polling
+  useEffect(() => {
+    if (!pollingId) return;
+    let cancelled = false;
+    const subscription = AppState.addEventListener('change', (next: AppStateStatus) => {
+      if (next !== 'active') return;
+      getTitheIntent(pollingId)
+        .then((fresh) => {
+          if (!cancelled) applyGatewayIntent(pollingId, fresh);
+        })
+        .catch(() => {
+          // rede instável: o polling tenta de novo
+        });
+    });
+    return () => {
+      cancelled = true;
+      subscription.remove();
+    };
+  }, [pollingId, applyGatewayIntent]);
 
   const handleCancel = (intent: TitheIntent) => {
     const noun = payMethodOf(intent) === 'CARD' ? 'cobrança' : payMethodOf(intent) === 'BOLETO' ? 'boleto' : 'Pix';
@@ -418,7 +493,7 @@ export default function TitheScreen() {
     if (!contestTarget) return;
     const note = contestText.trim();
     if (note.length < 5) {
-      Alert.alert('Contestar', 'Conte onde e quando você pagou (data, banco, valor).');
+      Alert.alert('Contestar', `Conte onde e quando você pagou (${CONTEST_COPY[payMethodOf(contestTarget)].details}).`);
       return;
     }
     setBusyId(contestTarget.id);
@@ -449,7 +524,8 @@ export default function TitheScreen() {
       if (fresh.status === 'CONFIRMED') {
         Alert.alert('Dízimo', `${what} já foi confirmado. 🙏`);
       } else {
-        Alert.alert('Dízimo', fresh.note ? `${what} foi encerrado: ${fresh.note}` : `${what} foi encerrado.`);
+        // A nota do sistema já vem neutra e completa ("Cobrança expirada — gere outra…"): mostra como está
+        Alert.alert(isPix(fresh) ? 'Pix encerrado' : 'Pagamento encerrado', fresh.note ?? `${what} foi encerrado.`);
       }
     } catch (error: any) {
       Alert.alert('Dízimo', error?.message ?? 'Não foi possível abrir.');
@@ -570,6 +646,11 @@ export default function TitheScreen() {
     (data.schedule.authorizationExpired === true ||
       (!!data.schedule.authorizationExpires && Date.parse(data.schedule.authorizationExpires) < Date.now()));
   const qrExpired = !!active && active.status === 'CREATED' && !!active.qrExpiresAt && Date.parse(active.qrExpiresAt) < Date.now();
+  // Boleto: qrExpiresAt já inclui a folga de compensação — vencido ainda pode ter sido pago, então "verificar" segue ativo
+  const boletoExpired = qrExpired && activeMethod === 'BOLETO';
+  // Cartão em análise de risco: nada de pedir novo pagamento nem tratar como vencido
+  const activeInReview = !!active && active.providerStatus === 'in_review' && active.status === 'CREATED';
+  const contestCopy = CONTEST_COPY[contestTarget ? payMethodOf(contestTarget) : 'PIX'];
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
@@ -891,6 +972,7 @@ export default function TitheScreen() {
                         <Text style={styles.intentMethod}>{PAYMENT_METHOD_LABELS[payMethodOf(intent)]}</Text>
                         <Text style={[styles.badge, styles[`badge_${intent.status}` as const]]}>{statusLabel(intent)}</Text>
                       </View>
+                      {providerHint(intent) ? <Text style={styles.providerHint}>{providerHint(intent)}</Text> : null}
                       {intent.status === 'CONFIRMED' && (
                         <TouchableOpacity disabled={busyId === intent.id} onPress={() => void handleReceipt(intent)} hitSlop={6}>
                           <Text style={styles.link}>{busyId === intent.id ? 'Gerando...' : '🧾 Comprovante'}</Text>
@@ -990,10 +1072,12 @@ export default function TitheScreen() {
                 {activeMethod === 'CARD' && (
                   <>
                     <Text style={[styles.hint, { textAlign: 'center' }]}>
-                      Você paga na página segura do Asaas em nome de {parish?.name}; a confirmação aparece aqui sozinha.
+                      {activeInReview
+                        ? 'O provedor está analisando o pagamento no cartão — não é preciso pagar de novo.'
+                        : `Você paga na página segura do Asaas em nome de ${parish?.name}; a confirmação aparece aqui sozinha.`}
                     </Text>
-                    {qrExpired ? <Text style={styles.expiredText}>⌛ Cobrança vencida — gere outra</Text> : null}
-                    {active.status === 'CREATED' && (
+                    {qrExpired && !activeInReview ? <Text style={styles.expiredText}>⌛ Cobrança vencida — gere outra</Text> : null}
+                    {active.status === 'CREATED' && !activeInReview && (
                       <>
                         <TouchableOpacity
                           style={[styles.primaryBtn, { marginTop: 12 }, (qrExpired || !active.paymentUrl) && styles.btnDisabled]}
@@ -1029,7 +1113,12 @@ export default function TitheScreen() {
                         Linha digitável indisponível — abra o PDF do boleto para pagar.
                       </Text>
                     )}
-                    {qrExpired ? <Text style={styles.expiredText}>⌛ Boleto vencido — gere outro</Text> : null}
+                    {boletoExpired ? (
+                      <Text style={styles.expiredText}>
+                        ⌛ Boleto vencido — se você já pagou, aguarde a compensação (até 2 dias úteis); se não pagou, gere outro
+                      </Text>
+                    ) : null}
+                    {/* Vencido: só copiar/abrir PDF/compartilhar ficam bloqueados; página do provedor e "verificar" seguem ativos */}
                     {active.status === 'CREATED' && (
                       <>
                         {active.boletoLine ? (
@@ -1059,8 +1148,7 @@ export default function TitheScreen() {
                         </View>
                         {active.paymentUrl ? (
                           <TouchableOpacity
-                            style={[styles.secondaryBtnSm, { marginTop: 8 }, qrExpired && styles.btnDisabled]}
-                            disabled={qrExpired}
+                            style={[styles.secondaryBtnSm, { marginTop: 8 }]}
                             onPress={() => void openUrl(active.paymentUrl, 'Página de pagamento')}
                           >
                             <Text style={styles.secondaryBtnSmText}>Abrir página de pagamento</Text>
@@ -1068,9 +1156,11 @@ export default function TitheScreen() {
                         ) : null}
                       </>
                     )}
-                    <Text style={[styles.hint, { textAlign: 'center', marginTop: 10 }]}>
-                      Boleto compensa em até 2 dias úteis — a confirmação aparece aqui sozinha.
-                    </Text>
+                    {!boletoExpired ? (
+                      <Text style={[styles.hint, { textAlign: 'center', marginTop: 10 }]}>
+                        Boleto compensa em até 2 dias úteis — a confirmação aparece aqui sozinha.
+                      </Text>
+                    ) : null}
                   </>
                 )}
 
@@ -1105,6 +1195,7 @@ export default function TitheScreen() {
                 ) : null}
                 {active.status === 'CREATED' && active.method === 'GATEWAY' && (
                   <>
+                    {activeInReview ? <Text style={styles.declared}>⏳ {PROVIDER_STATUS_HINTS.in_review}.</Text> : null}
                     <TouchableOpacity
                       style={styles.secondaryBtn}
                       disabled={busyId === active.id}
@@ -1115,11 +1206,13 @@ export default function TitheScreen() {
                       </Text>
                     </TouchableOpacity>
                     <Text style={[styles.hint, { textAlign: 'center', marginTop: 8 }]}>
-                      {activeMethod === 'CARD'
-                        ? 'Assim que o cartão for aprovado, a confirmação aparece aqui sozinha.'
-                        : activeMethod === 'BOLETO'
-                          ? 'Pagou o boleto? Pode fechar — quando compensar, a confirmação aparece sozinha.'
-                          : 'Assim que o banco aprovar, a confirmação aparece aqui sozinha.'}
+                      {activeInReview
+                        ? 'Pode fechar — quando o provedor concluir a análise, o resultado aparece aqui sozinho.'
+                        : activeMethod === 'CARD'
+                          ? 'Assim que o cartão for aprovado, a confirmação aparece aqui sozinha.'
+                          : activeMethod === 'BOLETO'
+                            ? 'Pagou o boleto? Pode fechar — quando compensar, a confirmação aparece sozinha.'
+                            : 'Assim que o banco aprovar, a confirmação aparece aqui sozinha.'}
                     </Text>
                   </>
                 )}
@@ -1269,17 +1362,17 @@ export default function TitheScreen() {
         <Pressable style={styles.overlay} onPress={() => setContestTarget(null)}>
           <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ width: '100%' }}>
           <Pressable style={styles.sheet} onPress={() => {}}>
-            <Text style={styles.sheetTitle}>Você pagou este Pix?</Text>
+            <Text style={styles.sheetTitle}>{contestCopy.title}</Text>
             <Text style={styles.sheetMeta}>
               {contestTarget ? `${money(contestTarget.amount)} · id ${contestTarget.txid}` : ''}
             </Text>
             <Text style={styles.hint}>
-              Conte onde e quando pagou (data, banco, valor). A tesouraria confere de novo. Se preferir, fale com a
+              Conte onde e quando pagou ({contestCopy.details}). A tesouraria confere de novo. Se preferir, fale com a
               secretaria pelo Perfil.
             </Text>
             <TextInput
               style={styles.contestInput}
-              placeholder="Ex.: paguei dia 12 pelo Nubank, R$ 33,00"
+              placeholder={contestCopy.placeholder}
               placeholderTextColor={colors.textTertiary}
               value={contestText}
               onChangeText={setContestText}
@@ -1376,6 +1469,7 @@ const createStyles = (colors: ReturnType<typeof useColors>) =>
     intentMeta: { fontSize: 12, color: colors.textSecondary, marginTop: 2 },
     statusRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
     intentMethod: { fontSize: 11, fontWeight: '700', color: colors.textTertiary },
+    providerHint: { fontSize: 11, fontWeight: '700', color: '#b45309', textAlign: 'right', maxWidth: 170 },
     badge: { fontSize: 11, fontWeight: '800', borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3, overflow: 'hidden' },
     badge_CREATED: { backgroundColor: colors.border, color: colors.textSecondary },
     badge_DECLARED: { backgroundColor: '#fdf3e4', color: '#b45309' },

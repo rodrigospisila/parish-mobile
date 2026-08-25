@@ -16,6 +16,16 @@ export const PAYMENT_METHOD_LABELS: Record<TithePaymentMethod, string> = {
   BOLETO: 'Boleto',
 };
 
+/**
+ * Situações do provedor que o app destaca (os demais valores de providerStatus são internos):
+ * in_review — cartão em análise de risco, ainda CREATED: a confirmação vem sozinha, sem pagar de novo;
+ * disputed — estorno/chargeback em disputa num intent já CONFIRMED.
+ */
+export const PROVIDER_STATUS_HINTS = {
+  in_review: 'Em análise pelo provedor — a confirmação chega sozinha',
+  disputed: 'Estorno em análise',
+} as const;
+
 export interface TitheIntent {
   id: string;
   amount: number;
@@ -43,7 +53,9 @@ export interface TitheIntent {
   boletoLine?: string | null;
   feeAmount?: number;
   chargedAmount?: number | null;
+  /** Validade do Pix; para boleto já inclui a folga de compensação (vencimento + 3 dias) */
   qrExpiresAt?: string | null;
+  /** Situação bruta no provedor — ver PROVIDER_STATUS_HINTS ('in_review', 'disputed') */
   providerStatus?: string | null;
   declaredAt?: string | null;
   confirmedAt?: string | null;
@@ -125,6 +137,7 @@ export interface PersistentQr {
   merchantName?: string | null;
 }
 
+/** CREATED é "Pix gerado" só para Pix — cartão/boleto usam o rótulo próprio (ver statusLabel na tela) */
 export const STATUS_LABELS: Record<TitheIntentStatus, string> = {
   CREATED: 'Pix gerado',
   DECLARED: 'Aguardando conferência',
