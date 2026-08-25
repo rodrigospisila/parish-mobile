@@ -14,6 +14,8 @@ import {
   Pressable,
   Share,
   Switch,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Stack, useRouter } from 'expo-router';
@@ -172,6 +174,14 @@ export default function TitheScreen() {
       Alert.alert('Obrigado 🙏', 'A tesouraria vai conferir o Pix e você recebe a confirmação por aqui.');
     } catch (error: any) {
       Alert.alert('Dízimo', error?.message ?? 'Não foi possível registrar.');
+      // Estado real do servidor: se o Pix foi encerrado (chave trocada etc.), fecha o modal
+      await load(true);
+      try {
+        const fresh = await getTitheIntent(intent.id);
+        setActive(fresh.status === 'CREATED' || fresh.status === 'DECLARED' ? fresh : null);
+      } catch {
+        setActive(null);
+      }
     } finally {
       setBusyId(null);
     }
@@ -263,10 +273,9 @@ export default function TitheScreen() {
 
   const parish = data?.parish;
   const enabled = !!parish?.titheEnabled;
+  // Toda a janela aceita pelo backend (+1 à frente … 12 atrás), mais recentes primeiro
   const monthOptions = data
-    ? Array.from({ length: 4 }, (_, i) => shiftMonth(data.currentMonth, i - 2)).filter(
-        (m) => m <= shiftMonth(data.currentMonth, data.monthsAhead),
-      )
+    ? Array.from({ length: data.monthsBack + data.monthsAhead + 1 }, (_, i) => shiftMonth(data.currentMonth, data.monthsAhead - i))
     : [];
   const currentYear = new Date().getFullYear();
 
@@ -330,7 +339,7 @@ export default function TitheScreen() {
               {kind === 'TITHE' ? (
                 <>
                   <Text style={styles.label}>Mês de referência</Text>
-                  <View style={styles.kindRow}>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.kindRow}>
                     {monthOptions.map((m) => (
                       <TouchableOpacity
                         key={m}
@@ -343,7 +352,7 @@ export default function TitheScreen() {
                         </Text>
                       </TouchableOpacity>
                     ))}
-                  </View>
+                  </ScrollView>
                 </>
               ) : (
                 <TouchableOpacity style={styles.anonRow} onPress={() => setAnonymous(!anonymous)}>
@@ -474,7 +483,7 @@ export default function TitheScreen() {
                       {intent.canContest && (
                         <TouchableOpacity
                           onPress={() => {
-                            setContestText('');
+                            if (contestTarget?.id !== intent.id) setContestText('');
                             setContestTarget(intent);
                           }}
                           hitSlop={6}
@@ -601,7 +610,8 @@ export default function TitheScreen() {
               <ScrollView showsVerticalScrollIndicator={false}>
                 <Text style={styles.sheetTitle}>Meu Pix do dízimo</Text>
                 <Text style={styles.sheetMeta}>
-                  Dizimista nº {persistent.registrationNumber} · {persistent.merchantName ?? persistent.parish}
+                  {persistent.registrationNumber ? `Dizimista nº ${persistent.registrationNumber} · ` : ''}
+                  {persistent.merchantName ?? persistent.parish}
                 </Text>
                 <Image source={{ uri: persistent.qrDataUrl }} style={styles.qr} resizeMode="contain" />
                 <Text style={styles.hint}>Sem valor fixo: informe o valor no banco. Identificador {persistent.txid}.</Text>
@@ -628,6 +638,7 @@ export default function TitheScreen() {
       {/* Contestação */}
       <Modal visible={!!contestTarget} transparent animationType="fade" onRequestClose={() => setContestTarget(null)}>
         <Pressable style={styles.overlay} onPress={() => setContestTarget(null)}>
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ width: '100%' }}>
           <Pressable style={styles.sheet} onPress={() => {}}>
             <Text style={styles.sheetTitle}>Você pagou este Pix?</Text>
             <Text style={styles.sheetMeta}>
@@ -653,6 +664,7 @@ export default function TitheScreen() {
               <Text style={styles.closeBtnText}>Fechar</Text>
             </TouchableOpacity>
           </Pressable>
+          </KeyboardAvoidingView>
         </Pressable>
       </Modal>
     </SafeAreaView>

@@ -58,7 +58,7 @@ export interface MyTithe {
 }
 
 export interface PersistentQr {
-  registrationNumber: string;
+  registrationNumber: string | null;
   txid: string;
   brCode: string;
   qrDataUrl: string;
