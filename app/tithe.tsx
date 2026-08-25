@@ -28,7 +28,9 @@ import {
   TitheIntent,
   TitheIntentKind,
   PersistentQr,
+  TitheSchedule,
   STATUS_LABELS,
+  SCHEDULE_STATUS_LABELS,
   getMyTithe,
   createTitheIntent,
   declareTitheIntent,
@@ -40,6 +42,9 @@ import {
   shareAnnualStatement,
   shareTitheReceipt,
   getTitheIntent,
+  getMySchedule,
+  createTitheSchedule,
+  cancelTitheSchedule,
 } from '../src/services/titheService';
 
 const PRESETS = [20, 50, 100, 200];
@@ -85,6 +90,13 @@ export default function TitheScreen() {
   const [contestText, setContestText] = useState('');
   const [persistent, setPersistent] = useState<PersistentQr | null>(null);
   const [savingReminder, setSavingReminder] = useState(false);
+  // Dízimo automático (provedor)
+  const [scheduleModal, setScheduleModal] = useState(false);
+  const [scheduleAmount, setScheduleAmount] = useState('');
+  const [scheduleDay, setScheduleDay] = useState(10);
+  const [scheduleMode, setScheduleMode] = useState<'PIX_AUTOMATIC' | 'PIX_SUBSCRIPTION'>('PIX_AUTOMATIC');
+  const [scheduleBusy, setScheduleBusy] = useState(false);
+  const [authQr, setAuthQr] = useState<TitheSchedule | null>(null);
   const prefilledRef = useRef(false);
 
   const load = useCallback(async (refresh = false) => {
@@ -263,6 +275,61 @@ export default function TitheScreen() {
     }
   };
 
+  const handleCreateSchedule = async () => {
+    const amount = parseAmount(scheduleAmount);
+    if (amount < 1) {
+      Alert.alert('Valor', 'Informe o valor mensal a partir de R$ 1,00.');
+      return;
+    }
+    setScheduleBusy(true);
+    try {
+      const created = await createTitheSchedule({ amount, dayOfMonth: scheduleDay, mode: scheduleMode });
+      setScheduleModal(false);
+      await load(true);
+      if (created.status === 'PENDING_AUTHORIZATION' && created.qrDataUrl) {
+        setAuthQr(created);
+      } else {
+        Alert.alert('Dízimo automático ativado', 'Todo mês o Pix do seu dízimo aparece aqui no app, no dia escolhido.');
+      }
+    } catch (error: any) {
+      Alert.alert('Dízimo automático', error?.message ?? 'Não foi possível ativar.');
+    } finally {
+      setScheduleBusy(false);
+    }
+  };
+
+  const openAuthorization = async () => {
+    try {
+      const current = await getMySchedule();
+      if (current?.qrDataUrl) setAuthQr(current);
+      else Alert.alert('Autorização', 'O QR de autorização expirou — cancele e ative de novo.');
+    } catch (error: any) {
+      Alert.alert('Autorização', error?.message ?? 'Não foi possível abrir.');
+    }
+  };
+
+  const handleCancelSchedule = (schedule: TitheSchedule) => {
+    Alert.alert('Cancelar dízimo automático?', 'Você pode ativar de novo quando quiser.', [
+      { text: 'Voltar', style: 'cancel' },
+      {
+        text: 'Cancelar',
+        style: 'destructive',
+        onPress: async () => {
+          setScheduleBusy(true);
+          try {
+            await cancelTitheSchedule(schedule.id);
+            setAuthQr(null);
+            await load(true);
+          } catch (error: any) {
+            Alert.alert('Dízimo automático', error?.message ?? 'Não foi possível cancelar.');
+          } finally {
+            setScheduleBusy(false);
+          }
+        },
+      },
+    ]);
+  };
+
   const openPersistentQr = async () => {
     try {
       setPersistent(await getPersistentQr());
@@ -392,11 +459,70 @@ export default function TitheScreen() {
               <TouchableOpacity style={styles.primaryBtn} disabled={creating} onPress={() => void handleCreate()}>
                 <Text style={styles.primaryBtnText}>{creating ? 'Gerando...' : 'Gerar Pix'}</Text>
               </TouchableOpacity>
-              <Text style={styles.hint}>
-                Você paga no app do seu banco (QR ou copia e cola) — confira o nome do recebedor antes de confirmar.
-                Depois toque em “Já fiz o Pix”: a tesouraria confere e confirma. Sem taxa para você nem para a paróquia.
-              </Text>
+              {data.gateway?.available ? (
+                <Text style={styles.hint}>
+                  Pix com confirmação automática: assim que o banco aprovar, seu dízimo é registrado sem você precisar
+                  avisar.
+                  {data.gateway.feePolicy === 'PASS_THROUGH'
+                    ? ` A taxa do provedor (R$ ${data.gateway.feeFixed.toFixed(2).replace('.', ',')}${data.gateway.feePercent ? ` + ${data.gateway.feePercent}%` : ''}) é somada ao Pix.`
+                    : ''}
+                </Text>
+              ) : (
+                <Text style={styles.hint}>
+                  Você paga no app do seu banco (QR ou copia e cola) — confira o nome do recebedor antes de confirmar.
+                  Depois toque em “Já fiz o Pix”: a tesouraria confere e confirma.
+                </Text>
+              )}
+              {data.gateway?.needsCpf && (
+                <TouchableOpacity onPress={() => router.push('/(tabs)/profile' as never)}>
+                  <Text style={styles.link}>Cadastre seu CPF no perfil para ter confirmação automática e dízimo automático ›</Text>
+                </TouchableOpacity>
+              )}
             </View>
+
+            {(data.gateway?.recurringAvailable || data.schedule) && (
+              <View style={styles.card}>
+                <Text style={styles.sectionTitle}>Dízimo automático</Text>
+                {data.schedule ? (
+                  <>
+                    <Text style={styles.cardBody}>
+                      {money(data.schedule.amount)} todo dia {data.schedule.dayOfMonth} ·{' '}
+                      {data.schedule.mode === 'PIX_AUTOMATIC' ? 'Pix Automático (débito no seu banco)' : 'Pix mensal para você pagar'}
+                    </Text>
+                    <Text style={[styles.badge, styles[`sbadge_${data.schedule.status}` as const], { alignSelf: 'flex-start' }]}>
+                      {SCHEDULE_STATUS_LABELS[data.schedule.status]}
+                    </Text>
+                    {data.schedule.lastError ? <Text style={styles.hint}>{data.schedule.lastError}</Text> : null}
+                    <View style={styles.rowGap}>
+                      {data.schedule.status === 'PENDING_AUTHORIZATION' && (
+                        <TouchableOpacity style={styles.secondaryBtnSm} onPress={() => void openAuthorization()}>
+                          <Text style={styles.secondaryBtnSmText}>Autorizar no banco</Text>
+                        </TouchableOpacity>
+                      )}
+                      <TouchableOpacity style={styles.secondaryBtnSm} disabled={scheduleBusy} onPress={() => handleCancelSchedule(data.schedule!)}>
+                        <Text style={styles.secondaryBtnSmText}>Cancelar</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </>
+                ) : (
+                  <>
+                    <Text style={styles.hint}>
+                      Escolha o valor e o dia: com o Pix Automático, o seu banco debita o dízimo todo mês depois de uma
+                      única autorização. Sem cartão, sem boleto.
+                    </Text>
+                    <TouchableOpacity
+                      style={styles.secondaryBtnSm}
+                      onPress={() => {
+                        setScheduleAmount(amountText || (data.suggestedAmount ? String(data.suggestedAmount) : ''));
+                        setScheduleModal(true);
+                      }}
+                    >
+                      <Text style={styles.secondaryBtnSmText}>Ativar dízimo automático</Text>
+                    </TouchableOpacity>
+                  </>
+                )}
+              </View>
+            )}
 
             <View style={styles.card}>
               <View style={styles.rowBetween}>
@@ -635,6 +761,80 @@ export default function TitheScreen() {
         </Pressable>
       </Modal>
 
+      {/* Dízimo automático: configurar */}
+      <Modal visible={scheduleModal} transparent animationType="fade" onRequestClose={() => setScheduleModal(false)}>
+        <Pressable style={styles.overlay} onPress={() => setScheduleModal(false)}>
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ width: '100%' }}>
+          <Pressable style={styles.sheet} onPress={() => {}}>
+            <Text style={styles.sheetTitle}>Dízimo automático</Text>
+            <Text style={styles.label}>Valor mensal</Text>
+            <View style={styles.amountRow}>
+              <Text style={styles.amountPrefix}>R$</Text>
+              <TextInput style={styles.amountInput} keyboardType="decimal-pad" placeholder="0,00" placeholderTextColor={colors.textTertiary} value={scheduleAmount} onChangeText={setScheduleAmount} maxLength={10} />
+            </View>
+            <Text style={styles.label}>Dia do mês</Text>
+            <View style={styles.kindRow}>
+              {REMINDER_DAYS.map((day) => (
+                <TouchableOpacity key={day} style={[styles.kindChip, scheduleDay === day && styles.kindChipOn]} onPress={() => setScheduleDay(day)}>
+                  <Text style={[styles.kindChipText, scheduleDay === day && styles.kindChipTextOn]}>dia {day}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            <Text style={styles.label}>Como</Text>
+            <View style={styles.kindRow}>
+              <TouchableOpacity style={[styles.kindChip, scheduleMode === 'PIX_AUTOMATIC' && styles.kindChipOn]} onPress={() => setScheduleMode('PIX_AUTOMATIC')}>
+                <Text style={[styles.kindChipText, scheduleMode === 'PIX_AUTOMATIC' && styles.kindChipTextOn]}>Pix Automático (débito)</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.kindChip, scheduleMode === 'PIX_SUBSCRIPTION' && styles.kindChipOn]} onPress={() => setScheduleMode('PIX_SUBSCRIPTION')}>
+                <Text style={[styles.kindChipText, scheduleMode === 'PIX_SUBSCRIPTION' && styles.kindChipTextOn]}>Pix mensal para eu pagar</Text>
+              </TouchableOpacity>
+            </View>
+            <Text style={styles.hint}>
+              {scheduleMode === 'PIX_AUTOMATIC'
+                ? 'Você autoriza uma vez no seu banco (lendo um QR) e o débito acontece todo mês, sem esquecer.'
+                : 'Todo mês o Pix do dízimo aparece aqui no app e você paga quando quiser.'}
+            </Text>
+            <TouchableOpacity style={styles.primaryBtn} disabled={scheduleBusy} onPress={() => void handleCreateSchedule()}>
+              <Text style={styles.primaryBtnText}>{scheduleBusy ? 'Ativando...' : 'Ativar'}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.closeBtn} onPress={() => setScheduleModal(false)}>
+              <Text style={styles.closeBtnText}>Fechar</Text>
+            </TouchableOpacity>
+          </Pressable>
+          </KeyboardAvoidingView>
+        </Pressable>
+      </Modal>
+
+      {/* Dízimo automático: QR de autorização */}
+      <Modal visible={!!authQr} transparent animationType="fade" onRequestClose={() => setAuthQr(null)}>
+        <Pressable style={styles.overlay} onPress={() => setAuthQr(null)}>
+          <Pressable style={styles.sheet} onPress={() => {}}>
+            {authQr && (
+              <ScrollView showsVerticalScrollIndicator={false}>
+                <Text style={styles.sheetTitle}>Autorize no seu banco</Text>
+                <Text style={styles.sheetMeta}>
+                  Leia o QR no app do banco: o primeiro mês é pago agora e os próximos ({money(authQr.amount)} todo dia {authQr.dayOfMonth}) ficam autorizados.
+                </Text>
+                {authQr.qrDataUrl ? <Image source={{ uri: authQr.qrDataUrl }} style={styles.qr} resizeMode="contain" /> : null}
+                {authQr.authorizationPayload ? (
+                  <>
+                    <Text style={styles.codeLabel}>Pix copia e cola</Text>
+                    <Text style={styles.code} numberOfLines={3} selectable>{authQr.authorizationPayload}</Text>
+                    <TouchableOpacity style={styles.primaryBtn} onPress={() => void copyCode(authQr.authorizationPayload!)}>
+                      <Text style={styles.primaryBtnText}>📋 Copiar</Text>
+                    </TouchableOpacity>
+                  </>
+                ) : null}
+                <Text style={styles.hint}>Depois da autorização, o status muda para “Ativo” sozinho.</Text>
+                <TouchableOpacity style={styles.closeBtn} onPress={() => setAuthQr(null)}>
+                  <Text style={styles.closeBtnText}>Fechar</Text>
+                </TouchableOpacity>
+              </ScrollView>
+            )}
+          </Pressable>
+        </Pressable>
+      </Modal>
+
       {/* Contestação */}
       <Modal visible={!!contestTarget} transparent animationType="fade" onRequestClose={() => setContestTarget(null)}>
         <Pressable style={styles.overlay} onPress={() => setContestTarget(null)}>
@@ -750,6 +950,11 @@ const createStyles = (colors: ReturnType<typeof useColors>) =>
     badge_DECLARED: { backgroundColor: '#fdf3e4', color: '#b45309' },
     badge_CONFIRMED: { backgroundColor: '#eaf7ef', color: '#15803d' },
     badge_CANCELLED: { backgroundColor: '#fdecec', color: '#b91c1c' },
+    sbadge_PENDING_AUTHORIZATION: { backgroundColor: '#fdf3e4', color: '#b45309' },
+    sbadge_ACTIVE: { backgroundColor: '#eaf7ef', color: '#15803d' },
+    sbadge_PAUSED: { backgroundColor: colors.border, color: colors.textSecondary },
+    sbadge_CANCELLED: { backgroundColor: '#fdecec', color: '#b91c1c' },
+    sbadge_FAILED: { backgroundColor: '#fdecec', color: '#b91c1c' },
     link: { fontSize: 12.5, fontWeight: '700', color: colors.primary, marginTop: 2 },
     overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'center', padding: 18 },
     sheet: { backgroundColor: colors.card, borderRadius: 18, padding: 18, maxHeight: '92%' },

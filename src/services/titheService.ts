@@ -23,6 +23,12 @@ export interface TitheIntent {
   contestNote?: string | null;
   /** Encerrado pela tesouraria e ainda não contestado — o fiel pode contestar */
   canContest?: boolean;
+  /** PIX_STATIC (chave da paróquia) ou GATEWAY (provedor, confirmação automática) */
+  method?: 'PIX_STATIC' | 'GATEWAY';
+  feeAmount?: number;
+  chargedAmount?: number | null;
+  qrExpiresAt?: string | null;
+  providerStatus?: string | null;
   declaredAt?: string | null;
   confirmedAt?: string | null;
   createdAt: string;
@@ -55,7 +61,38 @@ export interface MyTithe {
   monthsBack: number;
   monthsAhead: number;
   persistentQrAvailable: boolean;
+  gateway: {
+    provider: string | null;
+    available: boolean;
+    needsCpf: boolean;
+    feePolicy: string;
+    feeFixed: number;
+    feePercent: number;
+    recurringAvailable: boolean;
+  } | null;
+  schedule: TitheSchedule | null;
 }
+
+export interface TitheSchedule {
+  id: string;
+  amount: number;
+  dayOfMonth: number;
+  mode: 'PIX_AUTOMATIC' | 'PIX_SUBSCRIPTION';
+  status: 'PENDING_AUTHORIZATION' | 'ACTIVE' | 'PAUSED' | 'CANCELLED' | 'FAILED';
+  nextDueDate?: string | null;
+  authorizationPayload?: string | null;
+  authorizationExpires?: string | null;
+  lastError?: string | null;
+  qrDataUrl?: string | null;
+}
+
+export const SCHEDULE_STATUS_LABELS: Record<TitheSchedule['status'], string> = {
+  PENDING_AUTHORIZATION: 'Aguardando autorização no banco',
+  ACTIVE: 'Ativo',
+  PAUSED: 'Pausado',
+  CANCELLED: 'Cancelado',
+  FAILED: 'Não ativado',
+};
 
 export interface PersistentQr {
   registrationNumber: string | null;
@@ -106,6 +143,15 @@ export const contestTitheIntent = (id: string, note: string): Promise<TitheInten
 /** Lembrete mensal: dia 1..28 ou null para desligar. */
 export const updateTithePreferences = (reminderDay: number | null): Promise<{ reminderDay: number | null }> =>
   wrap(async () => (await api.patch('/tithe/my/preferences', { reminderDay })).data);
+
+/** Dízimo automático (provedor): cria, consulta e cancela. */
+export const getMySchedule = (): Promise<TitheSchedule | null> => wrap(async () => (await api.get('/tithe/schedules/mine')).data ?? null);
+
+export const createTitheSchedule = (input: { amount: number; dayOfMonth: number; mode: 'PIX_AUTOMATIC' | 'PIX_SUBSCRIPTION' }): Promise<TitheSchedule> =>
+  wrap(async () => (await api.post('/tithe/schedules', input)).data);
+
+export const cancelTitheSchedule = (id: string): Promise<TitheSchedule> =>
+  wrap(async () => (await api.delete(`/tithe/schedules/${id}`)).data);
 
 /** QR fixo do dizimista (sem valor; txid = nº do dizimista). */
 export const getPersistentQr = (): Promise<PersistentQr> => wrap(async () => (await api.get('/tithe/my/qr')).data);
