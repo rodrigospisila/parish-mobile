@@ -517,14 +517,15 @@ const pdfSlug = (value: string) =>
     .replace(/^-+|-+$/g, '')
     .toLowerCase() || 'catequizando';
 
-/** Certificado de conclusão do catequizando (família ou equipe). */
 /** Recibo em PDF do pagamento da taxa (comprovante da família). */
 export const shareFeeReceipt = (paymentId: string, description?: string) =>
   downloadCatechesisPdf(
     `/catechesis/fees/payments/${paymentId}/receipt.pdf`,
-    `recibo_${(description ?? 'taxa').replace(/\s+/g, '_').toLowerCase().slice(0, 40)}.pdf`,
+    // Descrição é texto livre ("Material 2025/2026"): slug evita '/' no caminho do cache
+    `recibo-${description ? pdfSlug(description).slice(0, 40) : paymentId.slice(-8)}.pdf`,
   );
 
+/** Certificado de conclusão do catequizando (família ou equipe). */
 export const shareCatechesisCertificate = (enrollmentId: string, memberName?: string) =>
   downloadCatechesisPdf(
     `/catechesis/enrollments/${enrollmentId}/certificate.pdf`,

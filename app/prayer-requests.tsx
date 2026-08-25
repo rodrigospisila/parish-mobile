@@ -84,9 +84,25 @@ export default function PrayerRequestsScreen() {
       ),
     );
     try {
-      await prayForRequest(request.id);
-    } catch {
-      // contador local mantém — sincroniza na próxima carga
+      const count = await prayForRequest(request.id);
+      if (count > 0) {
+        setRequests((current) =>
+          current.map((item) => (item.id === request.id ? { ...item, prayerCount: count } : item)),
+        );
+      }
+    } catch (error: any) {
+      // Reverte o otimismo — o toque não foi registrado (offline, pedido removido...)
+      setPrayed((current) => {
+        const next = { ...current };
+        delete next[request.id];
+        return next;
+      });
+      setRequests((current) =>
+        current.map((item) =>
+          item.id === request.id ? { ...item, prayerCount: Math.max(0, item.prayerCount - 1) } : item,
+        ),
+      );
+      Alert.alert('Oração', error?.message ?? 'Não foi possível registrar agora. Tente novamente.');
     }
   };
 

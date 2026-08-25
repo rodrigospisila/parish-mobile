@@ -15,22 +15,34 @@ import { FontAwesome5 } from '@expo/vector-icons';
 import { useColors } from '../src/context/ThemeContext';
 import { AppNotification, getMyNotifications } from '../src/services/catechesisService';
 
+// Valores REAIS do enum NotificationType do backend
 const TYPE_META: Record<string, { label: string; icon: string }> = {
   CATECHESIS: { label: 'Catequese', icon: 'book' },
-  SCHEDULE: { label: 'Escala', icon: 'clipboard-list' },
-  EVENT: { label: 'Evento', icon: 'calendar-alt' },
-  ANNOUNCEMENT: { label: 'Aviso', icon: 'bullhorn' },
+  SCHEDULE_REMINDER: { label: 'Escala', icon: 'clipboard-list' },
+  ASSIGNMENT_CREATED: { label: 'Escala', icon: 'clipboard-list' },
+  ASSIGNMENT_DECLINED: { label: 'Escala', icon: 'clipboard-list' },
+  ASSIGNMENT_REPLACED: { label: 'Escala', icon: 'clipboard-list' },
+  SCHEDULE_CANCELLED: { label: 'Escala', icon: 'clipboard-list' },
+  TEAM_BROADCAST: { label: 'Pastoral', icon: 'users' },
+  EVENT_REMINDER: { label: 'Evento', icon: 'calendar-alt' },
+  URGENT_NOTICE: { label: 'Aviso urgente', icon: 'bullhorn' },
+  NEWS: { label: 'Notícia', icon: 'newspaper' },
   CLERGY_MESSAGE: { label: 'Palavra Pastoral', icon: 'scroll' },
-  PASTORAL: { label: 'Pastoral', icon: 'users' },
-  FINANCE: { label: 'Financeiro', icon: 'coins' },
-  SYSTEM: { label: 'Sistema', icon: 'cog' },
+  PRAYER_REQUEST: { label: 'Oração', icon: 'praying-hands' },
+  MASS_INTENTION_CONFIRMED: { label: 'Intenção de missa', icon: 'church' },
+  DAILY_LITURGY: { label: 'Liturgia', icon: 'book-open' },
 };
 
-const FILTERS: Array<{ key: string | null; label: string }> = [
+// O endpoint aceita UM type; os grupos são filtrados aqui a partir de 'Todos'
+const FILTERS: Array<{ key: string | null; label: string; types?: string[] }> = [
   { key: null, label: 'Todos' },
-  { key: 'CATECHESIS', label: 'Catequese' },
-  { key: 'SCHEDULE', label: 'Escala' },
-  { key: 'EVENT', label: 'Eventos' },
+  { key: 'catechesis', label: 'Catequese', types: ['CATECHESIS'] },
+  {
+    key: 'schedule',
+    label: 'Escala',
+    types: ['SCHEDULE_REMINDER', 'ASSIGNMENT_CREATED', 'ASSIGNMENT_DECLINED', 'ASSIGNMENT_REPLACED', 'SCHEDULE_CANCELLED', 'TEAM_BROADCAST'],
+  },
+  { key: 'event', label: 'Eventos', types: ['EVENT_REMINDER'] },
 ];
 
 /** Central de avisos: tudo que chegou por push, para reler com calma. */
@@ -44,21 +56,21 @@ export default function NotificationsScreen() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [filter, setFilter] = useState<string | null>(null);
 
-  const load = useCallback(
-    async (refresh = false) => {
-      if (refresh) setIsRefreshing(true);
-      try {
-        const list = await getMyNotifications(filter ?? undefined);
-        setItems(list);
-      } catch (error) {
-        console.error('Erro ao carregar avisos:', error);
-      } finally {
-        setIsLoading(false);
-        setIsRefreshing(false);
-      }
-    },
-    [filter],
-  );
+  const load = useCallback(async (refresh = false) => {
+    if (refresh) setIsRefreshing(true);
+    try {
+      const list = await getMyNotifications();
+      setItems(list);
+    } catch (error) {
+      console.error('Erro ao carregar avisos:', error);
+    } finally {
+      setIsLoading(false);
+      setIsRefreshing(false);
+    }
+  }, []);
+
+  const activeTypes = FILTERS.find((option) => option.key === filter)?.types;
+  const visible = activeTypes ? items.filter((notice) => activeTypes.includes(notice.type)) : items;
 
   useFocusEffect(
     useCallback(() => {
@@ -98,13 +110,15 @@ export default function NotificationsScreen() {
       >
         {isLoading ? (
           <ActivityIndicator size="large" color={colors.primary} style={{ marginTop: 40 }} />
-        ) : items.length === 0 ? (
+        ) : visible.length === 0 ? (
           <View style={styles.empty}>
             <FontAwesome5 name="bell-slash" size={26} color={colors.textTertiary} />
-            <Text style={styles.emptyText}>Nenhum aviso por aqui ainda.</Text>
+            <Text style={styles.emptyText}>
+              {filter ? 'Nenhum aviso deste tipo.' : 'Nenhum aviso por aqui ainda.'}
+            </Text>
           </View>
         ) : (
-          items.map((notice) => {
+          visible.map((notice) => {
             const meta = TYPE_META[notice.type ?? ''] ?? { label: 'Aviso', icon: 'bell' };
             return (
               <View key={notice.id} style={styles.card}>
