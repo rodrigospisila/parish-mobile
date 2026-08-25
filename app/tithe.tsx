@@ -22,15 +22,18 @@ import { Stack, useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import { FontAwesome5 } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
+import * as WebBrowser from 'expo-web-browser';
 import { useColors } from '../src/context/ThemeContext';
 import {
   MyTithe,
   TitheIntent,
   TitheIntentKind,
+  TithePaymentMethod,
   PersistentQr,
   TitheSchedule,
   STATUS_LABELS,
   SCHEDULE_STATUS_LABELS,
+  PAYMENT_METHOD_LABELS,
   getMyTithe,
   createTitheIntent,
   declareTitheIntent,
@@ -49,6 +52,23 @@ import {
 
 const PRESETS = [20, 50, 100, 200];
 const REMINDER_DAYS = [5, 10, 15, 20, 25];
+// Ordem fixa dos chips; só aparecem os meios que o backend liberou em gateway.methods
+const PAYMENT_METHODS: TithePaymentMethod[] = ['PIX', 'CARD', 'BOLETO'];
+const PAYMENT_METHOD_HINTS: Record<TithePaymentMethod, string> = {
+  PIX: 'Pix — confirma na hora.',
+  CARD: 'Cartão — página segura do Asaas, sem digitar o cartão no app.',
+  BOLETO: 'Boleto — compensa em até 2 dias úteis.',
+};
+const payMethodOf = (intent: TitheIntent): TithePaymentMethod => intent.paymentMethod ?? 'PIX';
+const isPix = (intent: TitheIntent) => payMethodOf(intent) === 'PIX';
+/** "Pix gerado" só faz sentido para Pix; cartão/boleto têm o próprio rótulo em CREATED */
+const statusLabel = (intent: TitheIntent) => {
+  if (intent.status !== 'CREATED') return STATUS_LABELS[intent.status];
+  const method = payMethodOf(intent);
+  return method === 'CARD' ? 'Cobrança gerada' : method === 'BOLETO' ? 'Boleto gerado' : STATUS_LABELS.CREATED;
+};
+const dateTimeBR = (iso: string) =>
+  new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 
 const money = (value: number) => `R$ ${value.toFixed(2).replace('.', ',')}`;
 const decimalBR = (value: number) => value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -81,7 +101,8 @@ const shiftMonth = (iso: string, delta: number) => {
 /**
  * Dízimo e ofertas pelo app (Fase 1 + Onda D2): Pix copia-e-cola com a chave da
  * paróquia, mês de referência, oferta anônima, contestação, lembrete mensal,
- * QR fixo do dizimista e extrato anual.
+ * QR fixo do dizimista e extrato anual. Com Asaas, o fiel também pode pagar com
+ * cartão (página segura do provedor) ou boleto — confirmação automática nos três.
  */
 export default function TitheScreen() {
   const router = useRouter();
@@ -96,6 +117,7 @@ export default function TitheScreen() {
   const [referenceMonth, setReferenceMonth] = useState<string | null>(null);
   const [anonymous, setAnonymous] = useState(false);
   const [amountText, setAmountText] = useState('');
+  const [payMethod, setPayMethod] = useState<TithePaymentMethod>('PIX');
   const [creating, setCreating] = useState(false);
   const [active, setActive] = useState<TitheIntent | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -136,6 +158,12 @@ export default function TitheScreen() {
     }, [load]),
   );
 
+  // Se o backend deixou de liberar o meio escolhido (ex.: gateway saiu do ar), volta para Pix
+  const gatewayMethods = data?.gateway?.methods;
+  useEffect(() => {
+    if (payMethod !== 'PIX' && !(gatewayMethods ?? []).includes(payMethod)) setPayMethod('PIX');
+  }, [gatewayMethods, payMethod]);
+
   // "1.234,56" → 1234.56 · "1.000" → 1000 · "50.00" → 50 · ",5" → 0.5
   const parseAmount = (text: string) => {
     const clean = text.replace(/[^\d,.]/g, '');
@@ -164,11 +192,19 @@ export default function TitheScreen() {
         kind,
         referenceMonth: kind === 'TITHE' ? referenceMonth ?? data?.currentMonth : data?.currentMonth,
         anonymous: kind === 'OFFERING' ? anonymous : false,
+        paymentMethod: payMethod,
       });
       setActive(intent);
       await load(true);
     } catch (error: any) {
-      Alert.alert('Não foi possível gerar o Pix', error?.message ?? 'Tente novamente.');
+      Alert.alert(
+        payMethod === 'CARD'
+          ? 'Não foi possível iniciar o pagamento'
+          : payMethod === 'BOLETO'
+            ? 'Não foi possível gerar o boleto'
+            : 'Não foi possível gerar o Pix',
+        error?.message ?? 'Tente novamente.',
+      );
     } finally {
       setCreating(false);
     }
@@ -179,15 +215,56 @@ export default function TitheScreen() {
     Alert.alert('Copiado ✓', 'Abra o app do seu banco, escolha "Pix copia e cola" e cole o código.');
   };
 
+  const copyBoletoLine = async (line: string) => {
+    await Clipboard.setStringAsync(line);
+    Alert.alert('Copiado ✓', 'Abra o app do seu banco, escolha "Pagar boleto" e cole a linha digitável.');
+  };
+
+  /** Abre a página segura do provedor (cartão) ou o PDF do boleto no navegador interno. */
+  const openUrl = async (url: string | null | undefined, what: string) => {
+    if (!url) {
+      Alert.alert(what, 'Link indisponível — gere outra cobrança.');
+      return false;
+    }
+    try {
+      await WebBrowser.openBrowserAsync(url);
+      return true;
+    } catch {
+      Alert.alert(what, 'Não foi possível abrir. Tente de novo.');
+      return false;
+    }
+  };
+
   const shareCode = async (intent: TitheIntent) => {
-    if (!intent.brCode) return;
+    const method = payMethodOf(intent);
     const origin =
       intent.method === 'GATEWAY'
         ? `Cobrança emitida por ${providerLabel(data?.gateway?.provider)} em nome de ${data?.parish?.name}`
         : `Recebedor: ${data?.parish?.merchantName ?? data?.parish?.name}`;
+    const purpose = intent.kind === 'TITHE' ? 'do dízimo' : 'de oferta';
+    let head: string;
+    let body: string;
+    if (method === 'CARD') {
+      if (!intent.paymentUrl) return;
+      head = `Pagamento ${purpose} com cartão`;
+      body = `Página de pagamento:\n${intent.paymentUrl}`;
+    } else if (method === 'BOLETO') {
+      const parts: string[] = [];
+      if (intent.boletoLine) parts.push(`Linha digitável:\n${intent.boletoLine}`);
+      if (intent.boletoUrl) parts.push(`Boleto (PDF):\n${intent.boletoUrl}`);
+      else if (intent.paymentUrl) parts.push(`Página de pagamento:\n${intent.paymentUrl}`);
+      if (parts.length === 0) return;
+      head = `Boleto ${purpose}`;
+      body = parts.join('\n\n');
+    } else {
+      if (!intent.brCode) return;
+      head = `Pix ${purpose}`;
+      body = `Pix copia e cola:\n${intent.brCode}`;
+    }
+    const due = method !== 'PIX' && intent.qrExpiresAt ? `\nVencimento: ${dateTimeBR(intent.qrExpiresAt)}` : '';
     try {
       await Share.share({
-        message: `Pix ${intent.kind === 'TITHE' ? 'do dízimo' : 'de oferta'} · ${money(intent.amount)} · ${monthLabel(intent.referenceMonth)}\n${origin}\nIdentificador: ${intent.txid}\n\nPix copia e cola:\n${intent.brCode}`,
+        message: `${head} · ${money(intent.amount)} · ${monthLabel(intent.referenceMonth)}\n${origin}\nIdentificador: ${intent.txid}${due}\n\n${body}`,
       });
     } catch {
       // usuário cancelou
@@ -221,10 +298,21 @@ export default function TitheScreen() {
     (fresh: TitheIntent) => {
       setActive(null);
       void load(true);
+      const method = payMethodOf(fresh);
       if (fresh.status === 'CONFIRMED') {
-        Alert.alert('Contribuição confirmada 🙏', 'O banco confirmou o seu Pix e ele já está registrado.');
+        Alert.alert(
+          'Contribuição confirmada 🙏',
+          method === 'CARD'
+            ? 'O pagamento no cartão foi aprovado e já está registrado.'
+            : method === 'BOLETO'
+              ? 'O boleto compensou e o pagamento já está registrado.'
+              : 'O banco confirmou o seu Pix e ele já está registrado.',
+        );
       } else {
-        Alert.alert('Pix encerrado', fresh.note ?? 'Este Pix foi encerrado.');
+        Alert.alert(
+          method === 'PIX' ? 'Pix encerrado' : 'Pagamento encerrado',
+          fresh.note ?? (method === 'PIX' ? 'Este Pix foi encerrado.' : 'Este pagamento foi encerrado.'),
+        );
       }
     },
     [load],
@@ -240,14 +328,32 @@ export default function TitheScreen() {
         return;
       }
       setActive((current) => (current && current.id === intent.id ? { ...current, ...fresh } : current));
+      const method = payMethodOf(intent);
       Alert.alert(
-        'Aguardando o banco',
-        'Ainda não chegou a confirmação do banco — normalmente leva alguns segundos. Se você pagou, ela aparece sozinha aqui.',
+        method === 'BOLETO' ? 'Aguardando a compensação' : 'Aguardando o banco',
+        method === 'CARD'
+          ? 'Ainda não chegou a aprovação do cartão — normalmente leva alguns segundos depois de concluir na página de pagamento. Se você pagou, ela aparece sozinha aqui.'
+          : method === 'BOLETO'
+            ? 'O boleto ainda não compensou — pode levar até 2 dias úteis depois do pagamento. Quando compensar, a confirmação aparece sozinha aqui.'
+            : 'Ainda não chegou a confirmação do banco — normalmente leva alguns segundos. Se você pagou, ela aparece sozinha aqui.',
       );
     } catch (error: any) {
       Alert.alert('Dízimo', error?.message ?? 'Não foi possível verificar.');
     } finally {
       setBusyId(null);
+    }
+  };
+
+  /** Ao voltar da página de pagamento (cartão): consulta o provedor sem alerta — o polling segue se ainda estiver aberto. */
+  const openPaymentPage = async (intent: TitheIntent) => {
+    const opened = await openUrl(intent.paymentUrl, 'Página de pagamento');
+    if (!opened) return;
+    try {
+      const fresh = await getTitheIntent(intent.id);
+      if (fresh.status === 'CONFIRMED' || fresh.status === 'CANCELLED') settleGatewayIntent(fresh);
+      else setActive((current) => (current && current.id === intent.id ? { ...current, ...fresh } : current));
+    } catch {
+      // rede instável: o polling tenta de novo
     }
   };
 
@@ -286,10 +392,11 @@ export default function TitheScreen() {
   }, [pollingId, settleGatewayIntent]);
 
   const handleCancel = (intent: TitheIntent) => {
-    Alert.alert('Cancelar este Pix?', 'Só cancele se você NÃO fez o pagamento.', [
+    const noun = payMethodOf(intent) === 'CARD' ? 'cobrança' : payMethodOf(intent) === 'BOLETO' ? 'boleto' : 'Pix';
+    Alert.alert(`Cancelar ${noun === 'cobrança' ? 'esta' : 'este'} ${noun}?`, 'Só cancele se você NÃO fez o pagamento.', [
       { text: 'Voltar', style: 'cancel' },
       {
-        text: 'Cancelar Pix',
+        text: `Cancelar ${noun}`,
         style: 'destructive',
         onPress: async () => {
           setBusyId(intent.id);
@@ -338,10 +445,11 @@ export default function TitheScreen() {
       }
       // O servidor já sabe o desfecho (ex.: provedor confirmou): atualiza a lista em vez de abrir o QR
       await load(true);
+      const what = isPix(fresh) ? 'Este Pix' : 'Este pagamento';
       if (fresh.status === 'CONFIRMED') {
-        Alert.alert('Dízimo', 'Este Pix já foi confirmado. 🙏');
+        Alert.alert('Dízimo', `${what} já foi confirmado. 🙏`);
       } else {
-        Alert.alert('Dízimo', fresh.note ? `Este Pix foi encerrado: ${fresh.note}` : 'Este Pix foi encerrado.');
+        Alert.alert('Dízimo', fresh.note ? `${what} foi encerrado: ${fresh.note}` : `${what} foi encerrado.`);
       }
     } catch (error: any) {
       Alert.alert('Dízimo', error?.message ?? 'Não foi possível abrir.');
@@ -452,6 +560,11 @@ export default function TitheScreen() {
     : [];
   const currentYear = new Date().getFullYear();
   const gatewayFee = data?.gateway ? feeText(data.gateway.feeFixed, data.gateway.feePercent) : '';
+  // Chips só quando há escolha real (Asaas com CPF); sem isso o backend manda só ['PIX'] ou nada
+  const availableMethods = PAYMENT_METHODS.filter((m) => (gatewayMethods ?? []).includes(m));
+  const showMethodChips = availableMethods.length > 1;
+  const hasNonPixIntent = !!data?.intents.some((intent) => !isPix(intent));
+  const activeMethod: TithePaymentMethod = active ? payMethodOf(active) : 'PIX';
   const scheduleAuthExpired =
     !!data?.schedule &&
     (data.schedule.authorizationExpired === true ||
@@ -568,14 +681,50 @@ export default function TitheScreen() {
                   maxLength={10}
                 />
               </View>
+              {showMethodChips && (
+                <>
+                  <Text style={styles.label}>Como pagar</Text>
+                  <View style={styles.kindRow}>
+                    {availableMethods.map((method) => (
+                      <TouchableOpacity
+                        key={method}
+                        style={[styles.kindChip, payMethod === method && styles.kindChipOn]}
+                        onPress={() => setPayMethod(method)}
+                      >
+                        <Text style={[styles.kindChipText, payMethod === method && styles.kindChipTextOn]}>
+                          {PAYMENT_METHOD_LABELS[method]}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                  <Text style={styles.hint}>{PAYMENT_METHOD_HINTS[payMethod]}</Text>
+                </>
+              )}
               <TouchableOpacity style={styles.primaryBtn} disabled={creating} onPress={() => void handleCreate()}>
-                <Text style={styles.primaryBtnText}>{creating ? 'Gerando...' : 'Gerar Pix'}</Text>
+                <Text style={styles.primaryBtnText}>
+                  {creating
+                    ? 'Gerando...'
+                    : payMethod === 'CARD'
+                      ? '💳 Pagar com cartão'
+                      : payMethod === 'BOLETO'
+                        ? 'Gerar boleto'
+                        : 'Gerar Pix'}
+                </Text>
               </TouchableOpacity>
               {data.gateway?.available ? (
                 <Text style={styles.hint}>
-                  Pix com confirmação automática: assim que o banco aprovar, seu dízimo é registrado sem você precisar
-                  avisar.
-                  {data.gateway.feePolicy === 'PASS_THROUGH' && gatewayFee ? ` A taxa do provedor (${gatewayFee}) é somada ao Pix.` : ''}
+                  {payMethod === 'CARD'
+                    ? 'Cartão com confirmação automática: você paga na página segura do Asaas e, assim que for aprovado, seu dízimo é registrado sem você precisar avisar.'
+                    : payMethod === 'BOLETO'
+                      ? 'Boleto com confirmação automática: quando compensar (até 2 dias úteis), seu dízimo é registrado sem você precisar avisar.'
+                      : 'Pix com confirmação automática: assim que o banco aprovar, seu dízimo é registrado sem você precisar avisar.'}
+                  {data.gateway.feePolicy === 'PASS_THROUGH'
+                    ? payMethod === 'PIX'
+                      ? gatewayFee
+                        ? ` A taxa do provedor (${gatewayFee}) é somada ao Pix.`
+                        : ''
+                      : ' A taxa do provedor é somada ao valor — você vê o total antes de pagar.'
+                    : ''}
                 </Text>
               ) : (
                 <Text style={styles.hint}>
@@ -705,7 +854,7 @@ export default function TitheScreen() {
 
             {data.intents.length > 0 && (
               <View style={styles.card}>
-                <Text style={styles.sectionTitle}>Meus Pix</Text>
+                <Text style={styles.sectionTitle}>{hasNonPixIntent ? 'Meus pagamentos' : 'Meus Pix'}</Text>
                 {data.intents.map((intent) => (
                   <TouchableOpacity
                     key={intent.id}
@@ -738,7 +887,10 @@ export default function TitheScreen() {
                       )}
                     </View>
                     <View style={{ alignItems: 'flex-end', gap: 6 }}>
-                      <Text style={[styles.badge, styles[`badge_${intent.status}` as const]]}>{STATUS_LABELS[intent.status]}</Text>
+                      <View style={styles.statusRow}>
+                        <Text style={styles.intentMethod}>{PAYMENT_METHOD_LABELS[payMethodOf(intent)]}</Text>
+                        <Text style={[styles.badge, styles[`badge_${intent.status}` as const]]}>{statusLabel(intent)}</Text>
+                      </View>
                       {intent.status === 'CONFIRMED' && (
                         <TouchableOpacity disabled={busyId === intent.id} onPress={() => void handleReceipt(intent)} hitSlop={6}>
                           <Text style={styles.link}>{busyId === intent.id ? 'Gerando...' : '🧾 Comprovante'}</Text>
@@ -784,28 +936,45 @@ export default function TitheScreen() {
         )}
       </ScrollView>
 
-      {/* Pix gerado: QR + copia e cola + ações */}
+      {/* Cobrança gerada: Pix (QR + copia e cola), cartão (página do Asaas) ou boleto (linha digitável + PDF) */}
       <Modal visible={!!active} transparent animationType="fade" onRequestClose={() => setActive(null)}>
         <Pressable style={styles.overlay} onPress={() => setActive(null)}>
           <Pressable style={styles.sheet} onPress={() => {}}>
             {active && (
               <ScrollView showsVerticalScrollIndicator={false}>
                 <Text style={styles.sheetTitle}>
-                  {active.kind === 'TITHE' ? 'Dízimo' : 'Oferta'} · {money(active.amount)}
+                  {activeMethod === 'CARD'
+                    ? 'Pagar com cartão'
+                    : activeMethod === 'BOLETO'
+                      ? 'Pagar com boleto'
+                      : `${active.kind === 'TITHE' ? 'Dízimo' : 'Oferta'} · ${money(active.amount)}`}
                 </Text>
-                <Text style={styles.sheetMeta}>{monthLabel(active.referenceMonth)}</Text>
+                <Text style={styles.sheetMeta}>
+                  {activeMethod === 'PIX'
+                    ? monthLabel(active.referenceMonth)
+                    : `${active.kind === 'TITHE' ? 'Dízimo' : 'Oferta'} · ${money(active.amount)} · ${monthLabel(active.referenceMonth)}`}
+                </Text>
                 {active.method === 'GATEWAY' ? (
                   <View style={styles.beneficiary}>
-                    <Text style={styles.beneficiaryLabel}>Pix com confirmação automática</Text>
+                    <Text style={styles.beneficiaryLabel}>
+                      {activeMethod === 'CARD'
+                        ? 'Cartão com confirmação automática'
+                        : activeMethod === 'BOLETO'
+                          ? 'Boleto com confirmação automática'
+                          : 'Pix com confirmação automática'}
+                    </Text>
                     <Text style={styles.beneficiaryText}>
                       Cobrança emitida por {providerLabel(data?.gateway?.provider)} em nome de {parish?.name}
                     </Text>
                     <Text style={styles.beneficiaryText}>Identificador: {active.txid}</Text>
                     {active.chargedAmount != null && active.chargedAmount !== active.amount ? (
                       <Text style={styles.beneficiaryText}>
-                        Valor do Pix: {money(active.chargedAmount)} (inclui taxa de{' '}
+                        {activeMethod === 'PIX' ? 'Valor do Pix' : 'Valor cobrado'}: {money(active.chargedAmount)} (inclui taxa de{' '}
                         {money(active.feeAmount ?? active.chargedAmount - active.amount)})
                       </Text>
+                    ) : null}
+                    {activeMethod !== 'PIX' && active.qrExpiresAt ? (
+                      <Text style={styles.beneficiaryText}>Vencimento: {dateTimeBR(active.qrExpiresAt)}</Text>
                     ) : null}
                   </View>
                 ) : (
@@ -816,10 +985,100 @@ export default function TitheScreen() {
                     <Text style={styles.beneficiaryText}>Identificador: {active.txid}</Text>
                   </View>
                 )}
-                {active.qrDataUrl ? (
+
+                {/* CARD: sem QR/copia e cola — só a página segura do provedor */}
+                {activeMethod === 'CARD' && (
+                  <>
+                    <Text style={[styles.hint, { textAlign: 'center' }]}>
+                      Você paga na página segura do Asaas em nome de {parish?.name}; a confirmação aparece aqui sozinha.
+                    </Text>
+                    {qrExpired ? <Text style={styles.expiredText}>⌛ Cobrança vencida — gere outra</Text> : null}
+                    {active.status === 'CREATED' && (
+                      <>
+                        <TouchableOpacity
+                          style={[styles.primaryBtn, { marginTop: 12 }, (qrExpired || !active.paymentUrl) && styles.btnDisabled]}
+                          disabled={qrExpired || !active.paymentUrl}
+                          onPress={() => void openPaymentPage(active)}
+                        >
+                          <Text style={styles.primaryBtnText}>💳 Abrir página de pagamento</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={[styles.secondaryBtnSm, { marginTop: 8 }, (qrExpired || !active.paymentUrl) && styles.btnDisabled]}
+                          disabled={qrExpired || !active.paymentUrl}
+                          onPress={() => void shareCode(active)}
+                        >
+                          <Text style={styles.secondaryBtnSmText}>Compartilhar link</Text>
+                        </TouchableOpacity>
+                      </>
+                    )}
+                  </>
+                )}
+
+                {/* BOLETO: linha digitável + PDF (+ página do provedor, se houver) */}
+                {activeMethod === 'BOLETO' && (
+                  <>
+                    {active.boletoLine ? (
+                      <>
+                        <Text style={styles.codeLabel}>Linha digitável</Text>
+                        <Text style={styles.code} selectable>
+                          {active.boletoLine}
+                        </Text>
+                      </>
+                    ) : (
+                      <Text style={[styles.hint, { textAlign: 'center', marginTop: 8 }]}>
+                        Linha digitável indisponível — abra o PDF do boleto para pagar.
+                      </Text>
+                    )}
+                    {qrExpired ? <Text style={styles.expiredText}>⌛ Boleto vencido — gere outro</Text> : null}
+                    {active.status === 'CREATED' && (
+                      <>
+                        {active.boletoLine ? (
+                          <TouchableOpacity
+                            style={[styles.primaryBtn, { marginTop: 12 }, qrExpired && styles.btnDisabled]}
+                            disabled={qrExpired}
+                            onPress={() => void copyBoletoLine(active.boletoLine!)}
+                          >
+                            <Text style={styles.primaryBtnText}>📋 Copiar linha digitável</Text>
+                          </TouchableOpacity>
+                        ) : null}
+                        <View style={styles.rowGap}>
+                          <TouchableOpacity
+                            style={[styles.secondaryBtnSm, { flex: 1, marginTop: 4 }, (qrExpired || !active.boletoUrl) && styles.btnDisabled]}
+                            disabled={qrExpired || !active.boletoUrl}
+                            onPress={() => void openUrl(active.boletoUrl, 'Boleto')}
+                          >
+                            <Text style={styles.secondaryBtnSmText}>📄 Abrir boleto (PDF)</Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            style={[styles.secondaryBtnSm, { flex: 1, marginTop: 4 }, qrExpired && styles.btnDisabled]}
+                            disabled={qrExpired}
+                            onPress={() => void shareCode(active)}
+                          >
+                            <Text style={styles.secondaryBtnSmText}>Compartilhar</Text>
+                          </TouchableOpacity>
+                        </View>
+                        {active.paymentUrl ? (
+                          <TouchableOpacity
+                            style={[styles.secondaryBtnSm, { marginTop: 8 }, qrExpired && styles.btnDisabled]}
+                            disabled={qrExpired}
+                            onPress={() => void openUrl(active.paymentUrl, 'Página de pagamento')}
+                          >
+                            <Text style={styles.secondaryBtnSmText}>Abrir página de pagamento</Text>
+                          </TouchableOpacity>
+                        ) : null}
+                      </>
+                    )}
+                    <Text style={[styles.hint, { textAlign: 'center', marginTop: 10 }]}>
+                      Boleto compensa em até 2 dias úteis — a confirmação aparece aqui sozinha.
+                    </Text>
+                  </>
+                )}
+
+                {/* PIX (provedor ou chave estática): QR + copia e cola */}
+                {activeMethod === 'PIX' && active.qrDataUrl ? (
                   <Image source={{ uri: active.qrDataUrl }} style={styles.qr} resizeMode="contain" />
                 ) : null}
-                {active.brCode ? (
+                {activeMethod === 'PIX' && active.brCode ? (
                   <>
                     <Text style={styles.codeLabel}>Pix copia e cola</Text>
                     <Text style={styles.code} numberOfLines={3} selectable>
@@ -856,7 +1115,11 @@ export default function TitheScreen() {
                       </Text>
                     </TouchableOpacity>
                     <Text style={[styles.hint, { textAlign: 'center', marginTop: 8 }]}>
-                      Assim que o banco aprovar, a confirmação aparece aqui sozinha.
+                      {activeMethod === 'CARD'
+                        ? 'Assim que o cartão for aprovado, a confirmação aparece aqui sozinha.'
+                        : activeMethod === 'BOLETO'
+                          ? 'Pagou o boleto? Pode fechar — quando compensar, a confirmação aparece sozinha.'
+                          : 'Assim que o banco aprovar, a confirmação aparece aqui sozinha.'}
                     </Text>
                   </>
                 )}
@@ -874,7 +1137,9 @@ export default function TitheScreen() {
                 {active.status === 'DECLARED' && (
                   <Text style={styles.declared}>
                     {active.method === 'GATEWAY'
-                      ? '⏳ Pix informado — aguardando a confirmação do banco.'
+                      ? activeMethod === 'PIX'
+                        ? '⏳ Pix informado — aguardando a confirmação do banco.'
+                        : '⏳ Pagamento informado — aguardando a confirmação do provedor.'
                       : '⏳ Pix informado — aguardando a conferência da tesouraria.'}
                   </Text>
                 )}
@@ -1109,6 +1374,8 @@ const createStyles = (colors: ReturnType<typeof useColors>) =>
     },
     intentTitle: { fontSize: 14, fontWeight: '700', color: colors.text },
     intentMeta: { fontSize: 12, color: colors.textSecondary, marginTop: 2 },
+    statusRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+    intentMethod: { fontSize: 11, fontWeight: '700', color: colors.textTertiary },
     badge: { fontSize: 11, fontWeight: '800', borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3, overflow: 'hidden' },
     badge_CREATED: { backgroundColor: colors.border, color: colors.textSecondary },
     badge_DECLARED: { backgroundColor: '#fdf3e4', color: '#b45309' },

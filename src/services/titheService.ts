@@ -7,6 +7,14 @@ import { downloadCatechesisPdf } from './catechesisService';
 
 export type TitheIntentStatus = 'CREATED' | 'DECLARED' | 'CONFIRMED' | 'CANCELLED';
 export type TitheIntentKind = 'TITHE' | 'OFFERING';
+/** Meio de pagamento no provedor: Pix (padrão), cartão (página segura do Asaas) ou boleto */
+export type TithePaymentMethod = 'PIX' | 'CARD' | 'BOLETO';
+
+export const PAYMENT_METHOD_LABELS: Record<TithePaymentMethod, string> = {
+  PIX: 'Pix',
+  CARD: 'Cartão',
+  BOLETO: 'Boleto',
+};
 
 export interface TitheIntent {
   id: string;
@@ -25,6 +33,14 @@ export interface TitheIntent {
   canContest?: boolean;
   /** PIX_STATIC (chave da paróquia) ou GATEWAY (provedor, confirmação automática) */
   method?: 'PIX_STATIC' | 'GATEWAY';
+  /** PIX (padrão) · CARD/BOLETO só no Asaas — sem brCode/qrDataUrl; qrExpiresAt traz o vencimento */
+  paymentMethod?: TithePaymentMethod;
+  /** Página segura do provedor para pagar (cartão, ou boleto) */
+  paymentUrl?: string | null;
+  /** PDF do boleto */
+  boletoUrl?: string | null;
+  /** Linha digitável do boleto */
+  boletoLine?: string | null;
   feeAmount?: number;
   chargedAmount?: number | null;
   qrExpiresAt?: string | null;
@@ -71,6 +87,8 @@ export interface MyTithe {
     feeFixed: number;
     feePercent: number;
     recurringAvailable: boolean;
+    /** Meios aceitos — só ['PIX'] quando não há Asaas ou falta CPF */
+    methods?: TithePaymentMethod[];
   } | null;
   schedule: TitheSchedule | null;
 }
@@ -129,6 +147,8 @@ export const createTitheIntent = (input: {
   referenceMonth?: string;
   kind: TitheIntentKind;
   anonymous?: boolean;
+  /** Padrão PIX; CARD/BOLETO exigem Asaas (o backend responde 400 quando não há) */
+  paymentMethod?: TithePaymentMethod;
 }): Promise<TitheIntent> => wrap(async () => (await api.post('/tithe/intents', input)).data);
 
 export const getTitheIntent = (id: string): Promise<TitheIntent> =>
