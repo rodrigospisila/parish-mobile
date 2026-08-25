@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -58,20 +58,24 @@ export default function TitheScreen() {
   const [creating, setCreating] = useState(false);
   const [active, setActive] = useState<TitheIntent | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  // Sugere o último valor UMA vez — depois o campo é do usuário (inclusive vazio)
+  const prefilledRef = useRef(false);
 
   const load = useCallback(async (refresh = false) => {
     if (refresh) setIsRefreshing(true);
     try {
       const result = await getMyTithe();
       setData(result);
-      if (!amountText && result.suggestedAmount) setAmountText(String(result.suggestedAmount).replace('.', ','));
+      if (!prefilledRef.current && result.suggestedAmount) {
+        prefilledRef.current = true;
+        setAmountText(String(result.suggestedAmount.toFixed(2)).replace('.', ','));
+      }
     } catch (error: any) {
       Alert.alert('Dízimo', error?.message ?? 'Não foi possível carregar.');
     } finally {
       setIsLoading(false);
       setIsRefreshing(false);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useFocusEffect(
@@ -80,10 +84,18 @@ export default function TitheScreen() {
     }, [load]),
   );
 
+  // "1.234,56" → 1234.56 · "1.000" → 1000 · "50.00" → 50 · ",5" → 0.5
   const parseAmount = (text: string) => {
-    const normalized = text.replace(/[^\d,.]/g, '').replace('.', ',');
-    const [int, dec = ''] = normalized.split(',');
-    const value = Number(`${int || '0'}.${dec.slice(0, 2)}`);
+    const clean = text.replace(/[^\d,.]/g, '');
+    let normalized: string;
+    if (clean.includes(',')) {
+      normalized = clean.replace(/\./g, '').replace(/,(?=.*,)/g, '').replace(',', '.');
+    } else if (/\.\d{1,2}$/.test(clean)) {
+      normalized = clean.replace(/\.(?=.*\.)/g, '');
+    } else {
+      normalized = clean.replace(/\./g, '');
+    }
+    const value = Number(normalized || '0');
     return Number.isFinite(value) ? Math.round(value * 100) / 100 : 0;
   };
 
