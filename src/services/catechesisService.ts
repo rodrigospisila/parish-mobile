@@ -19,7 +19,30 @@ export interface MyCatechesisClass {
   community: { id: string; name: string };
   activeEnrollments: number;
   sessionsCount: number;
+  /** Pendências da turma — mesmas contagens do painel "Pendências da coordenação" */
+  pendingApprovals?: number;
+  unreadFamilyMessages?: number;
+  documentsToReview?: number;
+  sessionsWithoutAttendance?: number;
 }
+
+/** Soma das pendências de uma turma (0 quando o backend ainda não envia). */
+export const classPendingTotal = (klass: MyCatechesisClass): number =>
+  (klass.pendingApprovals ?? 0) +
+  (klass.unreadFamilyMessages ?? 0) +
+  (klass.documentsToReview ?? 0) +
+  (klass.sessionsWithoutAttendance ?? 0);
+
+/** Descrição curta das pendências ("1 inscrição para aprovar · 3 mensagens da família"). */
+export const classPendingParts = (klass: MyCatechesisClass): string[] => {
+  const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+  return [
+    klass.pendingApprovals ? `${plural(klass.pendingApprovals, 'inscrição', 'inscrições')} para aprovar` : '',
+    klass.unreadFamilyMessages ? `${plural(klass.unreadFamilyMessages, 'mensagem', 'mensagens')} da família` : '',
+    klass.documentsToReview ? `${plural(klass.documentsToReview, 'documento', 'documentos')} para conferir` : '',
+    klass.sessionsWithoutAttendance ? `${plural(klass.sessionsWithoutAttendance, 'chamada', 'chamadas')} em aberto` : '',
+  ].filter(Boolean);
+};
 
 export interface CatechesisSessionSummary {
   id: string;
@@ -608,21 +631,33 @@ export const getClassConversations = async (classId: string): Promise<ClassConve
  */
 export const getCommunityCatechesisClasses = async (): Promise<MyCatechesisClass[]> => {
   try {
-    const { data } = await api.get('/catechesis/classes');
-    return (data ?? []).map((c: any) => ({
-      classId: c.id,
-      role: 'Coordenação',
-      name: c.name,
-      year: c.year,
-      weekday: c.weekday,
-      time: c.time,
-      room: c.room,
-      status: c.status,
-      stage: c.stage,
-      community: c.community,
-      activeEnrollments: c._count?.enrollments ?? 0,
-      sessionsCount: c._count?.sessions ?? 0,
-    }));
+    const [{ data }, overview] = await Promise.all([
+      api.get('/catechesis/classes'),
+      // Pendências por turma (mesma fonte da visão da coordenação na web)
+      api.get('/catechesis/community-overview').then((r) => r.data ?? []).catch(() => [] as any[]),
+    ]);
+    const pendingByClass = new Map<string, any>((overview as any[]).map((row) => [row.classId, row]));
+    return (data ?? []).map((c: any) => {
+      const pend = pendingByClass.get(c.id);
+      return {
+        classId: c.id,
+        role: 'Coordenação',
+        name: c.name,
+        year: c.year,
+        weekday: c.weekday,
+        time: c.time,
+        room: c.room,
+        status: c.status,
+        stage: c.stage,
+        community: c.community,
+        activeEnrollments: c._count?.enrollments ?? 0,
+        sessionsCount: c._count?.sessions ?? 0,
+        pendingApprovals: pend?.pendingApproval ?? 0,
+        unreadFamilyMessages: pend?.unreadFamilyMessages ?? 0,
+        documentsToReview: pend?.documentsToReview ?? 0,
+        sessionsWithoutAttendance: pend?.pastSessionsWithoutAttendance ?? 0,
+      };
+    });
   } catch {
     return [];
   }

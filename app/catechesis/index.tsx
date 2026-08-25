@@ -21,6 +21,8 @@ import { useColors } from '../../src/context/ThemeContext';
 import {
   FamilyCatechesisItem,
   getMyCatechesisClasses,
+  classPendingTotal,
+  classPendingParts,
   getMyFamilyCatechesis,
   MyCatechesisClass,
   shareCatechesisCertificate,
@@ -473,6 +475,11 @@ export default function CatechesisClassesScreen() {
                 <Text style={styles.cardTitle} numberOfLines={1}>
                   {klass.name}
                 </Text>
+                {classPendingTotal(klass) > 0 && (
+                  <View style={styles.pendBadge} accessibilityLabel={`${classPendingTotal(klass)} pendências`}>
+                    <Text style={styles.pendBadgeText}>{classPendingTotal(klass)}</Text>
+                  </View>
+                )}
                 <Text style={styles.roleChip}>{klass.role}</Text>
               </View>
               <Text style={styles.cardStage} numberOfLines={1}>
@@ -494,6 +501,9 @@ export default function CatechesisClassesScreen() {
                   📅 {klass.sessionsCount} encontro{klass.sessionsCount === 1 ? '' : 's'}
                 </Text>
               </View>
+              {classPendingTotal(klass) > 0 && (
+                <Text style={styles.pendLine}>⚠️ {classPendingParts(klass).join(' · ')} ›</Text>
+              )}
             </TouchableOpacity>
           ))
           )}
@@ -771,4 +781,15 @@ const createStyles = (colors: ReturnType<typeof useColors>) =>
     cardMeta: { fontSize: 12.5, color: colors.textSecondary },
     cardStats: { flexDirection: 'row', gap: 14, marginTop: 6 },
     cardStat: { fontSize: 12.5, color: colors.textSecondary },
+    pendBadge: {
+      minWidth: 22,
+      height: 22,
+      borderRadius: 11,
+      backgroundColor: colors.error,
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingHorizontal: 6,
+    },
+    pendBadgeText: { color: '#fff', fontWeight: '800', fontSize: 12 },
+    pendLine: { marginTop: 8, fontSize: 12.5, fontWeight: '700', color: colors.warning },
   });
