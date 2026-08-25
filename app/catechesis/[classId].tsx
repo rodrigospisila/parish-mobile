@@ -696,6 +696,20 @@ export default function CatechesisClassScreen() {
                 >
                   <FontAwesome5 name="envelope" size={14} color={colors.textSecondary} />
                 </TouchableOpacity>
+                <TouchableOpacity
+                  hitSlop={8}
+                  style={{ marginLeft: 10, flexDirection: 'row', alignItems: 'center', gap: 3 }}
+                  onPress={() => router.push(`/catechesis/chat/${student.enrollmentId}` as never)}
+                >
+                  <FontAwesome5
+                    name="comments"
+                    size={14}
+                    color={student.unreadMessages ? colors.primary : colors.textSecondary}
+                  />
+                  {student.unreadMessages ? (
+                    <Text style={{ fontSize: 11, fontWeight: '800', color: colors.primary }}>{student.unreadMessages}</Text>
+                  ) : null}
+                </TouchableOpacity>
                 <Text
                   style={[
                     styles.studentRate,

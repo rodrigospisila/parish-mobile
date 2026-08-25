@@ -51,6 +51,8 @@ export interface CatechesisStudentReport {
   docsCount?: number;
   attendanceRate: number | null;
   sessions: number;
+  /** Mensagens da família ainda não lidas pela equipe (Onda 4) */
+  unreadMessages?: number;
 }
 
 export interface CatechesisClassReport {
@@ -123,6 +125,8 @@ export interface FamilyCatechesisItem {
   assessmentsCount?: number;
   /** Motivo da recusa (matrículas REJECTED) */
   rejectionReason?: string | null;
+  /** Mensagens da equipe ainda não lidas pela família (Onda 4) */
+  unreadMessages?: number;
 }
 
 /** Catequese da FAMÍLIA: matrículas próprias e dos dependentes. */
@@ -538,3 +542,62 @@ export const shareCatechesisDeclaration = (enrollmentId: string, memberName?: st
     `/catechesis/enrollments/${enrollmentId}/declaration.pdf`,
     `declaracao-${memberName ? pdfSlug(memberName) : enrollmentId.slice(-8)}.pdf`,
   );
+
+// ============================================
+// CONVERSA FAMÍLIA ↔ EQUIPE (Onda 4)
+// ============================================
+
+export interface CatechesisChatMessage {
+  id: string;
+  body: string;
+  fromTeam: boolean;
+  authorName: string;
+  mine: boolean;
+  createdAt: string;
+  readAt?: string | null;
+}
+
+export interface CatechesisChatThread {
+  enrollmentId: string;
+  isTeam: boolean;
+  student: string;
+  className: string;
+  canWrite: boolean;
+  messages: CatechesisChatMessage[];
+}
+
+/** Abre a conversa da matrícula (marca como lidas as mensagens do outro lado). */
+export const getEnrollmentMessages = async (enrollmentId: string): Promise<CatechesisChatThread> => {
+  try {
+    const { data } = await api.get(`/catechesis/enrollments/${enrollmentId}/messages`);
+    return data;
+  } catch (error) {
+    throw new Error(getErrorMessage(error));
+  }
+};
+
+export const sendEnrollmentMessage = async (enrollmentId: string, body: string): Promise<CatechesisChatMessage> => {
+  try {
+    const { data } = await api.post(`/catechesis/enrollments/${enrollmentId}/messages`, { body });
+    return data;
+  } catch (error) {
+    throw new Error(getErrorMessage(error));
+  }
+};
+
+export interface ClassConversation {
+  enrollmentId: string;
+  student: string;
+  lastMessage: { body: string; fromTeam: boolean; createdAt: string } | null;
+  unread: number;
+}
+
+/** Conversas da turma (equipe): última mensagem e não lidas por catequizando. */
+export const getClassConversations = async (classId: string): Promise<ClassConversation[]> => {
+  try {
+    const { data } = await api.get(`/catechesis/classes/${classId}/conversations`);
+    return data ?? [];
+  } catch (error) {
+    throw new Error(getErrorMessage(error));
+  }
+};

@@ -357,11 +357,16 @@ export const confirmRosterPresence = async (rosterId: string): Promise<WriteOutc
     return 'error';
   }
 };
-export const declineRosterPresence = async (rosterId: string, reason?: string): Promise<WriteOutcome> => {
+export const declineRosterPresence = async (
+  rosterId: string,
+  reason?: string,
+  declineCouple = false,
+): Promise<WriteOutcome> => {
+  const payload = reason || declineCouple ? { ...(reason ? { reason } : {}), ...(declineCouple ? { declineCouple: true } : {}) } : undefined;
   try {
     if (!USE_MOCK) {
       // API real - recusar participaÃ§Ã£o na escala (com justificativa opcional, 4.6)
-      await api.patch(`/schedules/assignments/${rosterId}/decline`, reason ? { reason } : undefined);
+      await api.patch(`/schedules/assignments/${rosterId}/decline`, payload);
       return 'ok';
     }
 
@@ -378,7 +383,7 @@ export const declineRosterPresence = async (rosterId: string, reason?: string): 
       await enqueueWrite({
         method: 'patch',
         path: `/schedules/assignments/${rosterId}/decline`,
-        body: reason ? { reason } : undefined,
+        body: payload,
         description: 'Declinar presença na escala',
       });
       return 'queued';
@@ -909,3 +914,61 @@ export const getCoordinatorScheduleOverview = async (
   }
 };
 
+// ============================================
+// "QUERO PARTICIPAR" + PENDÊNCIAS DA COORDENAÇÃO (Onda 4)
+// ============================================
+
+export interface JoinRequestInfo {
+  id: string;
+  communityPastoralId: string;
+  pastoralName: string;
+  status: 'PENDING' | 'APPROVED' | 'REJECTED';
+  message?: string | null;
+  rejectionReason?: string | null;
+  createdAt: string;
+  reviewedAt?: string | null;
+}
+
+export interface MyJoinRequests {
+  requests: JoinRequestInfo[];
+  memberOfPastoralIds: string[];
+}
+
+export const getMyJoinRequests = async (): Promise<MyJoinRequests> => {
+  try {
+    const { data } = await api.get('/pastorals/join-requests/mine');
+    return data ?? { requests: [], memberOfPastoralIds: [] };
+  } catch (error) {
+    console.error('Erro ao buscar pedidos de participação:', error);
+    return { requests: [], memberOfPastoralIds: [] };
+  }
+};
+
+/** Pede para entrar numa pastoral — a coordenação aprova/recusa. Lança Error com a mensagem do backend. */
+export const requestJoinPastoral = async (communityPastoralId: string, message?: string): Promise<void> => {
+  try {
+    await api.post(`/pastorals/community/${communityPastoralId}/join-requests`, message ? { message } : {});
+  } catch (error: any) {
+    const msg = error?.response?.data?.message;
+    throw new Error(Array.isArray(msg) ? msg.join(', ') : msg || 'Não foi possível enviar o pedido.');
+  }
+};
+
+export interface CoordinatorOverview {
+  catechesis: { pendingApprovals: number; documentsToReview: number; sessionsWithoutAttendance: number; unreadFamilyMessages: number };
+  schedules: { pendingResponses: number; declinedToReplace: number; upcomingWeek: number };
+  swaps: { pending: number };
+  pastorals: { joinRequests: number };
+  prayers: { pendingModeration: number };
+  total: number;
+}
+
+/** Pendências consolidadas do coordenador (403 para quem não coordena → null). */
+export const getCoordinatorOverview = async (communityId?: string | null): Promise<CoordinatorOverview | null> => {
+  try {
+    const { data } = await api.get('/dashboard/coordinator', { params: communityId ? { communityId } : undefined });
+    return data ?? null;
+  } catch {
+    return null;
+  }
+};

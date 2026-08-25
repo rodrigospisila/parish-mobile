@@ -206,48 +206,54 @@ export default function ScheduleScreen() {
 
   const handleDeclinePresence = (roster: UserRoster) => {
     const wasConfirmed = roster.confirmationStatus === 'confirmed';
-
+    const doDecline = async (declineCouple: boolean) => {
+      setProcessingRosterId(roster.id);
+      try {
+        const outcome = await declineRosterPresence(roster.id, undefined, declineCouple);
+        if (outcome !== 'error') {
+          setUserRosters((prev) =>
+            prev.map((r) =>
+              r.id === roster.id ? { ...r, confirmationStatus: 'declined' as RosterConfirmationStatus } : r,
+            ),
+          );
+          if (outcome === 'queued') {
+            Alert.alert(
+              'Sem conexão',
+              'Sua resposta foi salva no aparelho e será enviada automaticamente quando a internet voltar.',
+            );
+          } else if (declineCouple && roster.coupleWith) {
+            Alert.alert('Recusa em casal', `A escala foi recusada por você e por ${roster.coupleWith}. O coordenador foi avisado.`);
+          }
+        } else {
+          Alert.alert('Erro', 'Não foi possível registrar sua resposta. Tente novamente.');
+        }
+      } finally {
+        setProcessingRosterId(null);
+      }
+    };
+    const title = wasConfirmed ? 'Cancelar Presença' : 'Declinar Presença';
+    // Pastoral "casais servem juntos": oferece recusar o par completo
+    if (roster.coupleWith) {
+      Alert.alert(
+        title,
+        `Vocês servem em casal nesta escala. Recusar só você ou também ${roster.coupleWith}?\n\nO coordenador da pastoral será notificado.`,
+        [
+          { text: 'Voltar', style: 'cancel' },
+          { text: 'Só eu', onPress: () => void doDecline(false) },
+          { text: 'Nós dois', style: 'destructive', onPress: () => void doDecline(true) },
+        ],
+      );
+      return;
+    }
     Alert.alert(
-      wasConfirmed ? 'Cancelar Presença' : 'Declinar Presença',
+      title,
       wasConfirmed
-        ? `Tem certeza que deseja cancelar sua presença confirmada em "${roster.eventTitle}"?\n\nO coordenador da pastoral será notificado para reorganizar a escala.`
+        ? `Tem certeza que deseja cancelar sua presença confirmada em "${roster.eventTitle}"?\n\nO coordenador da pastoral será notificado.`
         : `Tem certeza que deseja declinar sua presença em "${roster.eventTitle}"?\n\nO coordenador da pastoral será notificado.`,
       [
         { text: 'Voltar', style: 'cancel' },
-        {
-          text: wasConfirmed ? 'Cancelar presença' : 'Declinar',
-          style: 'destructive',
-          onPress: async () => {
-            setProcessingRosterId(roster.id);
-            try {
-              const outcome = await declineRosterPresence(roster.id);
-              if (outcome !== 'error') {
-                setUserRosters((prev) =>
-                  prev.map((r) =>
-                    r.id === roster.id
-                      ? { ...r, confirmationStatus: 'declined' as RosterConfirmationStatus }
-                      : r
-                  )
-                );
-                if (outcome === 'queued') {
-                  Alert.alert(
-                    'Sem conexão',
-                    'Sua resposta foi salva no aparelho e será enviada automaticamente quando a internet voltar.',
-                  );
-                } else {
-                  Alert.alert('Presença Declinada', 'O coordenador foi notificado sobre sua ausência.');
-                }
-              } else {
-                Alert.alert('Erro', 'Não foi possível atualizar sua presença. Tente novamente.');
-              }
-            } catch {
-              Alert.alert('Erro', 'Ocorreu um erro ao atualizar sua presença.');
-            } finally {
-              setProcessingRosterId(null);
-            }
-          },
-        },
-      ]
+        { text: wasConfirmed ? 'Cancelar presença' : 'Declinar', style: 'destructive', onPress: () => void doDecline(false) },
+      ],
     );
   };
 

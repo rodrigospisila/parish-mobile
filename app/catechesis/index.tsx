@@ -396,6 +396,16 @@ export default function CatechesisClassesScreen() {
                         </Text>
                       </TouchableOpacity>
                     ))}
+                  {(item.status === 'ACTIVE' || item.status === 'PENDING_APPROVAL') && (
+                    <TouchableOpacity
+                      style={styles.docBtn}
+                      onPress={() => router.push(`/catechesis/chat/${item.enrollmentId}` as never)}
+                    >
+                      <Text style={styles.docBtnText}>
+                        💬 Falar com a catequista{item.unreadMessages ? ` (${item.unreadMessages} nova(s))` : ''}
+                      </Text>
+                    </TouchableOpacity>
+                  )}
                   {(item.status === 'ACTIVE' || item.status === 'COMPLETED') && (
                     <TouchableOpacity
                       style={styles.docBtn}

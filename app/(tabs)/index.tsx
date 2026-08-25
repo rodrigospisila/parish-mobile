@@ -17,6 +17,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { useAuth } from '../../src/context/AuthContext';
+import { getCoordinatorOverview, CoordinatorOverview } from '../../src/services/pastoralService';
 import { useCommunity } from '../../src/context/CommunityContext';
 import { getMyCatechesisClasses, getMyFamilyCatechesis } from '../../src/services/catechesisService';
 import { useColors } from '../../src/context/ThemeContext';
@@ -121,8 +122,28 @@ function nextFixedOccurrence(
 
 export default function HomeScreen() {
   const { user } = useAuth();
+
+  // Pendências da coordenação (Onda 4) — só para quem coordena
+  const isCoordinatorRole = ['PASTORAL_COORDINATOR', 'COMMUNITY_COORDINATOR', 'PARISH_ADMIN', 'DIOCESAN_ADMIN', 'SYSTEM_ADMIN'].includes(
+    String(user?.role ?? ''),
+  );
   const { activeCommunityId, activeCommunityName, isSecondaryActive, links, setActiveCommunity } =
     useCommunity();
+
+  const [overview, setOverview] = useState<CoordinatorOverview | null>(null);
+  useEffect(() => {
+    if (!isCoordinatorRole) {
+      setOverview(null);
+      return;
+    }
+    let cancelled = false;
+    getCoordinatorOverview(activeCommunityId).then((data) => {
+      if (!cancelled) setOverview(data);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [isCoordinatorRole, activeCommunityId]);
   const colors = useColors();
   const router = useRouter();
   const { rescheduleEventNotifications } = useNotifications();
@@ -1001,6 +1022,52 @@ export default function HomeScreen() {
           <FontAwesome5 name="chevron-right" size={14} color={colors.textTertiary} />
         </TouchableOpacity>
 
+        {/* PENDÊNCIAS DA COORDENAÇÃO (Onda 4) */}
+        {overview && overview.total > 0 && (
+          <View style={styles.pendCard}>
+            <View style={styles.pendHead}>
+              <Text style={styles.pendTitle}>Pendências da coordenação</Text>
+              <View style={styles.pendBadge}><Text style={styles.pendBadgeText}>{overview.total}</Text></View>
+            </View>
+            {overview.catechesis.pendingApprovals + overview.catechesis.documentsToReview + overview.catechesis.unreadFamilyMessages + overview.catechesis.sessionsWithoutAttendance > 0 && (
+              <TouchableOpacity style={styles.pendRow} onPress={() => router.push('/catechesis' as never)}>
+                <Text style={styles.pendRowText}>
+                  📖 Catequese: {[
+                    overview.catechesis.pendingApprovals ? `${overview.catechesis.pendingApprovals} inscrição(ões)` : '',
+                    overview.catechesis.documentsToReview ? `${overview.catechesis.documentsToReview} documento(s)` : '',
+                    overview.catechesis.unreadFamilyMessages ? `${overview.catechesis.unreadFamilyMessages} mensagem(ns)` : '',
+                    overview.catechesis.sessionsWithoutAttendance ? `${overview.catechesis.sessionsWithoutAttendance} chamada(s) em aberto` : '',
+                  ].filter(Boolean).join(' · ')}
+                </Text>
+                <FontAwesome5 name="chevron-right" size={12} color={colors.textTertiary} />
+              </TouchableOpacity>
+            )}
+            {overview.schedules.pendingResponses + overview.schedules.declinedToReplace + overview.swaps.pending > 0 && (
+              <TouchableOpacity style={styles.pendRow} onPress={() => router.push('/(tabs)/schedule' as never)}>
+                <Text style={styles.pendRowText}>
+                  📋 Escalas: {[
+                    overview.schedules.pendingResponses ? `${overview.schedules.pendingResponses} sem resposta` : '',
+                    overview.schedules.declinedToReplace ? `${overview.schedules.declinedToReplace} recusa(s) a substituir` : '',
+                    overview.swaps.pending ? `${overview.swaps.pending} troca(s)` : '',
+                  ].filter(Boolean).join(' · ')}
+                </Text>
+                <FontAwesome5 name="chevron-right" size={12} color={colors.textTertiary} />
+              </TouchableOpacity>
+            )}
+            {overview.pastorals.joinRequests + overview.prayers.pendingModeration > 0 && (
+              <TouchableOpacity style={styles.pendRow} onPress={() => router.push('/(tabs)/pastorals' as never)}>
+                <Text style={styles.pendRowText}>
+                  🙋 Comunidade: {[
+                    overview.pastorals.joinRequests ? `${overview.pastorals.joinRequests} pedido(s) para entrar em pastoral` : '',
+                    overview.prayers.pendingModeration ? `${overview.prayers.pendingModeration} oração(ões) para moderar (web)` : '',
+                  ].filter(Boolean).join(' · ')}
+                </Text>
+                <FontAwesome5 name="chevron-right" size={12} color={colors.textTertiary} />
+              </TouchableOpacity>
+            )}
+          </View>
+        )}
+
         {/* MURAL DE ORAÇÃO */}
         <TouchableOpacity
           style={styles.nearbyBanner}
@@ -1243,6 +1310,40 @@ const createStyles = (colors: ReturnType<typeof useColors>) =>
       fontWeight: '600',
       color: colors.textSecondary,
     },
+    // ===== PENDÊNCIAS DA COORDENAÇÃO (Onda 4) =====
+    pendCard: {
+      marginHorizontal: 16,
+      marginBottom: 12,
+      backgroundColor: colors.card,
+      borderRadius: 16,
+      borderWidth: 1,
+      borderColor: colors.border,
+      padding: 14,
+      gap: 8,
+    },
+    pendHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+    pendTitle: { fontSize: 15, fontWeight: '800', color: colors.text },
+    pendBadge: {
+      minWidth: 26,
+      height: 26,
+      borderRadius: 13,
+      backgroundColor: colors.error,
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingHorizontal: 8,
+    },
+    pendBadgeText: { color: '#fff', fontWeight: '800', fontSize: 12.5 },
+    pendRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 8,
+      paddingVertical: 6,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: colors.border,
+    },
+    pendRowText: { flex: 1, fontSize: 13, color: colors.text, lineHeight: 18 },
+
     // ===== MISSAS POR PERTO (banner) =====
     nearbyBanner: {
       flexDirection: 'row',

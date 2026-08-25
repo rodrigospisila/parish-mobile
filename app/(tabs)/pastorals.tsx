@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -14,10 +14,58 @@ import {
 import { useAuth } from '../../src/context/AuthContext';
 import { useCommunity } from '../../src/context/CommunityContext';
 import { useColors } from '../../src/context/ThemeContext';
-import { Pastoral, Member, getPastorals } from '../../src/services/pastoralService';
+import {
+  Pastoral,
+  Member,
+  getPastorals,
+  getMyJoinRequests,
+  requestJoinPastoral,
+  MyJoinRequests,
+} from '../../src/services/pastoralService';
 
 export default function PastoralsScreen() {
   const { user } = useAuth();
+
+  // "Quero participar" (Onda 4): estado dos meus pedidos e vínculos
+  const [joinInfo, setJoinInfo] = useState<MyJoinRequests>({ requests: [], memberOfPastoralIds: [] });
+  const [joiningId, setJoiningId] = useState<string | null>(null);
+  const loadJoinInfo = useCallback(async () => {
+    setJoinInfo(await getMyJoinRequests());
+  }, []);
+  useEffect(() => {
+    void loadJoinInfo();
+  }, [loadJoinInfo]);
+  const joinStateOf = (pastoralId: string): 'member' | 'pending' | 'rejected' | 'none' => {
+    if (joinInfo.memberOfPastoralIds.includes(pastoralId)) return 'member';
+    const request = joinInfo.requests.find((r) => r.communityPastoralId === pastoralId);
+    if (request?.status === 'PENDING') return 'pending';
+    if (request?.status === 'REJECTED') return 'rejected';
+    return 'none';
+  };
+  const handleJoin = (pastoral: Pastoral) => {
+    Alert.alert(
+      'Quero participar',
+      `Enviar seu pedido para entrar na pastoral "${pastoral.name}"? A coordenação aprova e você recebe o aviso por aqui.`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Enviar pedido',
+          onPress: async () => {
+            setJoiningId(pastoral.id);
+            try {
+              await requestJoinPastoral(pastoral.id);
+              await loadJoinInfo();
+              Alert.alert('Pedido enviado 🙌', 'A coordenação da pastoral foi avisada.');
+            } catch (error: any) {
+              Alert.alert('Não foi possível', error?.message ?? 'Tente novamente.');
+            } finally {
+              setJoiningId(null);
+            }
+          },
+        },
+      ],
+    );
+  };
   const colors = useColors();
   const [pastorals, setPastorals] = useState<Pastoral[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -101,6 +149,23 @@ export default function PastoralsScreen() {
             </Text>
           )}
         </View>
+        {(() => {
+          const state = joinStateOf(item.id);
+          if (state === 'member') return <Text style={styles.joinState}>✓ Você participa</Text>;
+          if (state === 'pending') return <Text style={styles.joinState}>⏳ Pedido enviado — aguardando a coordenação</Text>;
+          return (
+            <TouchableOpacity
+              style={styles.joinBtn}
+              disabled={joiningId === item.id}
+              onPress={() => handleJoin(item)}
+              hitSlop={6}
+            >
+              <Text style={styles.joinBtnText}>
+                {joiningId === item.id ? 'Enviando...' : state === 'rejected' ? '🙋 Pedir novamente' : '🙋 Quero participar'}
+              </Text>
+            </TouchableOpacity>
+          );
+        })()}
       </View>
       <Text style={styles.chevron}>›</Text>
     </TouchableOpacity>
@@ -327,6 +392,17 @@ const createStyles = (colors: ReturnType<typeof useColors>) =>
       color: colors.textTertiary,
       marginRight: 5,
     },
+    joinState: { marginTop: 6, fontSize: 12, fontWeight: '600', color: colors.textSecondary },
+    joinBtn: {
+      alignSelf: 'flex-start',
+      marginTop: 8,
+      borderWidth: 1,
+      borderColor: colors.primary,
+      borderRadius: 999,
+      paddingHorizontal: 12,
+      paddingVertical: 5,
+    },
+    joinBtnText: { fontSize: 12.5, fontWeight: '700', color: colors.primary },
     chevron: {
       fontSize: 24,
       color: colors.textTertiary,
