@@ -35,7 +35,7 @@ import { formatDateBR, formatDateTimeBR } from '../src/utils/dateUtils';
 export default function SecurityScreen() {
   const router = useRouter();
   const colors = useColors();
-  const { refreshUser } = useAuth();
+  const { refreshUser, signOut } = useAuth();
   const styles = createStyles(colors);
 
   // ---------- estado principal ----------
@@ -246,7 +246,12 @@ export default function SecurityScreen() {
           onPress: async () => {
             setForgettingId(device.id);
             try {
-              await securityService.forgetDevice(device.id);
+              const result = await securityService.forgetDevice(device.id);
+              if (result.current) {
+                // Este aparelho foi esquecido: a sessão acabou aqui
+                await signOut();
+                return;
+              }
               await load();
             } catch (error: any) {
               Alert.alert('Erro', error?.message ?? 'Não foi possível esquecer o aparelho.');

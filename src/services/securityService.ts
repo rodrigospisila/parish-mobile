@@ -1,4 +1,4 @@
-import api, { getErrorMessage } from '../config/api';
+import api, { getErrorMessage, saveTokens } from '../config/api';
 
 // ============================================
 // TIPOS — Governança de acesso (Dízimo D4.7)
@@ -27,6 +27,17 @@ export interface TwoFactorEnableResult {
   enabled: boolean;
   /** Códigos de recuperação — mostrados apenas uma vez */
   backupCodes: string[];
+  /** Sessão nova deste aparelho (as demais sessões da conta foram encerradas) */
+  accessToken?: string;
+  refreshToken?: string;
+}
+
+export interface ForgetDeviceResult {
+  forgotten: boolean;
+  /** true quando o aparelho esquecido é este — a sessão atual acabou */
+  current: boolean;
+  accessToken?: string;
+  refreshToken?: string;
 }
 
 /** Aparelho conhecido pela conta */
@@ -72,6 +83,10 @@ export const securityService = {
       const response = await api.post<TwoFactorEnableResult>('/auth/2fa/enable', {
         code: code.trim(),
       });
+      // Ativar o 2FA encerra as outras sessões; este aparelho segue com os tokens novos
+      if (response.data?.accessToken && response.data?.refreshToken) {
+        await saveTokens(response.data.accessToken, response.data.refreshToken);
+      }
       return response.data;
     } catch (error) {
       throw new Error(getErrorMessage(error));
@@ -98,12 +113,17 @@ export const securityService = {
   },
 
   /**
-   * Esquece um aparelho. O servidor também encerra as sessões abertas da
-   * conta — o próximo login (em qualquer aparelho) volta a avisar.
+   * Esquece um aparelho. O servidor encerra todas as sessões da conta; se o
+   * aparelho esquecido não é este, devolve tokens novos para continuar aqui.
    */
-  async forgetDevice(deviceId: string): Promise<void> {
+  async forgetDevice(deviceId: string): Promise<ForgetDeviceResult> {
     try {
-      await api.delete(`/auth/devices/${deviceId}`);
+      const response = await api.delete<ForgetDeviceResult>(`/auth/devices/${deviceId}`);
+      const data = response.data ?? { forgotten: true, current: false };
+      if (!data.current && data.accessToken && data.refreshToken) {
+        await saveTokens(data.accessToken, data.refreshToken);
+      }
+      return data;
     } catch (error) {
       throw new Error(getErrorMessage(error));
     }

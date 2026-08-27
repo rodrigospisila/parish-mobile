@@ -119,7 +119,9 @@ export interface UpdateUserData {
  * Flag para usar mock ou API real
  * Em desenvolvimento, pode ser útil alternar entre mock e API real
  */
-const USE_MOCK = process.env.EXPO_PUBLIC_USE_MOCK === 'true';
+// Mock só em desenvolvimento (__DEV__) — mesma regra de config/api; um build de
+// produção com a env herdada por engano NUNCA aceita as credenciais fictícias
+const USE_MOCK = __DEV__ && process.env.EXPO_PUBLIC_USE_MOCK === 'true';
 
 // ============================================
 // MOCK DATA (para desenvolvimento sem backend)
