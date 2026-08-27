@@ -18,6 +18,7 @@ import {
   Platform,
   AppState,
   AppStateStatus,
+  LayoutChangeEvent,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Stack, useRouter } from 'expo-router';
@@ -33,10 +34,12 @@ import {
   TithePaymentMethod,
   PersistentQr,
   TitheSchedule,
+  TitheCampaign,
   STATUS_LABELS,
   SCHEDULE_STATUS_LABELS,
   PAYMENT_METHOD_LABELS,
   PROVIDER_STATUS_HINTS,
+  CAMPAIGN_KIND_LABELS,
   getMyTithe,
   createTitheIntent,
   declareTitheIntent,
@@ -51,6 +54,10 @@ import {
   getMySchedule,
   createTitheSchedule,
   cancelTitheSchedule,
+  getCampaigns,
+  setCampaignPledge,
+  cancelCampaignPledge,
+  getCampaignQr,
 } from '../src/services/titheService';
 
 const PRESETS = [20, 50, 100, 200];
@@ -122,6 +129,16 @@ const shiftMonth = (iso: string, delta: number) => {
   const idx = y * 12 + (m - 1) + delta;
   return `${Math.floor(idx / 12)}-${String((idx % 12) + 1).padStart(2, '0')}`;
 };
+/** 33 → "33,00" para preencher um campo de valor */
+const amountToText = (value: number) => value.toFixed(2).replace('.', ',');
+const contributorsText = (count: number) =>
+  count === 0 ? 'Nenhum contribuinte ainda' : count === 1 ? '1 contribuinte' : `${count} contribuintes`;
+/** null = sem data de término (fundo permanente) */
+const daysLeftText = (days: number | null) =>
+  days === null ? null : days <= 0 ? 'último dia' : days === 1 ? '1 dia restante' : `${days} dias restantes`;
+/** Valores sugeridos pela campanha (positivos, sem repetição) — vazio cai nos presets padrão */
+const campaignPresets = (campaign: TitheCampaign | null) =>
+  campaign ? Array.from(new Set((campaign.suggestedAmounts ?? []).filter((v) => Number.isFinite(v) && v > 0))) : [];
 
 /**
  * Dízimo e ofertas pelo app (Fase 1 + Onda D2): Pix copia-e-cola com a chave da
@@ -160,12 +177,38 @@ export default function TitheScreen() {
   const prefilledRef = useRef(false);
   // Último intent GATEWAY encerrado pelo app — evita alerta duplicado quando navegador, AppState e polling respondem juntos
   const settledIdRef = useRef<string | null>(null);
+  // Campanhas e fundos
+  const [campaigns, setCampaigns] = useState<TitheCampaign[]>([]);
+  /** Campanha escolhida em "Contribuir": a oferta sai com finalidade (chip "Para: …" no card de contribuição) */
+  const [campaignTarget, setCampaignTarget] = useState<TitheCampaign | null>(null);
+  const [pledgeTarget, setPledgeTarget] = useState<TitheCampaign | null>(null);
+  const [pledgeAmount, setPledgeAmount] = useState('');
+  const [pledgeNote, setPledgeNote] = useState('');
+  const [pledgeBusy, setPledgeBusy] = useState(false);
+  const [qrBusyId, setQrBusyId] = useState<string | null>(null);
+  const scrollRef = useRef<ScrollView>(null);
+  // Posição do card "Contribuir agora" dentro do ScrollView — para rolar até ele ao tocar em "Contribuir"
+  const contributeY = useRef(0);
+  /** Com campanha escolhida, a contribuição é sempre oferta (o backend também força) */
+  const effectiveKind: TitheIntentKind = campaignTarget ? 'OFFERING' : kind;
 
   const load = useCallback(async (refresh = false) => {
     if (refresh) setIsRefreshing(true);
     try {
-      const result = await getMyTithe();
+      // Campanhas são acessório: se falharem, a tela segue sem a seção (lista vazia)
+      const [result, campaignResult] = await Promise.all([
+        getMyTithe(),
+        getCampaigns().then(
+          (list) => ({ ok: true, list }),
+          () => ({ ok: false, list: [] as TitheCampaign[] }),
+        ),
+      ]);
       setData(result);
+      setCampaigns(campaignResult.list);
+      if (campaignResult.ok) {
+        // Mantém a campanha escolhida com os números atualizados; some se ela deixou de estar ativa
+        setCampaignTarget((current) => (current ? campaignResult.list.find((c) => c.id === current.id) ?? null : null));
+      }
       setReferenceMonth((current) => current ?? result.currentMonth);
       if (!prefilledRef.current && result.suggestedAmount) {
         prefilledRef.current = true;
@@ -214,14 +257,18 @@ export default function TitheScreen() {
     }
     setCreating(true);
     try {
+      const target = campaignTarget;
       const intent = await createTitheIntent({
         amount,
-        kind,
-        referenceMonth: kind === 'TITHE' ? referenceMonth ?? data?.currentMonth : data?.currentMonth,
-        anonymous: kind === 'OFFERING' ? anonymous : false,
+        kind: effectiveKind,
+        referenceMonth: effectiveKind === 'TITHE' ? referenceMonth ?? data?.currentMonth : data?.currentMonth,
+        anonymous: effectiveKind === 'OFFERING' && (target ? target.allowAnonymous : true) ? anonymous : false,
         paymentMethod: payMethod,
+        ...(target ? { campaignId: target.id } : {}),
       });
-      setActive(intent);
+      // A campanha vale para esta cobrança; a próxima volta ao padrão (evita mandar o dízimo do mês para a campanha sem querer)
+      setActive(target ? { ...intent, campaign: intent.campaign ?? { id: target.id, name: target.name } } : intent);
+      setCampaignTarget(null);
       await load(true);
     } catch (error: any) {
       Alert.alert(
@@ -271,7 +318,7 @@ export default function TitheScreen() {
       intent.method === 'GATEWAY'
         ? `Cobrança emitida por ${providerLabel(data?.gateway?.provider)} em nome de ${data?.parish?.name}`
         : `Recebedor: ${data?.parish?.merchantName ?? data?.parish?.name}`;
-    const purpose = intent.kind === 'TITHE' ? 'do dízimo' : 'de oferta';
+    const purpose = intent.campaign ? `para "${intent.campaign.name}"` : intent.kind === 'TITHE' ? 'do dízimo' : 'de oferta';
     let head: string;
     let body: string;
     if (method === 'CARD') {
@@ -628,6 +675,98 @@ export default function TitheScreen() {
     }
   };
 
+  /** "Contribuir" na campanha: seleciona o destino no card "Contribuir agora" e rola até ele. */
+  const selectCampaign = (campaign: TitheCampaign) => {
+    setCampaignTarget(campaign);
+    // best-effort: se o card ainda não mediu, fica onde está
+    requestAnimationFrame(() => scrollRef.current?.scrollTo({ y: Math.max(0, contributeY.current - 8), animated: true }));
+  };
+
+  const openPledge = (campaign: TitheCampaign) => {
+    setPledgeAmount(campaign.myPledge ? amountToText(campaign.myPledge.amount) : '');
+    setPledgeNote(campaign.myPledge?.note ?? '');
+    setPledgeTarget(campaign);
+  };
+
+  const submitPledge = async () => {
+    if (!pledgeTarget) return;
+    const amount = parseAmount(pledgeAmount);
+    if (amount < 1) {
+      Alert.alert('Promessa', 'Informe um valor a partir de R$ 1,00.');
+      return;
+    }
+    setPledgeBusy(true);
+    try {
+      const note = pledgeNote.trim();
+      const saved = await setCampaignPledge(pledgeTarget.id, { amount, ...(note ? { note } : {}) });
+      const pledge = { amount: saved.amount, note: saved.note ?? null, fulfilled: saved.fulfilled };
+      setCampaigns((list) => list.map((c) => (c.id === pledgeTarget.id ? { ...c, myTotal: saved.myTotal, myPledge: pledge } : c)));
+      setPledgeTarget(null);
+      Alert.alert(
+        'Promessa registrada 🙏',
+        saved.fulfilled
+          ? 'Você já contribuiu esse valor — promessa cumprida!'
+          : `Você prometeu ${money(saved.amount)} para “${pledgeTarget.name}”. Contribua quando puder — o app mostra quanto falta.`,
+      );
+    } catch (error: any) {
+      Alert.alert('Promessa', error?.message ?? 'Não foi possível salvar.');
+    } finally {
+      setPledgeBusy(false);
+    }
+  };
+
+  const handleCancelPledge = (campaign: TitheCampaign) => {
+    Alert.alert('Cancelar promessa?', 'O que você já contribuiu continua registrado — só a promessa é desfeita.', [
+      { text: 'Voltar', style: 'cancel' },
+      {
+        text: 'Cancelar promessa',
+        style: 'destructive',
+        onPress: async () => {
+          setPledgeBusy(true);
+          try {
+            await cancelCampaignPledge(campaign.id);
+            setCampaigns((list) => list.map((c) => (c.id === campaign.id ? { ...c, myPledge: null } : c)));
+            setPledgeTarget(null);
+          } catch (error: any) {
+            Alert.alert('Promessa', error?.message ?? 'Não foi possível cancelar.');
+          } finally {
+            setPledgeBusy(false);
+          }
+        },
+      },
+    ]);
+  };
+
+  /** QR estático da paróquia identificado pela campanha — para divulgar no grupo da comunidade. */
+  const shareCampaignQr = async (campaign: TitheCampaign) => {
+    setQrBusyId(campaign.id);
+    let message: string;
+    try {
+      const qr = await getCampaignQr(campaign.id);
+      const lines = [
+        `${CAMPAIGN_KIND_LABELS[campaign.kind]}: ${qr.name} · ${qr.parish}`,
+        `Recebedor: ${qr.merchantName ?? qr.parish}`,
+        qr.pixKey ? `Chave Pix: ${qr.pixKey}` : null,
+        `Código: ${qr.code}`,
+        '',
+        'Pix copia e cola (sem valor fixo — informe o valor no banco):',
+        qr.brCode,
+      ].filter((line): line is string => line !== null);
+      message = lines.join('\n');
+    } catch (error: any) {
+      // 400 quando a paróquia não ativou o Pix pelo app: mostra a mensagem do backend
+      Alert.alert('Compartilhar QR', error?.message ?? 'Não foi possível gerar o QR.');
+      return;
+    } finally {
+      setQrBusyId(null);
+    }
+    try {
+      await Share.share({ message });
+    } catch {
+      // usuário cancelou
+    }
+  };
+
   const parish = data?.parish;
   const enabled = !!parish?.titheEnabled;
   // Toda a janela aceita pelo backend (+1 à frente … 12 atrás), mais recentes primeiro
@@ -651,6 +790,11 @@ export default function TitheScreen() {
   // Cartão em análise de risco: nada de pedir novo pagamento nem tratar como vencido
   const activeInReview = !!active && active.providerStatus === 'in_review' && active.status === 'CREATED';
   const contestCopy = CONTEST_COPY[contestTarget ? payMethodOf(contestTarget) : 'PIX'];
+  // Com campanha: valores sugeridos dela (se houver) e "anônimo" só quando ela permite
+  const targetPresets = campaignPresets(campaignTarget);
+  const presets = targetPresets.length > 0 ? targetPresets : PRESETS;
+  const showAnonymous = effectiveKind === 'OFFERING' && (campaignTarget ? campaignTarget.allowAnonymous : true);
+  const registeredText = campaignTarget ? 'sua contribuição é registrada' : 'seu dízimo é registrado';
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
@@ -664,6 +808,7 @@ export default function TitheScreen() {
       </View>
 
       <ScrollView
+        ref={scrollRef}
         contentContainerStyle={styles.scroll}
         refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={() => load(true)} />}
         showsVerticalScrollIndicator={false}
@@ -694,22 +839,42 @@ export default function TitheScreen() {
               ) : null}
             </View>
 
-            <View style={styles.card}>
+            <View
+              style={styles.card}
+              onLayout={(event: LayoutChangeEvent) => {
+                contributeY.current = event.nativeEvent.layout.y;
+              }}
+            >
               <Text style={styles.sectionTitle}>Contribuir agora</Text>
-              <View style={styles.kindRow}>
-                {(['TITHE', 'OFFERING'] as TitheIntentKind[]).map((option) => (
-                  <TouchableOpacity
-                    key={option}
-                    style={[styles.kindChip, kind === option && styles.kindChipOn]}
-                    onPress={() => setKind(option)}
-                  >
-                    <Text style={[styles.kindChipText, kind === option && styles.kindChipTextOn]}>
-                      {option === 'TITHE' ? 'Dízimo' : 'Oferta avulsa'}
+              {campaignTarget ? (
+                <>
+                  <TouchableOpacity style={styles.targetChip} onPress={() => setCampaignTarget(null)} hitSlop={6}>
+                    <Text style={styles.targetChipText} numberOfLines={1}>
+                      Para: {campaignTarget.name}
                     </Text>
+                    <Text style={styles.targetChipClose}>✕</Text>
                   </TouchableOpacity>
-                ))}
-              </View>
-              {kind === 'TITHE' ? (
+                  <Text style={styles.hint}>
+                    Oferta com finalidade: vai para {CAMPAIGN_KIND_LABELS[campaignTarget.kind].toLowerCase()} “{campaignTarget.name}”
+                    {campaignTarget.community ? ` (${campaignTarget.community.name})` : ''}. Toque em ✕ para voltar ao dízimo.
+                  </Text>
+                </>
+              ) : (
+                <View style={styles.kindRow}>
+                  {(['TITHE', 'OFFERING'] as TitheIntentKind[]).map((option) => (
+                    <TouchableOpacity
+                      key={option}
+                      style={[styles.kindChip, kind === option && styles.kindChipOn]}
+                      onPress={() => setKind(option)}
+                    >
+                      <Text style={[styles.kindChipText, kind === option && styles.kindChipTextOn]}>
+                        {option === 'TITHE' ? 'Dízimo' : 'Oferta avulsa'}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              )}
+              {effectiveKind === 'TITHE' ? (
                 <>
                   <Text style={styles.label}>Mês de referência</Text>
                   <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.kindRow}>
@@ -727,7 +892,7 @@ export default function TitheScreen() {
                     ))}
                   </ScrollView>
                 </>
-              ) : (
+              ) : showAnonymous ? (
                 <TouchableOpacity style={styles.anonRow} onPress={() => setAnonymous(!anonymous)}>
                   <FontAwesome5
                     name={anonymous ? 'check-square' : 'square'}
@@ -736,9 +901,9 @@ export default function TitheScreen() {
                   />
                   <Text style={styles.anonText}>Oferta anônima — meu nome não aparece para a tesouraria</Text>
                 </TouchableOpacity>
-              )}
+              ) : null}
               <View style={styles.presetRow}>
-                {PRESETS.map((preset) => (
+                {presets.map((preset) => (
                   <TouchableOpacity
                     key={preset}
                     style={[styles.preset, parseAmount(amountText) === preset && styles.presetOn]}
@@ -795,10 +960,10 @@ export default function TitheScreen() {
               {data.gateway?.available ? (
                 <Text style={styles.hint}>
                   {payMethod === 'CARD'
-                    ? 'Cartão com confirmação automática: você paga na página segura do Asaas e, assim que for aprovado, seu dízimo é registrado sem você precisar avisar.'
+                    ? `Cartão com confirmação automática: você paga na página segura do Asaas e, assim que for aprovado, ${registeredText} sem você precisar avisar.`
                     : payMethod === 'BOLETO'
-                      ? 'Boleto com confirmação automática: quando compensar (até 2 dias úteis), seu dízimo é registrado sem você precisar avisar.'
-                      : 'Pix com confirmação automática: assim que o banco aprovar, seu dízimo é registrado sem você precisar avisar.'}
+                      ? `Boleto com confirmação automática: quando compensar (até 2 dias úteis), ${registeredText} sem você precisar avisar.`
+                      : `Pix com confirmação automática: assim que o banco aprovar, ${registeredText} sem você precisar avisar.`}
                   {data.gateway.feePolicy === 'PASS_THROUGH'
                     ? payMethod === 'PIX'
                       ? gatewayFee
@@ -825,6 +990,77 @@ export default function TitheScreen() {
                 </Text>
               )}
             </View>
+
+            {campaigns.length > 0 && (
+              <View style={styles.card}>
+                <Text style={styles.sectionTitle}>Campanhas e fundos</Text>
+                <Text style={styles.hint}>
+                  Contribuições com destino certo: escolha uma campanha e a tesouraria registra o seu Pix nela.
+                </Text>
+                {campaigns.map((campaign) => {
+                  const percent = campaign.percent === null ? null : Math.min(100, Math.max(0, campaign.percent));
+                  const pledge = campaign.myPledge;
+                  const pledgeRemaining = pledge ? Math.max(0, pledge.amount - campaign.myTotal) : 0;
+                  const daysLeft = daysLeftText(campaign.daysLeft);
+                  const selected = campaignTarget?.id === campaign.id;
+                  const qrBusy = qrBusyId === campaign.id;
+                  return (
+                    <View key={campaign.id} style={styles.campaign}>
+                      <View style={styles.rowBetween}>
+                        <Text style={styles.campaignName}>{campaign.name}</Text>
+                        <Text style={[styles.tag, campaign.kind === 'FUND' ? styles.tagFund : styles.tagCampaign]}>
+                          {CAMPAIGN_KIND_LABELS[campaign.kind]}
+                        </Text>
+                      </View>
+                      <Text style={styles.meta}>{campaign.community?.name ?? 'Paróquia'}</Text>
+                      {campaign.description ? (
+                        <Text style={styles.cardBody} numberOfLines={2}>
+                          {campaign.description}
+                        </Text>
+                      ) : null}
+                      {percent !== null ? (
+                        <View style={styles.progressTrack}>
+                          <View style={[styles.progressFill, { width: `${percent}%` as const }]} />
+                        </View>
+                      ) : null}
+                      <Text style={styles.campaignRaised}>
+                        {campaign.goalAmount
+                          ? `${money(campaign.raised)} arrecadados de ${money(campaign.goalAmount)}`
+                          : `${money(campaign.raised)} arrecadados`}
+                        {percent !== null ? ` · ${Math.round(percent)}%` : ''}
+                      </Text>
+                      <Text style={styles.hint}>
+                        {contributorsText(campaign.contributors)}
+                        {daysLeft ? ` · ${daysLeft}` : ''}
+                      </Text>
+                      {campaign.myTotal > 0 ? (
+                        <Text style={styles.campaignMine}>Você já contribuiu {money(campaign.myTotal)}</Text>
+                      ) : null}
+                      {pledge ? (
+                        <Text style={styles.campaignPledge}>
+                          Promessa: {money(pledge.amount)} {pledge.fulfilled ? '✓ cumprida' : `· faltam ${money(pledgeRemaining)}`}
+                        </Text>
+                      ) : null}
+                      <View style={styles.campaignActions}>
+                        <TouchableOpacity style={styles.primaryBtnSm} onPress={() => selectCampaign(campaign)}>
+                          <Text style={styles.primaryBtnSmText}>{selected ? 'Selecionada ↑' : 'Contribuir'}</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity style={styles.secondaryBtnSm} disabled={pledgeBusy} onPress={() => openPledge(campaign)}>
+                          <Text style={styles.secondaryBtnSmText}>{pledge ? 'Alterar promessa' : 'Prometer'}</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={[styles.secondaryBtnSm, qrBusy && styles.btnDisabled]}
+                          disabled={qrBusy}
+                          onPress={() => void shareCampaignQr(campaign)}
+                        >
+                          <Text style={styles.secondaryBtnSmText}>{qrBusy ? 'Gerando...' : 'Compartilhar QR'}</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  );
+                })}
+              </View>
+            )}
 
             {(data.gateway?.recurringAvailable || data.schedule) && (
               <View style={styles.card}>
@@ -948,6 +1184,11 @@ export default function TitheScreen() {
                         {intent.kind === 'TITHE' ? 'Dízimo' : intent.anonymous ? 'Oferta anônima' : 'Oferta'} ·{' '}
                         {monthLabel(intent.referenceMonth)}
                       </Text>
+                      {intent.campaign ? (
+                        <Text style={styles.intentCampaign} numberOfLines={1}>
+                          Campanha: {intent.campaign.name}
+                        </Text>
+                      ) : null}
                       <Text style={styles.intentMeta}>
                         {money(intent.amountPaid ?? intent.amount)}
                         {intent.amountPaid != null && intent.amountPaid !== intent.amount ? ` (gerado ${money(intent.amount)})` : ''} ·{' '}
@@ -1035,6 +1276,7 @@ export default function TitheScreen() {
                   {activeMethod === 'PIX'
                     ? monthLabel(active.referenceMonth)
                     : `${active.kind === 'TITHE' ? 'Dízimo' : 'Oferta'} · ${money(active.amount)} · ${monthLabel(active.referenceMonth)}`}
+                  {active.campaign ? ` · Campanha: ${active.campaign.name}` : ''}
                 </Text>
                 {active.method === 'GATEWAY' ? (
                   <View style={styles.beneficiary}>
@@ -1357,6 +1599,61 @@ export default function TitheScreen() {
         </Pressable>
       </Modal>
 
+      {/* Campanhas: promessa (valor + observação) */}
+      <Modal visible={!!pledgeTarget} transparent animationType="fade" onRequestClose={() => setPledgeTarget(null)}>
+        <Pressable style={styles.overlay} onPress={() => setPledgeTarget(null)}>
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ width: '100%' }}>
+          <Pressable style={styles.sheet} onPress={() => {}}>
+            <Text style={styles.sheetTitle}>{pledgeTarget?.myPledge ? 'Alterar promessa' : 'Prometer contribuição'}</Text>
+            <Text style={styles.sheetMeta}>
+              {pledgeTarget ? `${CAMPAIGN_KIND_LABELS[pledgeTarget.kind]} “${pledgeTarget.name}”` : ''}
+              {pledgeTarget && pledgeTarget.myTotal > 0 ? ` · você já contribuiu ${money(pledgeTarget.myTotal)}` : ''}
+            </Text>
+            <Text style={styles.hint}>
+              A promessa é um compromisso pessoal, sem cobrança automática: você contribui quando puder e o app mostra
+              quanto falta.
+            </Text>
+            <Text style={styles.label}>Valor prometido</Text>
+            <View style={styles.amountRow}>
+              <Text style={styles.amountPrefix}>R$</Text>
+              <TextInput
+                style={styles.amountInput}
+                keyboardType="decimal-pad"
+                placeholder="0,00"
+                placeholderTextColor={colors.textTertiary}
+                value={pledgeAmount}
+                onChangeText={setPledgeAmount}
+                maxLength={10}
+              />
+            </View>
+            <Text style={styles.label}>Observação (opcional)</Text>
+            <TextInput
+              style={styles.pledgeInput}
+              placeholder="Ex.: em memória de minha mãe"
+              placeholderTextColor={colors.textTertiary}
+              value={pledgeNote}
+              onChangeText={setPledgeNote}
+              maxLength={200}
+              multiline
+            />
+            <TouchableOpacity style={styles.primaryBtn} disabled={pledgeBusy} onPress={() => void submitPledge()}>
+              <Text style={styles.primaryBtnText}>
+                {pledgeBusy ? 'Salvando...' : pledgeTarget?.myPledge ? 'Salvar promessa' : 'Prometer'}
+              </Text>
+            </TouchableOpacity>
+            {pledgeTarget?.myPledge ? (
+              <TouchableOpacity disabled={pledgeBusy} onPress={() => handleCancelPledge(pledgeTarget)}>
+                <Text style={styles.cancelLink}>Cancelar promessa</Text>
+              </TouchableOpacity>
+            ) : null}
+            <TouchableOpacity style={styles.closeBtn} onPress={() => setPledgeTarget(null)}>
+              <Text style={styles.closeBtnText}>Fechar</Text>
+            </TouchableOpacity>
+          </Pressable>
+          </KeyboardAvoidingView>
+        </Pressable>
+      </Modal>
+
       {/* Contestação */}
       <Modal visible={!!contestTarget} transparent animationType="fade" onRequestClose={() => setContestTarget(null)}>
         <Pressable style={styles.overlay} onPress={() => setContestTarget(null)}>
@@ -1433,8 +1730,9 @@ const createStyles = (colors: ReturnType<typeof useColors>) =>
     kindChipTextOn: { color: colors.primary },
     anonRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 4 },
     anonText: { flex: 1, fontSize: 13, color: colors.text },
-    presetRow: { flexDirection: 'row', gap: 8 },
-    preset: { flex: 1, borderWidth: 1, borderColor: colors.border, borderRadius: 10, paddingVertical: 8, alignItems: 'center' },
+    // flexBasis + wrap: campanhas podem sugerir mais de 4 valores — quebra a linha em vez de espremer
+    presetRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+    preset: { flexGrow: 1, flexBasis: 70, borderWidth: 1, borderColor: colors.border, borderRadius: 10, paddingVertical: 8, alignItems: 'center' },
     presetOn: { borderColor: colors.primary, backgroundColor: colors.primary + '18' },
     presetText: { fontSize: 13, fontWeight: '700', color: colors.textSecondary },
     presetTextOn: { color: colors.primary },
@@ -1499,6 +1797,48 @@ const createStyles = (colors: ReturnType<typeof useColors>) =>
     cancelLink: { textAlign: 'center', fontSize: 12.5, color: colors.textTertiary, marginTop: 12, textDecorationLine: 'underline' },
     closeBtn: { alignItems: 'center', paddingVertical: 10, marginTop: 6 },
     closeBtnText: { color: colors.textSecondary, fontWeight: '700' },
+    // Campanhas e fundos
+    targetChip: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      alignSelf: 'flex-start',
+      maxWidth: '100%',
+      borderWidth: 1,
+      borderColor: colors.primary,
+      backgroundColor: colors.primary + '18',
+      borderRadius: 999,
+      paddingHorizontal: 12,
+      paddingVertical: 6,
+    },
+    targetChipText: { flexShrink: 1, fontSize: 12.5, fontWeight: '700', color: colors.primary },
+    targetChipClose: { fontSize: 13, fontWeight: '800', color: colors.primary },
+    campaign: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border, paddingTop: 10, gap: 6 },
+    campaignName: { flex: 1, fontSize: 14.5, fontWeight: '800', color: colors.text },
+    tag: { fontSize: 10.5, fontWeight: '800', borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3, overflow: 'hidden', textTransform: 'uppercase' },
+    tagCampaign: { backgroundColor: colors.primary + '18', color: colors.primary },
+    tagFund: { backgroundColor: '#eaf7ef', color: '#15803d' },
+    progressTrack: { height: 8, borderRadius: 999, backgroundColor: colors.border, overflow: 'hidden', marginTop: 2 },
+    progressFill: { height: '100%', borderRadius: 999, backgroundColor: colors.success },
+    campaignRaised: { fontSize: 13, fontWeight: '700', color: colors.text },
+    campaignMine: { fontSize: 12.5, fontWeight: '700', color: '#15803d' },
+    campaignPledge: { fontSize: 12.5, fontWeight: '600', color: colors.textSecondary },
+    campaignActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 2 },
+    primaryBtnSm: { backgroundColor: colors.primary, borderRadius: 10, paddingVertical: 9, paddingHorizontal: 14, alignItems: 'center', justifyContent: 'center' },
+    primaryBtnSmText: { color: '#fff', fontWeight: '800', fontSize: 13 },
+    intentCampaign: { fontSize: 12, fontWeight: '600', color: colors.primary, marginTop: 2 },
+    pledgeInput: {
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: 10,
+      padding: 10,
+      minHeight: 64,
+      textAlignVertical: 'top',
+      fontSize: 14,
+      color: colors.text,
+      backgroundColor: colors.surface,
+      marginTop: 4,
+    },
     contestInput: {
       borderWidth: 1,
       borderColor: colors.border,

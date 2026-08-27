@@ -57,9 +57,71 @@ export interface TitheIntent {
   qrExpiresAt?: string | null;
   /** Situação bruta no provedor — ver PROVIDER_STATUS_HINTS ('in_review', 'disputed') */
   providerStatus?: string | null;
+  /** Oferta com finalidade: campanha/fundo escolhido na hora de contribuir */
+  campaignId?: string | null;
+  campaign?: { id: string; name: string } | null;
   declaredAt?: string | null;
   confirmedAt?: string | null;
   createdAt: string;
+}
+
+// ============================================
+// CAMPANHAS E FUNDOS
+// ============================================
+
+export type TitheCampaignKind = 'CAMPAIGN' | 'FUND';
+
+export const CAMPAIGN_KIND_LABELS: Record<TitheCampaignKind, string> = {
+  CAMPAIGN: 'Campanha',
+  FUND: 'Fundo',
+};
+
+/** Promessa do fiel para uma campanha — compromisso pessoal, sem cobrança automática */
+export interface CampaignPledge {
+  amount: number;
+  note?: string | null;
+  /** myTotal já alcançou o valor prometido */
+  fulfilled: boolean;
+}
+
+/** Campanha/fundo visível ao fiel: ativa, da paróquia inteira ou da comunidade dele */
+export interface TitheCampaign {
+  id: string;
+  parishId: string;
+  communityId: string | null;
+  community: { id: string; name: string } | null;
+  kind: TitheCampaignKind;
+  status: 'ACTIVE';
+  code: string;
+  name: string;
+  description?: string | null;
+  goalAmount: number | null;
+  startsAt?: string | null;
+  endsAt?: string | null;
+  /** Só então a oferta pode ser anônima */
+  allowAnonymous: boolean;
+  /** Valores sugeridos pela paróquia — substituem os presets padrão quando houver */
+  suggestedAmounts: number[];
+  raised: number;
+  /** 0–100, ou null quando não há meta */
+  percent: number | null;
+  contributors: number;
+  /** null quando não tem data de término */
+  daysLeft: number | null;
+  /** Quanto o fiel já contribuiu (confirmado) para esta campanha */
+  myTotal: number;
+  myPledge: CampaignPledge | null;
+}
+
+/** QR estático da paróquia (sem valor) identificado pela campanha, para divulgar */
+export interface CampaignQr {
+  brCode: string;
+  qrDataUrl: string;
+  name: string;
+  code: string;
+  parish: string;
+  pixKey?: string | null;
+  merchantName?: string | null;
 }
 
 export interface MyTithe {
@@ -162,7 +224,27 @@ export const createTitheIntent = (input: {
   anonymous?: boolean;
   /** Padrão PIX; CARD/BOLETO exigem Asaas (o backend responde 400 quando não há) */
   paymentMethod?: TithePaymentMethod;
+  /** Oferta com finalidade: o backend força kind OFFERING e só aceita anonymous se a campanha permitir */
+  campaignId?: string;
 }): Promise<TitheIntent> => wrap(async () => (await api.post('/tithe/intents', input)).data);
+
+/** Campanhas e fundos ativos visíveis ao fiel (paróquia inteira ou a comunidade dele). */
+export const getCampaigns = (): Promise<TitheCampaign[]> =>
+  wrap(async () => (await api.get('/tithe/campaigns')).data ?? []);
+
+/** Cria ou altera a promessa do fiel para a campanha. */
+export const setCampaignPledge = (
+  id: string,
+  input: { amount: number; note?: string },
+): Promise<CampaignPledge & { myTotal: number }> =>
+  wrap(async () => (await api.post(`/tithe/campaigns/${id}/pledge`, input)).data);
+
+export const cancelCampaignPledge = (id: string): Promise<{ cancelled: boolean }> =>
+  wrap(async () => (await api.delete(`/tithe/campaigns/${id}/pledge`)).data);
+
+/** QR estático da campanha para compartilhar (400 se a paróquia não ativou o Pix pelo app). */
+export const getCampaignQr = (id: string): Promise<CampaignQr> =>
+  wrap(async () => (await api.get(`/tithe/campaigns/${id}/qr`)).data);
 
 export const getTitheIntent = (id: string): Promise<TitheIntent> =>
   wrap(async () => (await api.get(`/tithe/intents/${id}`)).data);
