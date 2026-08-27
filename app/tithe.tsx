@@ -36,6 +36,7 @@ import {
   PersistentQr,
   TitheSchedule,
   TitheCampaign,
+  TithePreferences,
   PublishedStatement,
   STATUS_LABELS,
   SCHEDULE_STATUS_LABELS,
@@ -193,6 +194,7 @@ export default function TitheScreen() {
   const [contestText, setContestText] = useState('');
   const [persistent, setPersistent] = useState<PersistentQr | null>(null);
   const [savingReminder, setSavingReminder] = useState(false);
+  const [savingWhatsapp, setSavingWhatsapp] = useState(false);
   // Dízimo automático (provedor)
   const [scheduleModal, setScheduleModal] = useState(false);
   const [scheduleAmount, setScheduleAmount] = useState('');
@@ -688,15 +690,38 @@ export default function TitheScreen() {
     </View>
   );
 
+  /** Reflete a resposta do PATCH de preferências (lembrete + WhatsApp) no estado local, sem recarregar a tela */
+  const applyPreferences = (prefs: TithePreferences) =>
+    setData((current) =>
+      current
+        ? {
+            ...current,
+            reminderDay: prefs.reminderDay,
+            whatsapp: { ...current.whatsapp, optIn: prefs.whatsappOptIn },
+          }
+        : current,
+    );
+
   const setReminder = async (day: number | null) => {
     setSavingReminder(true);
     try {
-      await updateTithePreferences(day);
-      setData((current) => (current ? { ...current, reminderDay: day } : current));
+      applyPreferences(await updateTithePreferences({ reminderDay: day }));
     } catch (error: any) {
       Alert.alert('Lembrete', error?.message ?? 'Não foi possível salvar.');
     } finally {
       setSavingReminder(false);
+    }
+  };
+
+  /** Pix do mês pelo WhatsApp: ao ligar sem dia de lembrete o backend define o dia 10 — a resposta já vem com ele */
+  const setWhatsappOptIn = async (on: boolean) => {
+    setSavingWhatsapp(true);
+    try {
+      applyPreferences(await updateTithePreferences({ whatsappOptIn: on }));
+    } catch (error: any) {
+      Alert.alert('WhatsApp', error?.message ?? 'Não foi possível salvar.');
+    } finally {
+      setSavingWhatsapp(false);
     }
   };
 
@@ -1264,7 +1289,7 @@ export default function TitheScreen() {
                 </View>
                 <Switch
                   value={data.reminderDay !== null}
-                  disabled={savingReminder}
+                  disabled={savingReminder || savingWhatsapp}
                   onValueChange={(on) => void setReminder(on ? 10 : null)}
                   trackColor={{ true: colors.primary }}
                 />
@@ -1275,7 +1300,7 @@ export default function TitheScreen() {
                     <TouchableOpacity
                       key={day}
                       style={[styles.kindChip, data.reminderDay === day && styles.kindChipOn]}
-                      disabled={savingReminder}
+                      disabled={savingReminder || savingWhatsapp}
                       onPress={() => void setReminder(day)}
                     >
                       <Text style={[styles.kindChipText, data.reminderDay === day && styles.kindChipTextOn]}>dia {day}</Text>
@@ -1283,6 +1308,31 @@ export default function TitheScreen() {
                   ))}
                 </View>
               )}
+              {data.whatsapp?.available ? (
+                data.whatsapp.hasPhone ? (
+                  <View style={styles.whatsappRow}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.whatsappTitle}>📲 Receber o Pix do mês pelo WhatsApp</Text>
+                      <Text style={styles.hint}>
+                        No dia do lembrete você recebe o Pix copia e cola por WhatsApp; responda PAGUEI depois de pagar.
+                        SAIR para parar.
+                      </Text>
+                    </View>
+                    <Switch
+                      value={data.whatsapp.optIn}
+                      disabled={savingReminder || savingWhatsapp}
+                      onValueChange={(on) => void setWhatsappOptIn(on)}
+                      trackColor={{ true: colors.primary }}
+                    />
+                  </View>
+                ) : (
+                  <View style={styles.whatsappRow}>
+                    <Text style={[styles.hint, { flex: 1 }]}>
+                      📲 Cadastre um celular no seu perfil (a secretaria faz isso) para receber pelo WhatsApp.
+                    </Text>
+                  </View>
+                )
+              ) : null}
               <Text style={styles.hint}>
                 Prefere não depender de lembrete? No seu banco, agende um Pix mensal para a chave da paróquia usando o
                 seu QR fixo abaixo.
@@ -1923,6 +1973,17 @@ const createStyles = (colors: ReturnType<typeof useColors>) =>
     kindChipTextOn: { color: colors.primary },
     anonRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 4 },
     anonText: { flex: 1, fontSize: 13, color: colors.text },
+    // Opção do WhatsApp dentro do card do lembrete: um filete a separa do bloco dos dias
+    whatsappRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+      borderTopWidth: 1,
+      borderTopColor: colors.border,
+      paddingTop: 10,
+      marginTop: 2,
+    },
+    whatsappTitle: { fontSize: 13.5, fontWeight: '700', color: colors.text, marginBottom: 2 },
     // flexBasis + wrap: campanhas podem sugerir mais de 4 valores — quebra a linha em vez de espremer
     presetRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
     preset: { flexGrow: 1, flexBasis: 70, borderWidth: 1, borderColor: colors.border, borderRadius: 10, paddingVertical: 8, alignItems: 'center' },

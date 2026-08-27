@@ -168,6 +168,13 @@ export interface MyTithe {
     methods?: TithePaymentMethod[];
   } | null;
   schedule: TitheSchedule | null;
+  /** Pix do mês pelo WhatsApp (D4.5): available = paróquia ativou o canal e o servidor tem Twilio */
+  whatsapp: {
+    available: boolean;
+    optIn: boolean;
+    /** Sem celular cadastrado o opt-in não liga (a secretaria cadastra no perfil do fiel) */
+    hasPhone: boolean;
+  };
 }
 
 export interface TitheSchedule {
@@ -269,9 +276,21 @@ export const cancelTitheIntent = (id: string): Promise<TitheIntent> =>
 export const contestTitheIntent = (id: string, note: string): Promise<TitheIntent> =>
   wrap(async () => (await api.post(`/tithe/intents/${id}/contest`, { note })).data);
 
-/** Lembrete mensal: dia 1..28 ou null para desligar. */
-export const updateTithePreferences = (reminderDay: number | null): Promise<{ reminderDay: number | null }> =>
-  wrap(async () => (await api.patch('/tithe/my/preferences', { reminderDay })).data);
+/** Estado final das preferências, como o backend devolve após o PATCH */
+export interface TithePreferences {
+  reminderDay: number | null;
+  whatsappOptIn: boolean;
+}
+
+/**
+ * Preferências do dízimo: lembrete mensal (dia 1..28 ou null para desligar) e Pix do mês pelo WhatsApp.
+ * Ligar o WhatsApp sem dia de lembrete faz o backend definir o dia 10 — por isso a resposta traz os dois campos.
+ * 400 ao ligar o WhatsApp sem celular cadastrado ou com o canal desligado na paróquia.
+ */
+export const updateTithePreferences = (input: {
+  reminderDay?: number | null;
+  whatsappOptIn?: boolean;
+}): Promise<TithePreferences> => wrap(async () => (await api.patch('/tithe/my/preferences', input)).data);
 
 /** Dízimo automático (provedor): cria, consulta e cancela. */
 export const getMySchedule = (): Promise<TitheSchedule | null> => wrap(async () => (await api.get('/tithe/schedules/mine')).data ?? null);
