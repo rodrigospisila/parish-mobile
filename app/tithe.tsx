@@ -131,11 +131,21 @@ const shiftMonth = (iso: string, delta: number) => {
 };
 /** 33 → "33,00" para preencher um campo de valor */
 const amountToText = (value: number) => value.toFixed(2).replace('.', ',');
-const contributorsText = (count: number) =>
-  count === 0 ? 'Nenhum contribuinte ainda' : count === 1 ? '1 contribuinte' : `${count} contribuintes`;
-/** null = sem data de término (fundo permanente) */
-const daysLeftText = (days: number | null) =>
-  days === null ? null : days <= 0 ? 'último dia' : days === 1 ? '1 dia restante' : `${days} dias restantes`;
+/** Sem contribuinte identificado mas com valor arrecadado = lançamentos manuais da tesouraria (ou ofertas anônimas) */
+const contributorsText = (count: number, raised: number) =>
+  count === 0
+    ? raised > 0
+      ? 'Contribuições registradas pela tesouraria'
+      : 'Nenhum contribuinte ainda'
+    : count === 1
+      ? '1 contribuinte'
+      : `${count} contribuintes`;
+/** null = sem data de término (fundo permanente). daysLeft nunca é negativo: 0 é o último dia; vencida vem com expired */
+const daysLeftText = (campaign: TitheCampaign) => {
+  if (campaign.expired) return 'prazo encerrado';
+  const days = campaign.daysLeft;
+  return days === null ? null : days <= 0 ? 'último dia' : days === 1 ? '1 dia restante' : `${days} dias restantes`;
+};
 /** Valores sugeridos pela campanha (positivos, sem repetição) — vazio cai nos presets padrão */
 const campaignPresets = (campaign: TitheCampaign | null) =>
   campaign ? Array.from(new Set((campaign.suggestedAmounts ?? []).filter((v) => Number.isFinite(v) && v > 0))) : [];
@@ -195,19 +205,23 @@ export default function TitheScreen() {
   const load = useCallback(async (refresh = false) => {
     if (refresh) setIsRefreshing(true);
     try {
-      // Campanhas são acessório: se falharem, a tela segue sem a seção (lista vazia)
-      const [result, campaignResult] = await Promise.all([
+      // Campanhas são acessório: se falharem, a tela segue com a lista anterior (null = não atualizar)
+      const [result, campaignList] = await Promise.all([
         getMyTithe(),
         getCampaigns().then(
-          (list) => ({ ok: true, list }),
-          () => ({ ok: false, list: [] as TitheCampaign[] }),
+          (list) => list,
+          (): TitheCampaign[] | null => null,
         ),
       ]);
       setData(result);
-      setCampaigns(campaignResult.list);
-      if (campaignResult.ok) {
-        // Mantém a campanha escolhida com os números atualizados; some se ela deixou de estar ativa
-        setCampaignTarget((current) => (current ? campaignResult.list.find((c) => c.id === current.id) ?? null : null));
+      if (campaignList) {
+        setCampaigns(campaignList);
+        // Mantém a campanha escolhida com os números atualizados; some se ela deixou de estar ativa ou venceu o prazo
+        setCampaignTarget((current) => {
+          if (!current) return null;
+          const fresh = campaignList.find((c) => c.id === current.id);
+          return fresh && !fresh.expired ? fresh : null;
+        });
       }
       setReferenceMonth((current) => current ?? result.currentMonth);
       if (!prefilledRef.current && result.suggestedAmount) {
@@ -256,8 +270,8 @@ export default function TitheScreen() {
       return;
     }
     setCreating(true);
+    const target = campaignTarget;
     try {
-      const target = campaignTarget;
       const intent = await createTitheIntent({
         amount,
         kind: effectiveKind,
@@ -279,6 +293,12 @@ export default function TitheScreen() {
             : 'Não foi possível gerar o Pix',
         error?.message ?? 'Tente novamente.',
       );
+      // 400 da campanha ("Campanha encerrada ou indisponível…"): o alvo saiu do ar entre o toque e o envio —
+      // solta o chip "Para: …" e recarrega a lista para a tela refletir o estado real
+      if (target && error?.status === 400 && /campanha/i.test(String(error?.message ?? ''))) {
+        setCampaignTarget(null);
+        await load(true);
+      }
     } finally {
       setCreating(false);
     }
@@ -677,6 +697,7 @@ export default function TitheScreen() {
 
   /** "Contribuir" na campanha: seleciona o destino no card "Contribuir agora" e rola até ele. */
   const selectCampaign = (campaign: TitheCampaign) => {
+    if (campaign.expired) return; // botão fica escondido; guarda só por segurança
     setCampaignTarget(campaign);
     // best-effort: se o card ainda não mediu, fica onde está
     requestAnimationFrame(() => scrollRef.current?.scrollTo({ y: Math.max(0, contributeY.current - 8), animated: true }));
@@ -1001,7 +1022,7 @@ export default function TitheScreen() {
                   const percent = campaign.percent === null ? null : Math.min(100, Math.max(0, campaign.percent));
                   const pledge = campaign.myPledge;
                   const pledgeRemaining = pledge ? Math.max(0, pledge.amount - campaign.myTotal) : 0;
-                  const daysLeft = daysLeftText(campaign.daysLeft);
+                  const daysLeft = daysLeftText(campaign);
                   const selected = campaignTarget?.id === campaign.id;
                   const qrBusy = qrBusyId === campaign.id;
                   return (
@@ -1030,7 +1051,7 @@ export default function TitheScreen() {
                         {percent !== null ? ` · ${Math.round(percent)}%` : ''}
                       </Text>
                       <Text style={styles.hint}>
-                        {contributorsText(campaign.contributors)}
+                        {contributorsText(campaign.contributors, campaign.raised)}
                         {daysLeft ? ` · ${daysLeft}` : ''}
                       </Text>
                       {campaign.myTotal > 0 ? (
@@ -1042,9 +1063,12 @@ export default function TitheScreen() {
                         </Text>
                       ) : null}
                       <View style={styles.campaignActions}>
-                        <TouchableOpacity style={styles.primaryBtnSm} onPress={() => selectCampaign(campaign)}>
-                          <Text style={styles.primaryBtnSmText}>{selected ? 'Selecionada ↑' : 'Contribuir'}</Text>
-                        </TouchableOpacity>
+                        {/* Prazo encerrado: o backend recusa novas contribuições (400) — não oferece o botão */}
+                        {!campaign.expired ? (
+                          <TouchableOpacity style={styles.primaryBtnSm} onPress={() => selectCampaign(campaign)}>
+                            <Text style={styles.primaryBtnSmText}>{selected ? 'Selecionada ↑' : 'Contribuir'}</Text>
+                          </TouchableOpacity>
+                        ) : null}
                         <TouchableOpacity style={styles.secondaryBtnSm} disabled={pledgeBusy} onPress={() => openPledge(campaign)}>
                           <Text style={styles.secondaryBtnSmText}>{pledge ? 'Alterar promessa' : 'Prometer'}</Text>
                         </TouchableOpacity>
@@ -1636,6 +1660,9 @@ export default function TitheScreen() {
               maxLength={200}
               multiline
             />
+            <Text style={[styles.hint, { marginTop: 6 }]}>
+              A tesouraria vê sua promessa e o quanto você já contribuiu — ofertas anônimas não entram nesse total.
+            </Text>
             <TouchableOpacity style={styles.primaryBtn} disabled={pledgeBusy} onPress={() => void submitPledge()}>
               <Text style={styles.primaryBtnText}>
                 {pledgeBusy ? 'Salvando...' : pledgeTarget?.myPledge ? 'Salvar promessa' : 'Prometer'}

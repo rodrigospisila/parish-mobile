@@ -76,8 +76,13 @@ export function NotificationProvider({ children }: NotificationProviderProps) {
     // Listener para quando o usuário interage com a notificação
     responseListener.current = Notifications.addNotificationResponseReceivedListener((response) => {
       const data = response.notification.request.content.data;
+      const kind = typeof data?.kind === 'string' ? data.kind : '';
 
-      if (data?.scheduleId) {
+      if (kind.startsWith('tithe')) {
+        // Dízimo e ofertas (tithe-campaign, tithe-confirmed, tithe-schedule, tithe-charge, tithe-reminder,
+        // tithe-declared…): a tela do dízimo já mostra campanhas, Pix e histórico — abre direto nela
+        router.push('/tithe');
+      } else if (data?.scheduleId) {
         // Recusa/substituicao/cancelamento de escala: leva direto para a operacao da escala
         router.push({
           pathname: '/coordination/[scheduleId]',

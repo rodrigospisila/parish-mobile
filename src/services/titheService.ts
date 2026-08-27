@@ -1,3 +1,4 @@
+import axios from 'axios';
 import api, { getErrorMessage } from '../config/api';
 import { downloadCatechesisPdf } from './catechesisService';
 
@@ -106,8 +107,10 @@ export interface TitheCampaign {
   /** 0–100, ou null quando não há meta */
   percent: number | null;
   contributors: number;
-  /** null quando não tem data de término */
+  /** null quando não tem data de término; nunca negativo — 0 é o último dia (vencida vem com expired=true) */
   daysLeft: number | null;
+  /** Prazo encerrado: ainda aparece na lista (promessas/histórico), mas não recebe novas contribuições */
+  expired: boolean;
   /** Quanto o fiel já contribuiu (confirmado) para esta campanha */
   myTotal: number;
   myPledge: CampaignPledge | null;
@@ -207,11 +210,18 @@ export const STATUS_LABELS: Record<TitheIntentStatus, string> = {
   CANCELLED: 'Cancelado',
 };
 
+/** Erro já traduzido para o usuário, com o status HTTP (null sem resposta) — a tela usa para tratar 400 específicos */
+export interface TitheApiError extends Error {
+  status: number | null;
+}
+
 const wrap = async <T>(fn: () => Promise<T>): Promise<T> => {
   try {
     return await fn();
   } catch (error) {
-    throw new Error(getErrorMessage(error));
+    const wrapped = new Error(getErrorMessage(error)) as TitheApiError;
+    wrapped.status = axios.isAxiosError(error) ? (error.response?.status ?? null) : null;
+    throw wrapped;
   }
 };
 
