@@ -24,6 +24,7 @@ import {
   getFixedSchedulePending,
 } from '../../src/services/coordinatorService';
 import { formatToBrazilianDate } from '../../src/utils/dateUtils';
+import { isFinancialRole } from '../../src/services/titheService';
 
 type AssignmentFilter = 'all' | 'PENDING' | 'CONFIRMED' | 'DECLINED' | 'CHECKED_IN';
 type DateRange = 'next7' | 'next30' | 'next90' | 'all';
@@ -79,6 +80,8 @@ export default function CoordinationScreen() {
     (!!user?.role && coordinatorRoles.includes(user.role)) ||
     !!user?.pastorals?.some((pastoral) => coordinatorPastoralRoles.includes(pastoral.role));
   const styles = createStyles(colors);
+  // Tesouraria/coordenação de comunidade: atalho para o modo agente do Dízimo
+  const isFinancial = isFinancialRole(user?.role);
 
   const getDateRangeParams = useCallback(() => {
     // Calendário: carrega o mês exibido inteiro
@@ -340,6 +343,19 @@ export default function CoordinationScreen() {
           <Text style={styles.title}>Coordenação de escalas</Text>
           <Text style={styles.subtitle}>Pendências, confirmações e presenças da sua pastoral.</Text>
         </View>
+
+        {/* Modo agente do Dízimo (papéis financeiros) */}
+        {isFinancial && (
+          <TouchableOpacity style={styles.agentCard} activeOpacity={0.85} onPress={() => router.push('/tithe-agent' as never)}>
+            <View style={{ flex: 1, gap: 2 }}>
+              <Text style={styles.agentTitle}>🧾 Modo agente — registrar contribuição presencial</Text>
+              <Text style={styles.agentHint}>
+                Envelope, dinheiro, maquininha, Pix visto no extrato, transferência ou cheque — em nome do fiel.
+              </Text>
+            </View>
+            <Text style={styles.agentChevron}>›</Text>
+          </TouchableOpacity>
+        )}
 
         {/* Alternância Lista | Calendário */}
         <View style={styles.filterRow}>
@@ -858,6 +874,23 @@ export default function CoordinationScreen() {
 const createStyles = (colors: ReturnType<typeof useColors>) =>
   StyleSheet.create({
     safeArea: { flex: 1, backgroundColor: colors.background },
+    // Modo agente do Dízimo
+    agentCard: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+      marginHorizontal: 18,
+      marginBottom: 12,
+      backgroundColor: colors.card,
+      borderRadius: 14,
+      borderWidth: 1,
+      borderColor: colors.primary,
+      borderLeftWidth: 4,
+      padding: 14,
+    },
+    agentTitle: { fontSize: 14, fontWeight: '800', color: colors.primary },
+    agentHint: { fontSize: 12, color: colors.textSecondary, lineHeight: 17 },
+    agentChevron: { fontSize: 22, color: colors.textTertiary, fontWeight: '600' },
     scrollView: { flex: 1 },
     header: {
       paddingHorizontal: 18,

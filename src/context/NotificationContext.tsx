@@ -78,9 +78,10 @@ export function NotificationProvider({ children }: NotificationProviderProps) {
       const data = response.notification.request.content.data;
       const kind = typeof data?.kind === 'string' ? data.kind : '';
 
-      if (kind.startsWith('tithe')) {
+      if (kind.startsWith('tithe') || kind === 'finance-statement') {
         // Dízimo e ofertas (tithe-campaign, tithe-confirmed, tithe-schedule, tithe-charge, tithe-reminder,
-        // tithe-declared…): a tela do dízimo já mostra campanhas, Pix e histórico — abre direto nela
+        // tithe-declared…) e balancete publicado (finance-statement, com statementId): a tela do dízimo já
+        // mostra campanhas, Pix, histórico e a seção Transparência — abre direto nela
         router.push('/tithe');
       } else if (data?.scheduleId) {
         // Recusa/substituicao/cancelamento de escala: leva direto para a operacao da escala

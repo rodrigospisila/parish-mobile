@@ -27,6 +27,7 @@ import { FontAwesome5 } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
 import * as WebBrowser from 'expo-web-browser';
 import { useColors } from '../src/context/ThemeContext';
+import { useAuth } from '../src/context/AuthContext';
 import {
   MyTithe,
   TitheIntent,
@@ -35,6 +36,7 @@ import {
   PersistentQr,
   TitheSchedule,
   TitheCampaign,
+  PublishedStatement,
   STATUS_LABELS,
   SCHEDULE_STATUS_LABELS,
   PAYMENT_METHOD_LABELS,
@@ -58,10 +60,15 @@ import {
   setCampaignPledge,
   cancelCampaignPledge,
   getCampaignQr,
+  getPublishedStatements,
+  shareStatementPdf,
+  isFinancialRole,
 } from '../src/services/titheService';
 
 const PRESETS = [20, 50, 100, 200];
 const REMINDER_DAYS = [5, 10, 15, 20, 25];
+// Transparência: balancetes mostrados no card antes de "Ver mais"
+const STATEMENTS_PREVIEW = 6;
 // Ordem fixa dos chips; só aparecem os meios que o backend liberou em gateway.methods
 const PAYMENT_METHODS: TithePaymentMethod[] = ['PIX', 'CARD', 'BOLETO'];
 const PAYMENT_METHOD_HINTS: Record<TithePaymentMethod, string> = {
@@ -102,7 +109,13 @@ const CONTEST_COPY: Record<TithePaymentMethod, { title: string; details: string;
 const dateTimeBR = (iso: string) =>
   new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 
+/** "27/08" — aprovação/publicação do balancete (o mês já está no título do card) */
+const dateBR = (iso: string | null | undefined) =>
+  iso ? new Date(iso).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }) : '—';
+
 const money = (value: number) => `R$ ${value.toFixed(2).replace('.', ',')}`;
+/** Saldo negativo com o sinal antes do R$ ("−R$ 150,00") em vez do "R$ -150,00" cru */
+const balanceText = (value: number) => (value < 0 ? `−${money(-value)}` : money(value));
 const decimalBR = (value: number) => value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const providerLabel = (provider?: string | null) =>
   provider === 'MERCADOPAGO' ? 'Mercado Pago' : provider === 'ASAAS' ? 'Asaas' : 'provedor de pagamento';
@@ -160,6 +173,9 @@ export default function TitheScreen() {
   const router = useRouter();
   const colors = useColors();
   const styles = createStyles(colors);
+  const { user } = useAuth();
+  // Tesouraria/coordenação: atalho para o modo agente (registrar contribuição presencial em nome do fiel)
+  const isFinancial = isFinancialRole(user?.role);
 
   const [data, setData] = useState<MyTithe | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -196,6 +212,11 @@ export default function TitheScreen() {
   const [pledgeNote, setPledgeNote] = useState('');
   const [pledgeBusy, setPledgeBusy] = useState(false);
   const [qrBusyId, setQrBusyId] = useState<string | null>(null);
+  // Transparência: balancetes publicados pela paróquia (qualquer fiel vê)
+  const [statements, setStatements] = useState<PublishedStatement[]>([]);
+  const [showAllStatements, setShowAllStatements] = useState(false);
+  const [statementTarget, setStatementTarget] = useState<PublishedStatement | null>(null);
+  const [statementPdfBusy, setStatementPdfBusy] = useState(false);
   const scrollRef = useRef<ScrollView>(null);
   // Posição do card "Contribuir agora" dentro do ScrollView — para rolar até ele ao tocar em "Contribuir"
   const contributeY = useRef(0);
@@ -205,15 +226,20 @@ export default function TitheScreen() {
   const load = useCallback(async (refresh = false) => {
     if (refresh) setIsRefreshing(true);
     try {
-      // Campanhas são acessório: se falharem, a tela segue com a lista anterior (null = não atualizar)
-      const [result, campaignList] = await Promise.all([
+      // Campanhas e balancetes são acessório: se falharem, a tela segue com a lista anterior (null = não atualizar)
+      const [result, campaignList, statementList] = await Promise.all([
         getMyTithe(),
         getCampaigns().then(
           (list) => list,
           (): TitheCampaign[] | null => null,
         ),
+        getPublishedStatements().then(
+          (list) => list,
+          (): PublishedStatement[] | null => null,
+        ),
       ]);
       setData(result);
+      if (statementList) setStatements(statementList);
       if (campaignList) {
         setCampaigns(campaignList);
         // Mantém a campanha escolhida com os números atualizados; some se ela deixou de estar ativa ou venceu o prazo
@@ -611,6 +637,57 @@ export default function TitheScreen() {
     }
   };
 
+  /** PDF do balancete publicado — baixa com o token da sessão e abre a folha de compartilhar. */
+  const handleStatementPdf = async (statement: PublishedStatement) => {
+    setStatementPdfBusy(true);
+    try {
+      await shareStatementPdf(statement.id, statement.monthLabel);
+    } catch (error: any) {
+      Alert.alert('Balancete', error?.message ?? 'Não foi possível gerar.');
+    } finally {
+      setStatementPdfBusy(false);
+    }
+  };
+
+  /** Receitas · Despesas · Saldo (verde/vermelho) — no card e na sheet do balancete */
+  const renderStatementTotals = (snapshot: PublishedStatement['snapshot']) => (
+    <View style={styles.statementTotals}>
+      <View style={styles.statementTotal}>
+        <Text style={styles.statementTotalLabel}>Receitas</Text>
+        <Text style={[styles.statementTotalValue, styles.statementIncome]}>{money(snapshot.income.total)}</Text>
+      </View>
+      <View style={styles.statementTotal}>
+        <Text style={styles.statementTotalLabel}>Despesas</Text>
+        <Text style={[styles.statementTotalValue, styles.statementExpense]}>{money(snapshot.expense.total)}</Text>
+      </View>
+      <View style={styles.statementTotal}>
+        <Text style={styles.statementTotalLabel}>Saldo</Text>
+        <Text style={[styles.statementTotalValue, snapshot.balance < 0 ? styles.statementExpense : styles.statementIncome]}>
+          {balanceText(snapshot.balance)}
+        </Text>
+      </View>
+    </View>
+  );
+
+  /** Bloco "nome · total" da sheet do balancete (categorias, centros de custo, campanhas) */
+  const renderStatementLines = (title: string, lines: Array<{ name: string; total: number }>) => (
+    <View style={styles.statementGroup}>
+      <Text style={styles.label}>{title}</Text>
+      {lines.length === 0 ? (
+        <Text style={styles.hint}>Nenhum lançamento no mês.</Text>
+      ) : (
+        lines.map((line, index) => (
+          <View key={`${title}-${index}`} style={styles.statementRow}>
+            <Text style={styles.statementRowName} numberOfLines={2}>
+              {line.name}
+            </Text>
+            <Text style={styles.statementRowValue}>{money(line.total)}</Text>
+          </View>
+        ))
+      )}
+    </View>
+  );
+
   const setReminder = async (day: number | null) => {
     setSavingReminder(true);
     try {
@@ -835,6 +912,15 @@ export default function TitheScreen() {
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
+        {isFinancial && (
+          <TouchableOpacity style={styles.agentBanner} activeOpacity={0.85} onPress={() => router.push('/tithe-agent' as never)}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.agentTitle}>🧾 Modo agente — registrar contribuição presencial</Text>
+              <Text style={styles.hint}>Envelope, dinheiro, maquininha, Pix visto no extrato, transferência ou cheque — em nome do fiel.</Text>
+            </View>
+            <FontAwesome5 name="chevron-right" size={14} color={colors.textTertiary} />
+          </TouchableOpacity>
+        )}
         {isLoading ? (
           <ActivityIndicator size="large" color={colors.primary} style={{ marginTop: 40 }} />
         ) : !data ? (
@@ -1083,6 +1169,43 @@ export default function TitheScreen() {
                     </View>
                   );
                 })}
+              </View>
+            )}
+
+            {statements.length > 0 && (
+              <View style={styles.card}>
+                <Text style={styles.sectionTitle}>Transparência</Text>
+                <Text style={styles.hint}>Balancetes aprovados pelo Conselho de Assuntos Econômicos</Text>
+                {(showAllStatements ? statements : statements.slice(0, STATEMENTS_PREVIEW)).map((statement) => (
+                  <TouchableOpacity
+                    key={statement.id}
+                    style={styles.statement}
+                    onPress={() => setStatementTarget(statement)}
+                    activeOpacity={0.7}
+                  >
+                    <View style={styles.rowBetween}>
+                      <Text style={styles.statementMonth}>{statement.monthLabel}</Text>
+                      <Text
+                        style={[styles.tag, statement.community ? styles.tagCampaign : styles.tagFund, styles.statementScope]}
+                        numberOfLines={1}
+                      >
+                        {statement.community?.name ?? 'Paróquia'}
+                      </Text>
+                    </View>
+                    {renderStatementTotals(statement.snapshot)}
+                    <Text style={styles.hint}>
+                      Aprovado por {statement.approvedByName} em {dateBR(statement.approvedAt)} · publicado em{' '}
+                      {dateBR(statement.publishedAt)}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+                {statements.length > STATEMENTS_PREVIEW ? (
+                  <TouchableOpacity onPress={() => setShowAllStatements((current) => !current)} hitSlop={6}>
+                    <Text style={styles.link}>
+                      {showAllStatements ? 'Ver menos' : `Ver mais (${statements.length - STATEMENTS_PREVIEW})`}
+                    </Text>
+                  </TouchableOpacity>
+                ) : null}
               </View>
             )}
 
@@ -1681,6 +1804,46 @@ export default function TitheScreen() {
         </Pressable>
       </Modal>
 
+      {/* Transparência: detalhe do balancete publicado */}
+      <Modal visible={!!statementTarget} transparent animationType="fade" onRequestClose={() => setStatementTarget(null)}>
+        <Pressable style={styles.overlay} onPress={() => setStatementTarget(null)}>
+          <Pressable style={styles.sheet} onPress={() => {}}>
+            {statementTarget && (
+              <ScrollView showsVerticalScrollIndicator={false}>
+                <Text style={styles.sheetTitle}>Balancete de {statementTarget.monthLabel}</Text>
+                <Text style={styles.sheetMeta}>
+                  {statementTarget.community?.name ?? 'Paróquia'} · aprovado por {statementTarget.approvedByName} em{' '}
+                  {dateBR(statementTarget.approvedAt)} · publicado em {dateBR(statementTarget.publishedAt)}
+                </Text>
+                {renderStatementTotals(statementTarget.snapshot)}
+                {renderStatementLines('Receitas por categoria', statementTarget.snapshot.income.byCategory ?? [])}
+                {renderStatementLines('Despesas por categoria', statementTarget.snapshot.expense.byCategory ?? [])}
+                {renderStatementLines('Despesas por centro de custo', statementTarget.snapshot.expense.byCostCenter ?? [])}
+                {(statementTarget.snapshot.campaigns ?? []).length > 0
+                  ? renderStatementLines('Campanhas', statementTarget.snapshot.campaigns)
+                  : null}
+                {statementTarget.notes ? (
+                  <View style={styles.statementGroup}>
+                    <Text style={styles.label}>Mensagem do Conselho</Text>
+                    <Text style={styles.statementNotes}>{statementTarget.notes}</Text>
+                  </View>
+                ) : null}
+                <TouchableOpacity
+                  style={[styles.primaryBtn, { marginTop: 14 }, statementPdfBusy && styles.btnDisabled]}
+                  disabled={statementPdfBusy}
+                  onPress={() => void handleStatementPdf(statementTarget)}
+                >
+                  <Text style={styles.primaryBtnText}>{statementPdfBusy ? 'Gerando...' : '📄 Baixar PDF'}</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.closeBtn} onPress={() => setStatementTarget(null)}>
+                  <Text style={styles.closeBtnText}>Fechar</Text>
+                </TouchableOpacity>
+              </ScrollView>
+            )}
+          </Pressable>
+        </Pressable>
+      </Modal>
+
       {/* Contestação */}
       <Modal visible={!!contestTarget} transparent animationType="fade" onRequestClose={() => setContestTarget(null)}>
         <Pressable style={styles.overlay} onPress={() => setContestTarget(null)}>
@@ -1720,6 +1883,9 @@ export default function TitheScreen() {
 const createStyles = (colors: ReturnType<typeof useColors>) =>
   StyleSheet.create({
     safe: { flex: 1, backgroundColor: colors.background },
+    // Modo agente (tesouraria)
+    agentBanner: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: colors.card, borderRadius: 14, borderWidth: 1, borderColor: colors.primary, padding: 14 },
+    agentTitle: { fontSize: 14, fontWeight: '800', color: colors.primary, marginBottom: 2 },
     header: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -1878,4 +2044,27 @@ const createStyles = (colors: ReturnType<typeof useColors>) =>
       backgroundColor: colors.surface,
       marginTop: 8,
     },
+    // Transparência (balancetes publicados)
+    statement: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border, paddingTop: 10, gap: 6 },
+    statementMonth: { flex: 1, fontSize: 14.5, fontWeight: '800', color: colors.text, textTransform: 'capitalize' },
+    statementScope: { flexShrink: 1, maxWidth: '55%' },
+    statementTotals: { flexDirection: 'row', gap: 8 },
+    statementTotal: { flex: 1, backgroundColor: colors.surface, borderRadius: 10, padding: 8, gap: 2 },
+    statementTotalLabel: { fontSize: 10.5, fontWeight: '700', color: colors.textTertiary, textTransform: 'uppercase' },
+    statementTotalValue: { fontSize: 13, fontWeight: '800', color: colors.text },
+    statementIncome: { color: colors.success },
+    statementExpense: { color: colors.error },
+    statementGroup: { marginTop: 10, gap: 2 },
+    statementRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 10,
+      paddingVertical: 6,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: colors.border,
+    },
+    statementRowName: { flex: 1, fontSize: 13, color: colors.text },
+    statementRowValue: { fontSize: 13, fontWeight: '700', color: colors.text },
+    statementNotes: { fontSize: 13.5, color: colors.text, lineHeight: 20, backgroundColor: colors.surface, borderRadius: 10, padding: 10, marginTop: 4 },
   });

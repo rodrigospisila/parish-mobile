@@ -290,6 +290,183 @@ export const sharePersistentQrPdf = () => downloadCatechesisPdf('/tithe/my/qr.pd
 export const shareAnnualStatement = (year: number) =>
   downloadCatechesisPdf(`/tithe/my/statement.pdf?year=${year}`, `extrato-dizimo-${year}.pdf`);
 
-/** Comprovante em PDF (só após a confirmação da tesouraria). */
-export const shareTitheReceipt = (intent: TitheIntent) =>
+/** Comprovante em PDF (só após a confirmação — vale para o fiel e para lançamentos do modo agente). */
+export const shareTitheReceipt = (intent: Pick<TitheIntent, 'id' | 'referenceMonth'>) =>
   downloadCatechesisPdf(`/tithe/intents/${intent.id}/receipt.pdf`, `comprovante-dizimo-${intent.referenceMonth}.pdf`);
+
+// ============================================
+// TRANSPARÊNCIA — balancetes publicados pela paróquia (D4.3)
+// ============================================
+
+/** Linha de resumo do balancete (por categoria ou por centro de custo) */
+export interface StatementLine {
+  name: string;
+  total: number;
+  count: number;
+}
+
+/** Lado do balancete (receitas ou despesas) com os agrupamentos */
+export interface StatementSide {
+  total: number;
+  count: number;
+  byCategory: StatementLine[];
+  byCostCenter: StatementLine[];
+}
+
+/**
+ * Balancete mensal aprovado pelo Conselho de Assuntos Econômicos e publicado aos fiéis —
+ * da paróquia inteira (communityId null) ou só da comunidade do fiel.
+ */
+export interface PublishedStatement {
+  id: string;
+  parishId: string;
+  communityId: string | null;
+  community: { id: string; name: string } | null;
+  /** 'AAAA-MM' */
+  referenceMonth: string;
+  /** Pronto para exibir: 'agosto/2026' */
+  monthLabel: string;
+  status: 'PUBLISHED';
+  snapshot: {
+    income: StatementSide;
+    expense: StatementSide;
+    /** Receitas − despesas (negativo quando gastou mais do que entrou) */
+    balance: number;
+    campaigns: Array<{ id: string; name: string; total: number }>;
+    communities: Array<{ id: string; name: string; income: number; expense: number }>;
+  };
+  /** Mensagem do Conselho aos fiéis */
+  notes: string | null;
+  approvedAt: string;
+  approvedByName: string;
+  publishedAt: string;
+}
+
+/** Balancetes publicados visíveis ao fiel (paróquia e/ou a comunidade dele), mais recentes primeiro. */
+export const getPublishedStatements = (): Promise<PublishedStatement[]> =>
+  wrap(async () => (await api.get('/finance/statements/published')).data ?? []);
+
+/** 'março/2026' → 'marco-2026': nome de arquivo seguro (sem acento nem '/') */
+const fileSlug = (value: string) =>
+  Array.from(value.normalize('NFD'))
+    // descarta os diacríticos que o NFD separa (bloco U+0300–U+036F)
+    .filter((ch) => {
+      const code = ch.codePointAt(0) ?? 0;
+      return code < 0x300 || code > 0x36f;
+    })
+    .join('')
+    .replace(/[^a-zA-Z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .toLowerCase();
+
+/** PDF do balancete — mesmo fluxo do comprovante: baixa com o token da sessão e abre a folha de compartilhar. */
+export const shareStatementPdf = (id: string, monthLabel: string) =>
+  downloadCatechesisPdf(
+    `/finance/statements/published/${id}/pdf`,
+    `balancete-${fileSlug(monthLabel) || id.slice(-8)}.pdf`,
+  );
+
+// ============================================
+// MODO AGENTE — tesouraria registra contribuição presencial (D4.2)
+// ============================================
+
+/** Papéis com acesso financeiro (modo agente) — mesma regra do backend */
+export const FINANCIAL_ROLES = ['SYSTEM_ADMIN', 'DIOCESAN_ADMIN', 'PARISH_ADMIN', 'COMMUNITY_COORDINATOR'] as const;
+
+export const isFinancialRole = (role?: string | null): boolean =>
+  !!role && (FINANCIAL_ROLES as readonly string[]).includes(role);
+
+/** Como a tesouraria recebeu a contribuição presencial */
+export type PresentialMethod = 'CASH' | 'ENVELOPE' | 'POS' | 'PIX' | 'TRANSFER' | 'CHECK';
+
+export const PRESENTIAL_METHOD_LABELS: Record<PresentialMethod, string> = {
+  CASH: 'Dinheiro',
+  ENVELOPE: 'Envelope',
+  POS: 'Maquininha',
+  PIX: 'Pix (visto no extrato)',
+  TRANSFER: 'Transferência',
+  CHECK: 'Cheque',
+};
+
+/** Fiel encontrado na busca do agente (CPF/telefone já vêm mascarados do backend) */
+export interface AgentMember {
+  id: string;
+  fullName: string;
+  community: { id: string; name: string } | null;
+  registrationNumber: string | null;
+  titherStatus: string | null;
+  cpfMasked: string | null;
+  phoneMasked: string | null;
+  lastContribution: { referenceMonth: string; amount: number; date: string; method: string } | null;
+}
+
+/** Contribuição lançada pelo agente — entra CONFIRMED na hora; CANCELLED após "desfazer" */
+export interface AgentContribution {
+  id: string;
+  status: TitheIntentStatus;
+  amount: number;
+  referenceMonth: string;
+  kind: TitheIntentKind;
+  txid?: string | null;
+  /** Um PresentialMethod; string livre por segurança (lançamentos antigos/outras origens) */
+  paymentMethod: PresentialMethod | string;
+  campaign: { id: string; name: string } | null;
+  confirmedAt: string | null;
+  member: { id: string; fullName: string };
+  /** Até 24 h, só pelo próprio agente */
+  canUndo: boolean;
+}
+
+export interface RegisterAgentContributionInput {
+  memberId: string;
+  amount: number;
+  /** Padrão TITHE; com campaignId o backend força OFFERING */
+  kind?: TitheIntentKind;
+  /** 'AAAA-MM' — padrão: mês atual */
+  referenceMonth?: string;
+  method: PresentialMethod;
+  campaignId?: string | null;
+  /** 'AAAA-MM-DD' — padrão: hoje */
+  date?: string;
+  note?: string;
+  receiptNumber?: string;
+}
+
+export type ManagedCampaignStatus = 'ACTIVE' | 'PAUSED' | 'CLOSED';
+
+/** Campanha/fundo na visão de gestão (GET /tithe/campaigns/manage) — subconjunto estável dos campos */
+export interface ManagedCampaign {
+  id: string;
+  name: string;
+  code?: string;
+  communityId: string | null;
+  community?: { id: string; name: string } | null;
+  kind: TitheCampaignKind;
+  status: ManagedCampaignStatus | string;
+  description?: string | null;
+  goalAmount?: number | null;
+  raised?: number;
+  endsAt?: string | null;
+  expired?: boolean;
+  suggestedAmounts?: number[];
+}
+
+/** Busca por nome (parte), nº de dizimista, CPF ou telefone (últimos 8 dígitos); mínimo 2 caracteres, até 20 resultados. */
+export const searchAgentMembers = (q: string): Promise<AgentMember[]> =>
+  wrap(async () => (await api.get('/tithe/agent/members', { params: { q } })).data ?? []);
+
+/** Registra na hora uma contribuição presencial em nome do fiel (já confirmada). */
+export const registerAgentContribution = (input: RegisterAgentContributionInput): Promise<AgentContribution> =>
+  wrap(async () => (await api.post('/tithe/agent/contributions', input)).data);
+
+/** Lançamentos deste agente nas últimas 48 h. */
+export const getAgentRecent = (): Promise<AgentContribution[]> =>
+  wrap(async () => (await api.get('/tithe/agent/recent')).data ?? []);
+
+/** Desfaz um lançamento próprio (até 24 h). */
+export const undoAgentContribution = (id: string): Promise<{ id: string; status: 'CANCELLED' }> =>
+  wrap(async () => (await api.post(`/tithe/agent/contributions/${id}/undo`)).data);
+
+/** Campanhas/fundos na visão de gestão (padrão: só as ativas) — seletor opcional do modo agente. */
+export const getManagedCampaigns = (status: ManagedCampaignStatus = 'ACTIVE'): Promise<ManagedCampaign[]> =>
+  wrap(async () => (await api.get('/tithe/campaigns/manage', { params: { status } })).data ?? []);
