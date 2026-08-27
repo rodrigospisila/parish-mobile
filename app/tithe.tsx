@@ -890,8 +890,22 @@ export default function TitheScreen() {
     }
   };
 
+  /** Convite para doar (D4.6): link público /doar/:paróquia — quem não tem o app doa pelo navegador. */
+  const shareDonationLink = async (url: string) => {
+    try {
+      await Share.share({
+        message: `Ajude a ${data?.parish?.name ?? 'sua paróquia'}: contribua pelo link ${url} — sem precisar de cadastro.`,
+        url,
+      });
+    } catch {
+      // usuário cancelou
+    }
+  };
+
   const parish = data?.parish;
   const enabled = !!parish?.titheEnabled;
+  // Link público de doação (D4.6): só existe com o Pix da paróquia ativo e PUBLIC_WEB_URL no servidor
+  const donationUrl = data?.donationUrl ?? null;
   // Toda a janela aceita pelo backend (+1 à frente … 12 atrás), mais recentes primeiro
   const monthOptions = data
     ? Array.from({ length: data.monthsBack + data.monthsAhead + 1 }, (_, i) => shiftMonth(data.currentMonth, data.monthsAhead - i))
@@ -1121,6 +1135,16 @@ export default function TitheScreen() {
                   Cadastre um e-mail no seu perfil para ter confirmação automática — a secretaria faz isso para você.
                 </Text>
               )}
+              {donationUrl ? (
+                <View style={styles.inviteBlock}>
+                  <TouchableOpacity style={styles.secondaryBtnSm} onPress={() => void shareDonationLink(donationUrl)}>
+                    <Text style={styles.secondaryBtnSmText}>🔗 Convidar alguém a doar</Text>
+                  </TouchableOpacity>
+                  <Text style={styles.hint}>
+                    Compartilhe com quem não tem o app: a pessoa doa pelo navegador e recebe o comprovante por e-mail.
+                  </Text>
+                </View>
+              ) : null}
             </View>
 
             {campaigns.length > 0 && (
@@ -1984,6 +2008,8 @@ const createStyles = (colors: ReturnType<typeof useColors>) =>
       marginTop: 2,
     },
     whatsappTitle: { fontSize: 13.5, fontWeight: '700', color: colors.text, marginBottom: 2 },
+    // "Convidar alguém a doar" no fim do card "Contribuir agora": um filete o separa dos avisos do pagamento
+    inviteBlock: { borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 10, marginTop: 2, gap: 8 },
     // flexBasis + wrap: campanhas podem sugerir mais de 4 valores — quebra a linha em vez de espremer
     presetRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
     preset: { flexGrow: 1, flexBasis: 70, borderWidth: 1, borderColor: colors.border, borderRadius: 10, paddingVertical: 8, alignItems: 'center' },

@@ -175,6 +175,11 @@ export interface MyTithe {
     /** Sem celular cadastrado o opt-in não liga (a secretaria cadastra no perfil do fiel) */
     hasPhone: boolean;
   };
+  /**
+   * Link público de doação da web (D4.6) — /doar/:paróquia, para quem não tem o app.
+   * null quando o Pix da paróquia está desligado ou o servidor não tem PUBLIC_WEB_URL.
+   */
+  donationUrl: string | null;
 }
 
 export interface TitheSchedule {
