@@ -88,15 +88,26 @@ const parseAmount = (text: string) => {
   return Number.isFinite(value) ? Math.round(value * 100) / 100 : 0;
 };
 const methodLabel = (method: string) => PRESENTIAL_METHOD_LABELS[method as PresentialMethod] ?? method;
+/** lastContribution.method é o rótulo livre do histórico ('PIX', 'Dinheiro', 'Envelope'…): só o Pix ganha grafia amigável */
+const historyMethodLabel = (method: string) => (method === 'PIX' ? 'Pix' : method);
+/** Rótulo de histórico de um meio presencial recém-lançado — o mesmo que o backend devolve em lastContribution.method */
+const historyMethodOf = (paymentMethod: string) => (paymentMethod === 'PIX' ? 'PIX' : methodLabel(paymentMethod));
 const titherStatusLabel = (status: string) => TITHER_STATUS_LABELS[status] ?? status;
-/** Campanha da paróquia inteira ou da comunidade do fiel — as outras não valem para ele */
-const campaignVisible = (campaign: ManagedCampaign, member: AgentMember) =>
-  !campaign.communityId || campaign.communityId === member.community?.id;
+/**
+ * Campanha que aceita lançamento para este fiel: dentro do prazo, já iniciada, da paróquia dele
+ * (quando os dois lados informam parishId) e da paróquia inteira ou da comunidade dele.
+ */
+const campaignEligible = (campaign: ManagedCampaign, member: AgentMember, now: number) => {
+  if (campaign.expired) return false;
+  if (campaign.startsAt && Date.parse(campaign.startsAt) > now) return false;
+  if (campaign.parishId && member.parishId && campaign.parishId !== member.parishId) return false;
+  return !campaign.communityId || campaign.communityId === member.community?.id;
+};
 const kindText = (item: AgentContribution) =>
   item.campaign ? `Oferta · ${item.campaign.name}` : item.kind === 'TITHE' ? `Dízimo · ${monthLabel(item.referenceMonth)}` : 'Oferta';
 const lastContributionText = (member: AgentMember) =>
   member.lastContribution
-    ? `Última: ${money(member.lastContribution.amount)} · ${monthLabel(member.lastContribution.referenceMonth, true)} · ${methodLabel(member.lastContribution.method)} · ${dateBR(member.lastContribution.date)}`
+    ? `Última: ${money(member.lastContribution.amount)} · ${monthLabel(member.lastContribution.referenceMonth, true)} · ${historyMethodLabel(member.lastContribution.method)} · ${dateBR(member.lastContribution.date)}`
     : 'Nenhuma contribuição registrada';
 
 /**
@@ -148,7 +159,8 @@ export default function TitheAgentScreen() {
 
   /** Com campanha escolhida, a contribuição é sempre oferta (o backend também força) */
   const effectiveKind: TitheIntentKind = campaignTarget ? 'OFFERING' : kind;
-  const visibleCampaigns = member ? campaigns.filter((c) => campaignVisible(c, member) && !c.expired) : [];
+  const now = Date.now();
+  const visibleCampaigns = member ? campaigns.filter((c) => campaignEligible(c, member, now)) : [];
 
   const load = useCallback(
     async (refresh = false) => {
@@ -285,7 +297,7 @@ export default function TitheAgentScreen() {
                 referenceMonth: result.referenceMonth,
                 amount: result.amount,
                 date: result.confirmedAt ?? new Date().toISOString(),
-                method: result.paymentMethod,
+                method: historyMethodOf(result.paymentMethod),
               },
             }
           : current,
@@ -314,6 +326,21 @@ export default function TitheAgentScreen() {
     }
   };
 
+  /**
+   * Depois de desfazer o lançamento que o card do fiel mostrava como "Última": busca o fiel de novo para trazer a
+   * última contribuição real (best-effort — sem resposta, limpa para não exibir o lançamento desfeito).
+   */
+  const refreshLastContribution = async (selected: AgentMember) => {
+    const q = (selected.registrationNumber ?? selected.fullName).trim();
+    let fresh: AgentMember | undefined;
+    try {
+      fresh = q.length >= SEARCH_MIN_CHARS ? (await searchAgentMembers(q)).find((m) => m.id === selected.id) : undefined;
+    } catch {
+      fresh = undefined;
+    }
+    setMember((current) => (current && current.id === selected.id ? (fresh ?? { ...current, lastContribution: null }) : current));
+  };
+
   const handleUndo = (item: AgentContribution) => {
     Alert.alert(
       'Desfazer lançamento?',
@@ -329,6 +356,11 @@ export default function TitheAgentScreen() {
               await undoAgentContribution(item.id);
               setRecent((list) => list.map((r) => (r.id === item.id ? { ...r, status: 'CANCELLED', canUndo: false } : r)));
               if (done?.id === item.id) setDone(null);
+              // O card do fiel selecionado mostrava este lançamento como "Última"? Atualiza para não exibir o desfeito
+              const last = member?.lastContribution;
+              if (member && last && member.id === item.member.id && last.referenceMonth === item.referenceMonth && last.amount === item.amount) {
+                await refreshLastContribution(member);
+              }
               await load();
             } catch (error: any) {
               Alert.alert('Desfazer', error?.message ?? 'Não foi possível desfazer.');
@@ -587,8 +619,8 @@ export default function TitheAgentScreen() {
                       })}
                     </View>
                     <Text style={styles.hint}>
-                      Só as campanhas da paróquia inteira ou da comunidade do fiel. Ao escolher, o lançamento vira oferta
-                      com finalidade.
+                      Só campanhas em andamento da paróquia inteira ou da comunidade do fiel. Ao escolher, o lançamento vira
+                      oferta com finalidade.
                     </Text>
                   </>
                 ) : null}
@@ -628,6 +660,9 @@ export default function TitheAgentScreen() {
 
           <View style={styles.card}>
             <Text style={styles.sectionTitle}>Lançados por mim (48 h)</Text>
+            {recent.length > 0 ? (
+              <Text style={styles.hint}>Dá para desfazer em até 24 h depois do lançamento; os mais antigos ficam só para consulta.</Text>
+            ) : null}
             {recentLoading ? (
               <ActivityIndicator color={colors.primary} style={{ marginTop: 8 }} />
             ) : recent.length === 0 ? (

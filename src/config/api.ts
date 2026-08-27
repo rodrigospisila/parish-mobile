@@ -1,5 +1,7 @@
 import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Platform } from 'react-native';
+import * as Device from 'expo-device';
 
 // ============================================
 // CONFIGURAÇÃO
@@ -19,6 +21,83 @@ export const STORAGE_KEYS = {
   ACCESS_TOKEN: '@parish:access_token',
   REFRESH_TOKEN: '@parish:refresh_token',
   USER: '@parish:user',
+  DEVICE_ID: '@parish:device_id',
+};
+
+// ============================================
+// IDENTIFICAÇÃO DO DISPOSITIVO (Dízimo D4.7 — governança de acesso)
+// ============================================
+
+/**
+ * Gera um identificador aleatório (hex, 32 caracteres). Usa crypto.randomUUID
+ * quando disponível; senão cai em Math.random — suficiente para distinguir
+ * aparelhos (não é segredo, é só um rótulo estável por instalação).
+ */
+const generateDeviceId = (): string => {
+  const cryptoObj = (globalThis as any)?.crypto;
+  if (cryptoObj && typeof cryptoObj.randomUUID === 'function') {
+    try {
+      return String(cryptoObj.randomUUID()).replace(/-/g, '');
+    } catch {
+      // cai no fallback abaixo
+    }
+  }
+  let id = '';
+  for (let i = 0; i < 32; i++) {
+    id += Math.floor(Math.random() * 16).toString(16);
+  }
+  return id;
+};
+
+let deviceIdPromise: Promise<string> | null = null;
+
+/**
+ * Obtém o ID do dispositivo (gerado uma única vez e persistido no AsyncStorage,
+ * ao lado dos tokens). Sobrevive a logout — `clearTokens` não o remove — para
+ * que o backend reconheça o mesmo aparelho em logins futuros.
+ */
+export const getDeviceId = async (): Promise<string> => {
+  if (!deviceIdPromise) {
+    deviceIdPromise = (async () => {
+      try {
+        const stored = await AsyncStorage.getItem(STORAGE_KEYS.DEVICE_ID);
+        if (stored) return stored;
+        const fresh = generateDeviceId();
+        await AsyncStorage.setItem(STORAGE_KEYS.DEVICE_ID, fresh);
+        return fresh;
+      } catch (error) {
+        console.error('Erro ao obter ID do dispositivo:', error);
+        // Sem storage, usa um ID efêmero (válido só nesta execução)
+        return generateDeviceId();
+      }
+    })();
+  }
+  return deviceIdPromise;
+};
+
+/**
+ * Nome legível do aparelho (ex.: "iPhone 15", "SM-G991B"). Cabeçalhos HTTP
+ * só aceitam ASCII imprimível, então caracteres fora disso são descartados.
+ */
+export const getDeviceName = (): string => {
+  const raw = Device.modelName ?? Platform.OS;
+  const ascii = String(raw)
+    .replace(/[^\x20-\x7E]/g, '')
+    .trim()
+    .slice(0, 64);
+  return ascii || Platform.OS;
+};
+
+/**
+ * Cabeçalhos de identificação do dispositivo enviados em TODAS as requisições
+ * (inclusive login e refresh) — o backend usa para reconhecer "novo aparelho".
+ */
+export const getDeviceHeaders = async (): Promise<Record<string, string>> => {
+  const deviceId = await getDeviceId();
+  return {
+    'X-Device-Id': deviceId,
+    'X-Device-Name': getDeviceName(),
+  };
 };
 
 // ============================================
@@ -165,21 +244,41 @@ const processQueue = (error: any, token: string | null = null) => {
 };
 
 /**
- * Interceptor de request: adiciona o token JWT em todas as requisições
+ * Rotas que não exigem sessão (sem Bearer e sem tentativa de refresh no 401 —
+ * um 401 aqui significa credencial/código inválido, não sessão expirada).
+ */
+const PUBLIC_ROUTES = [
+  '/auth/login',
+  '/auth/2fa/login',
+  '/auth/register',
+  '/auth/refresh',
+  '/auth/forgot-password',
+  '/auth/reset-password',
+  '/auth/otp/send',
+  '/auth/otp/verify',
+];
+
+const isPublicRoute = (url?: string): boolean =>
+  !!url && PUBLIC_ROUTES.some((route) => url.includes(route));
+
+/**
+ * Interceptor de request: adiciona o token JWT e os cabeçalhos de dispositivo
+ * em todas as requisições
  */
 api.interceptors.request.use(
   async (config: InternalAxiosRequestConfig) => {
-    // Não adicionar token em rotas públicas
-    const publicRoutes = [
-      '/auth/login',
-      '/auth/register',
-      '/auth/refresh',
-      '/auth/forgot-password',
-      '/auth/reset-password',
-    ];
-    const isPublicRoute = publicRoutes.some((route) => config.url?.includes(route));
+    // Identificação do aparelho — vai em todas as requisições
+    try {
+      const deviceHeaders = await getDeviceHeaders();
+      Object.entries(deviceHeaders).forEach(([key, value]) => {
+        config.headers.set(key, value);
+      });
+    } catch {
+      // identificação do aparelho nunca pode bloquear a requisição
+    }
 
-    if (!isPublicRoute) {
+    // Não adicionar token em rotas públicas
+    if (!isPublicRoute(config.url)) {
       const token = await getAccessToken();
       if (token) {
         config.headers.Authorization = `Bearer ${token}`;
@@ -222,6 +321,13 @@ api.interceptors.response.use(
         return Promise.reject(error);
       }
 
+      // Rotas públicas (login, 2FA, registro...): o 401 é "credencial inválida",
+      // não sessão expirada. Devolve o erro original para a tela mostrar a
+      // mensagem da API em vez de tentar um refresh sem sessão.
+      if (isPublicRoute(originalRequest.url)) {
+        return Promise.reject(error);
+      }
+
       // Se já está fazendo refresh, adiciona à fila
       if (isRefreshing) {
         return new Promise((resolve, reject) => {
@@ -246,10 +352,13 @@ api.interceptors.response.use(
           throw new Error('No refresh token available');
         }
 
-        // Tenta renovar o token
-        const response = await axios.post(`${API_URL}/auth/refresh`, {
-          refreshToken,
-        });
+        // Tenta renovar o token (com os cabeçalhos de dispositivo — o backend
+        // pode vincular o refresh token ao aparelho)
+        const response = await axios.post(
+          `${API_URL}/auth/refresh`,
+          { refreshToken },
+          { headers: await getDeviceHeaders() },
+        );
 
         const { accessToken: newAccessToken, refreshToken: newRefreshToken } = response.data;
 

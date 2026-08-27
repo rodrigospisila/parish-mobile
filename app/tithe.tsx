@@ -21,7 +21,7 @@ import {
   LayoutChangeEvent,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Stack, useRouter } from 'expo-router';
+import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import { FontAwesome5 } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
@@ -172,6 +172,9 @@ const campaignPresets = (campaign: TitheCampaign | null) =>
  */
 export default function TitheScreen() {
   const router = useRouter();
+  // Deep link do push "balancete publicado" (finance-statement): ?statementId=… abre a sheet assim que a lista chegar
+  const params = useLocalSearchParams();
+  const linkedStatementId = typeof params.statementId === 'string' ? params.statementId : null;
   const colors = useColors();
   const styles = createStyles(colors);
   const { user } = useAuth();
@@ -219,6 +222,8 @@ export default function TitheScreen() {
   const [showAllStatements, setShowAllStatements] = useState(false);
   const [statementTarget, setStatementTarget] = useState<PublishedStatement | null>(null);
   const [statementPdfBusy, setStatementPdfBusy] = useState(false);
+  // Balancete já aberto pelo deep link — não reabre a cada recarga da lista (pull-to-refresh, foco)
+  const openedStatementRef = useRef<string | null>(null);
   const scrollRef = useRef<ScrollView>(null);
   // Posição do card "Contribuir agora" dentro do ScrollView — para rolar até ele ao tocar em "Contribuir"
   const contributeY = useRef(0);
@@ -275,6 +280,15 @@ export default function TitheScreen() {
   useEffect(() => {
     if (payMethod !== 'PIX' && !(gatewayMethods ?? []).includes(payMethod)) setPayMethod('PIX');
   }, [gatewayMethods, payMethod]);
+
+  // Push "balancete publicado" (finance-statement + statementId): abre a sheet do balancete uma única vez, quando a lista chegar
+  useEffect(() => {
+    if (!linkedStatementId || openedStatementRef.current === linkedStatementId) return;
+    const linked = statements.find((statement) => statement.id === linkedStatementId);
+    if (!linked) return;
+    openedStatementRef.current = linkedStatementId;
+    setStatementTarget(linked);
+  }, [linkedStatementId, statements]);
 
   // "1.234,56" → 1234.56 · "1.000" → 1000 · "50.00" → 50 · ",5" → 0.5
   const parseAmount = (text: string) => {
@@ -1221,43 +1235,50 @@ export default function TitheScreen() {
               </View>
             )}
 
-            {statements.length > 0 && (
-              <View style={styles.card}>
-                <Text style={styles.sectionTitle}>Transparência</Text>
-                <Text style={styles.hint}>Balancetes aprovados pelo Conselho de Assuntos Econômicos</Text>
-                {(showAllStatements ? statements : statements.slice(0, STATEMENTS_PREVIEW)).map((statement) => (
-                  <TouchableOpacity
-                    key={statement.id}
-                    style={styles.statement}
-                    onPress={() => setStatementTarget(statement)}
-                    activeOpacity={0.7}
-                  >
-                    <View style={styles.rowBetween}>
-                      <Text style={styles.statementMonth}>{statement.monthLabel}</Text>
-                      <Text
-                        style={[styles.tag, statement.community ? styles.tagCampaign : styles.tagFund, styles.statementScope]}
-                        numberOfLines={1}
-                      >
-                        {statement.community?.name ?? 'Paróquia'}
-                      </Text>
-                    </View>
-                    {renderStatementTotals(statement.snapshot)}
-                    <Text style={styles.hint}>
-                      Aprovado por {statement.approvedByName} em {dateBR(statement.approvedAt)} · publicado em{' '}
-                      {dateBR(statement.publishedAt)}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-                {statements.length > STATEMENTS_PREVIEW ? (
-                  <TouchableOpacity onPress={() => setShowAllStatements((current) => !current)} hitSlop={6}>
-                    <Text style={styles.link}>
-                      {showAllStatements ? 'Ver menos' : `Ver mais (${statements.length - STATEMENTS_PREVIEW})`}
-                    </Text>
-                  </TouchableOpacity>
-                ) : null}
-              </View>
-            )}
+          </>
+        )}
 
+        {/* Transparência: qualquer fiel vê os balancetes publicados — inclusive quando a paróquia não ativou o Pix pelo app */}
+        {data && statements.length > 0 && (
+          <View style={styles.card}>
+            <Text style={styles.sectionTitle}>Transparência</Text>
+            <Text style={styles.hint}>Balancetes aprovados pelo Conselho de Assuntos Econômicos</Text>
+            {(showAllStatements ? statements : statements.slice(0, STATEMENTS_PREVIEW)).map((statement) => (
+              <TouchableOpacity
+                key={statement.id}
+                style={styles.statement}
+                onPress={() => setStatementTarget(statement)}
+                activeOpacity={0.7}
+              >
+                <View style={styles.rowBetween}>
+                  <Text style={styles.statementMonth}>{statement.monthLabel}</Text>
+                  <Text
+                    style={[styles.tag, statement.community ? styles.tagCampaign : styles.tagFund, styles.statementScope]}
+                    numberOfLines={1}
+                  >
+                    {statement.community?.name ?? 'Paróquia'}
+                  </Text>
+                </View>
+                {renderStatementTotals(statement.snapshot)}
+                <Text style={styles.hint}>
+                  Aprovado por {statement.approvedByName} em {dateBR(statement.approvedAt)} · publicado em{' '}
+                  {dateBR(statement.publishedAt)}
+                </Text>
+              </TouchableOpacity>
+            ))}
+            {statements.length > STATEMENTS_PREVIEW ? (
+              <TouchableOpacity onPress={() => setShowAllStatements((current) => !current)} hitSlop={6}>
+                <Text style={styles.link}>
+                  {showAllStatements ? 'Ver menos' : `Ver mais (${statements.length - STATEMENTS_PREVIEW})`}
+                </Text>
+              </TouchableOpacity>
+            ) : null}
+          </View>
+        )}
+
+        {/* Só com o Pix da paróquia ativo: dízimo automático, lembrete, QR fixo, pagamentos e contribuições */}
+        {data && enabled && (
+          <>
             {(data.gateway?.recurringAvailable || data.schedule) && (
               <View style={styles.card}>
                 <Text style={styles.sectionTitle}>Dízimo automático</Text>

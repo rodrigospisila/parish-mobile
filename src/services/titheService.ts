@@ -314,9 +314,29 @@ export const sharePersistentQrPdf = () => downloadCatechesisPdf('/tithe/my/qr.pd
 export const shareAnnualStatement = (year: number) =>
   downloadCatechesisPdf(`/tithe/my/statement.pdf?year=${year}`, `extrato-dizimo-${year}.pdf`);
 
-/** Comprovante em PDF (só após a confirmação — vale para o fiel e para lançamentos do modo agente). */
-export const shareTitheReceipt = (intent: Pick<TitheIntent, 'id' | 'referenceMonth'>) =>
-  downloadCatechesisPdf(`/tithe/intents/${intent.id}/receipt.pdf`, `comprovante-dizimo-${intent.referenceMonth}.pdf`);
+/** 'março/2026' → 'marco-2026': nome de arquivo seguro (sem acento nem '/') */
+const fileSlug = (value: string) =>
+  Array.from(value.normalize('NFD'))
+    // descarta os diacríticos que o NFD separa (bloco U+0300–U+036F)
+    .filter((ch) => {
+      const code = ch.codePointAt(0) ?? 0;
+      return code < 0x300 || code > 0x36f;
+    })
+    .join('')
+    .replace(/[^a-zA-Z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .toLowerCase();
+
+/**
+ * Comprovante em PDF (só após a confirmação — vale para o fiel e para lançamentos do modo agente).
+ * Com txid o nome do arquivo fica único ("comprovante-dizimo-2026-08-par123.pdf"): dois lançamentos
+ * do mesmo mês não se sobrescrevem na pasta de downloads.
+ */
+export const shareTitheReceipt = (intent: Pick<TitheIntent, 'id' | 'referenceMonth'> & { txid?: string | null }) =>
+  downloadCatechesisPdf(
+    `/tithe/intents/${intent.id}/receipt.pdf`,
+    `comprovante-dizimo-${intent.referenceMonth}${intent.txid ? `-${fileSlug(intent.txid)}` : ''}.pdf`,
+  );
 
 // ============================================
 // TRANSPARÊNCIA — balancetes publicados pela paróquia (D4.3)
@@ -370,19 +390,6 @@ export interface PublishedStatement {
 export const getPublishedStatements = (): Promise<PublishedStatement[]> =>
   wrap(async () => (await api.get('/finance/statements/published')).data ?? []);
 
-/** 'março/2026' → 'marco-2026': nome de arquivo seguro (sem acento nem '/') */
-const fileSlug = (value: string) =>
-  Array.from(value.normalize('NFD'))
-    // descarta os diacríticos que o NFD separa (bloco U+0300–U+036F)
-    .filter((ch) => {
-      const code = ch.codePointAt(0) ?? 0;
-      return code < 0x300 || code > 0x36f;
-    })
-    .join('')
-    .replace(/[^a-zA-Z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .toLowerCase();
-
 /** PDF do balancete — mesmo fluxo do comprovante: baixa com o token da sessão e abre a folha de compartilhar. */
 export const shareStatementPdf = (id: string, monthLabel: string) =>
   downloadCatechesisPdf(
@@ -416,11 +423,14 @@ export const PRESENTIAL_METHOD_LABELS: Record<PresentialMethod, string> = {
 export interface AgentMember {
   id: string;
   fullName: string;
+  /** Paróquia do fiel (via community.parishId) — null sem comunidade; filtra as campanhas elegíveis */
+  parishId: string | null;
   community: { id: string; name: string } | null;
   registrationNumber: string | null;
   titherStatus: string | null;
   cpfMasked: string | null;
   phoneMasked: string | null;
+  /** method é o rótulo livre do histórico ('PIX', 'Dinheiro', 'Envelope'…), não um PresentialMethod */
   lastContribution: { referenceMonth: string; amount: number; date: string; method: string } | null;
 }
 
@@ -431,6 +441,7 @@ export interface AgentContribution {
   amount: number;
   referenceMonth: string;
   kind: TitheIntentKind;
+  /** Identificador do lançamento (vem no registro e em GET /tithe/agent/recent) — entra no nome do comprovante */
   txid?: string | null;
   /** Um PresentialMethod; string livre por segurança (lançamentos antigos/outras origens) */
   paymentMethod: PresentialMethod | string;
@@ -461,8 +472,10 @@ export type ManagedCampaignStatus = 'ACTIVE' | 'PAUSED' | 'CLOSED';
 /** Campanha/fundo na visão de gestão (GET /tithe/campaigns/manage) — subconjunto estável dos campos */
 export interface ManagedCampaign {
   id: string;
+  parishId: string;
   name: string;
   code?: string;
+  /** null = paróquia inteira */
   communityId: string | null;
   community?: { id: string; name: string } | null;
   kind: TitheCampaignKind;
@@ -470,8 +483,11 @@ export interface ManagedCampaign {
   description?: string | null;
   goalAmount?: number | null;
   raised?: number;
+  /** No futuro = ainda não começou; só a partir daí aceita lançamentos */
+  startsAt: string | null;
   endsAt?: string | null;
-  expired?: boolean;
+  /** Prazo encerrado: a gestão ainda lista, mas não recebe novos lançamentos */
+  expired: boolean;
   suggestedAmounts?: number[];
 }
 

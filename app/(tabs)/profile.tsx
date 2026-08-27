@@ -254,6 +254,17 @@ export default function ProfileScreen() {
               </View>
             </TouchableOpacity>
             <View style={styles.divider} />
+            {/* Governança de acesso (D4.7): 2FA e dispositivos conhecidos */}
+            <TouchableOpacity style={styles.infoRow} onPress={() => router.push('/security' as never)}>
+              <Text style={styles.infoLabel}>Segurança</Text>
+              <View style={styles.infoValueLink}>
+                <Text style={[styles.infoValue, { color: colors.primary }]} numberOfLines={1}>
+                  {user?.twoFactorEnabled ? 'Duas etapas ativas' : 'Duas etapas e dispositivos'}
+                </Text>
+                <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />
+              </View>
+            </TouchableOpacity>
+            <View style={styles.divider} />
             <TouchableOpacity
               style={styles.infoRow}
               onPress={() => router.push('/change-community' as never)}

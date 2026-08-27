@@ -47,6 +47,8 @@ export interface User {
   /** IDs das pastorais da comunidade em que o usuário é membro ativo */
   pastoralIds?: string[];
   pastorals?: UserPastoral[];
+  /** Segundo fator (TOTP) ativo — governança de acesso (D4.7) */
+  twoFactorEnabled?: boolean;
 }
 
 /**
@@ -56,7 +58,24 @@ export interface AuthResponse {
   user: User;
   accessToken: string;
   refreshToken: string;
+  /** true quando é o primeiro acesso da conta neste aparelho */
+  newDevice?: boolean;
 }
+
+/**
+ * Resposta do login quando a conta tem 2FA ativo: o servidor NÃO emite tokens;
+ * o app precisa concluir com o código do autenticador (POST /auth/2fa/login).
+ */
+export interface TwoFactorChallenge {
+  requiresTwoFactor: true;
+  challengeToken: string;
+  user: Pick<User, 'id' | 'email' | 'name'>;
+}
+
+export type LoginResult = AuthResponse | TwoFactorChallenge;
+
+export const isTwoFactorChallenge = (result: LoginResult): result is TwoFactorChallenge =>
+  (result as TwoFactorChallenge).requiresTwoFactor === true;
 
 /**
  * Dados para login
@@ -141,9 +160,11 @@ const mockUsers: Record<string, { user: User; password: string }> = {
 
 export const authService = {
   /**
-   * Realiza login do usuário
+   * Realiza login do usuário.
+   * Pode devolver um desafio de segundo fator (sem tokens) — nesse caso nada
+   * é salvo e o chamador deve concluir com `loginWithTwoFactor`.
    */
-  async login(data: LoginData): Promise<AuthResponse> {
+  async login(data: LoginData): Promise<LoginResult> {
     // Modo Mock
     if (USE_MOCK) {
       return mockLogin(data);
@@ -151,10 +172,40 @@ export const authService = {
 
     // Chamada real para a API
     try {
-      const response = await api.post<AuthResponse>('/auth/login', data);
+      const response = await api.post<LoginResult>('/auth/login', data);
+
+      if (isTwoFactorChallenge(response.data)) {
+        return response.data;
+      }
+
       const { user, accessToken, refreshToken } = response.data;
 
       // Salva os tokens e usuário no AsyncStorage
+      await saveTokens(accessToken, refreshToken);
+      await saveUser(user);
+
+      return response.data;
+    } catch (error) {
+      throw new Error(getErrorMessage(error));
+    }
+  },
+
+  /**
+   * Segunda etapa do login (2FA): código do autenticador ou de recuperação.
+   * 401 = código inválido ou desafio expirado (5 min).
+   */
+  async loginWithTwoFactor(challengeToken: string, code: string): Promise<AuthResponse> {
+    if (USE_MOCK) {
+      throw new Error('Segundo fator não disponível no modo Mock');
+    }
+
+    try {
+      const response = await api.post<AuthResponse>('/auth/2fa/login', {
+        challengeToken,
+        code: code.trim(),
+      });
+      const { user, accessToken, refreshToken } = response.data;
+
       await saveTokens(accessToken, refreshToken);
       await saveUser(user);
 

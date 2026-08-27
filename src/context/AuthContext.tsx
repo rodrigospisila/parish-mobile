@@ -4,8 +4,10 @@ import {
   User,
   AuthResponse,
   LoginData,
+  LoginResult,
   RegisterData,
-  authService
+  authService,
+  isTwoFactorChallenge,
 } from '../services/authService';
 import {
   getStoredUser,
@@ -19,6 +21,14 @@ import {
 // TIPOS
 // ============================================
 
+/**
+ * Resultado do login (D4.7): ou a sessão foi aberta, ou a conta tem 2FA e a
+ * tela precisa pedir o código para concluir com `completeTwoFactorSignIn`.
+ */
+export type SignInResult =
+  | { requiresTwoFactor: true; challengeToken: string }
+  | { requiresTwoFactor: false; newDevice: boolean };
+
 interface AuthContextType {
   /** Usuário autenticado */
   user: User | null;
@@ -28,8 +38,10 @@ interface AuthContextType {
   isAuthenticated: boolean;
   /** Indica se o usuário tem uma comunidade selecionada */
   hasCommunity: boolean;
-  /** Realiza login */
-  signIn: (data: LoginData) => Promise<void>;
+  /** Realiza login (pode devolver um desafio de segundo fator) */
+  signIn: (data: LoginData) => Promise<SignInResult>;
+  /** Conclui o login com o código do autenticador / de recuperação */
+  completeTwoFactorSignIn: (challengeToken: string, code: string) => Promise<SignInResult>;
   /** Realiza logout */
   signOut: () => Promise<void>;
   /** Registra novo usuário */
@@ -149,17 +161,37 @@ export function AuthProvider({ children }: AuthProviderProps) {
   // ============================================
 
   /**
-   * Realiza login do usuário
+   * Realiza login do usuário. Se a conta tiver 2FA, NÃO abre sessão — devolve
+   * o desafio para a tela pedir o código.
    */
-  const signIn = useCallback(async (data: LoginData): Promise<void> => {
+  const signIn = useCallback(async (data: LoginData): Promise<SignInResult> => {
     try {
-      const response: AuthResponse = await authService.login(data);
-      setUser(response.user);
+      const result: LoginResult = await authService.login(data);
+
+      if (isTwoFactorChallenge(result)) {
+        return { requiresTwoFactor: true, challengeToken: result.challengeToken };
+      }
+
+      setUser(result.user);
+      return { requiresTwoFactor: false, newDevice: !!result.newDevice };
     } catch (error) {
       // Re-throw para que o componente possa tratar
       throw error;
     }
   }, []);
+
+  /**
+   * Segunda etapa do login (2FA) — ao validar o código, abre a sessão
+   * exatamente como o login normal.
+   */
+  const completeTwoFactorSignIn = useCallback(
+    async (challengeToken: string, code: string): Promise<SignInResult> => {
+      const response: AuthResponse = await authService.loginWithTwoFactor(challengeToken, code);
+      setUser(response.user);
+      return { requiresTwoFactor: false, newDevice: !!response.newDevice };
+    },
+    [],
+  );
 
   /**
    * Registra um novo usuário
@@ -245,6 +277,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
         isAuthenticated,
         hasCommunity,
         signIn,
+        completeTwoFactorSignIn,
         signOut,
         register,
         updateUser,
