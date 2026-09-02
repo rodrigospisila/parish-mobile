@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -63,7 +63,23 @@ export default function CatechesisApplyScreen() {
   // Filtros de ano e etapa (na virada, 2026 e 2027 convivem na lista)
   const [yearFilter, setYearFilter] = useState<number | null>(null);
   const [stageFilter, setStageFilter] = useState<string | null>(null);
+  // Defaults dos filtros só na primeira carga por comunidade — reexecuções do
+  // load (refoco) não podem descartar a escolha do usuário
+  const defaultsAppliedFor = useRef<string | null>(null);
   const [who, setWho] = useState<Who>({ kind: 'self' });
+
+  // Turma selecionada que sai da lista visível (filtro mudou) é desmarcada —
+  // sem isso o envio ia para uma turma que o usuário nem está vendo
+  useEffect(() => {
+    setSelectedClass((prev) => {
+      if (!prev) return prev;
+      const visible =
+        classes.some((k) => k.classId === prev.classId) &&
+        (yearFilter === null || prev.year === yearFilter) &&
+        (stageFilter === null || prev.stage.name === stageFilter);
+      return visible ? prev : null;
+    });
+  }, [classes, yearFilter, stageFilter]);
   const [childName, setChildName] = useState('');
   const [childBirth, setChildBirth] = useState('');
   const [consent, setConsent] = useState(false);
@@ -78,11 +94,16 @@ export default function CatechesisApplyScreen() {
         getMyDependents().catch(() => [] as MyDependent[]),
       ]);
       setClasses(openClasses);
-      // Padrão do filtro: o MAIOR ano disponível (o ano novo, quando o
-      // coordenador já abriu as turmas dele)
-      const years = [...new Set(openClasses.map((klass) => klass.year))];
-      setYearFilter(years.length > 1 ? Math.max(...years) : null);
-      setStageFilter(null);
+      // Seleção re-resolvida contra a lista nova (turma pode ter saído)
+      setSelectedClass((prev) => (prev ? openClasses.find((k) => k.classId === prev.classId) ?? null : null));
+      // Padrão do filtro (só na primeira carga desta comunidade): o MAIOR ano
+      // disponível — o ano novo, quando o coordenador já abriu as turmas dele
+      if (defaultsAppliedFor.current !== (activeCommunityId ?? '')) {
+        const years = [...new Set(openClasses.map((klass) => klass.year))];
+        setYearFilter(years.length > 1 ? Math.max(...years) : null);
+        setStageFilter(null);
+        defaultsAppliedFor.current = activeCommunityId ?? '';
+      }
       setDependents(myDependents);
       if (presetMemberId) {
         const preset = myDependents.find((dependent) => dependent.id === presetMemberId);
@@ -245,7 +266,10 @@ export default function CatechesisApplyScreen() {
                   )}
                   {visible.map((klass) => {
                     const full = klass.openSpots !== null && klass.openSpots <= 0;
-                    const mode = klass.acceptingMode ?? (full ? 'WAITLIST' : 'OPEN');
+                    // Fallback CONSERVADOR: sem o campo (backend antigo), turma
+                    // cheia volta ao comportamento antigo (desabilitada) — não
+                    // prometer fila que o servidor vai recusar
+                    const mode = klass.acceptingMode ?? (full ? 'FULL_CLOSED' : 'OPEN');
                     const blocked = mode === 'FULL_CLOSED';
                     const selected = selectedClass?.classId === klass.classId;
                     return (
@@ -360,7 +384,7 @@ export default function CatechesisApplyScreen() {
               <Text style={styles.primaryBtnText}>
                 {submitting
                   ? 'Enviando...'
-                  : selectedClass && selectedClass.openSpots !== null && selectedClass.openSpots <= 0
+                  : selectedClass && selectedClass.acceptingMode === 'WAITLIST'
                     ? 'Entrar na fila de espera'
                     : 'Enviar inscrição'}
               </Text>
