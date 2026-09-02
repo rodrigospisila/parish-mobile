@@ -60,6 +60,7 @@ export type CatechesisEnrollmentStatus =
   | 'COMPLETED'
   | 'DROPPED_OUT'
   | 'PENDING_APPROVAL'
+  | 'WAITLISTED'
   | 'REJECTED';
 
 export interface CatechesisStudentReport {
@@ -110,6 +111,8 @@ export interface FamilyCatechesisItem {
   member: { id: string; fullName: string; isSelf: boolean };
   status: CatechesisEnrollmentStatus;
   pendingDocuments?: string | null;
+  /** Fila de espera: posição por ordem de chegada (1 = próximo) */
+  waitlistPosition?: number | null;
   attendanceRate: number | null;
   sessions: number;
   class: {
@@ -260,6 +263,9 @@ export interface CatechesisOpenClass {
   occupied: number;
   /** null = sem limite de vagas */
   openSpots: number | null;
+  /** OPEN = tem vaga · WAITLIST = cheia com fila de espera · FULL_CLOSED = cheia e bloqueada */
+  acceptingMode?: 'OPEN' | 'WAITLIST' | 'FULL_CLOSED';
+  waitlistCount?: number;
 }
 
 export interface MyDependent {
@@ -298,7 +304,7 @@ export const applyCatechesis = async (dto: {
   forMemberId?: string;
   newChild?: { fullName: string; birthDate?: string };
   consentGiven: boolean;
-}): Promise<{ id: string }> => {
+}): Promise<{ id: string; status?: string }> => {
   try {
     const { data } = await api.post('/catechesis/apply', dto);
     return data;

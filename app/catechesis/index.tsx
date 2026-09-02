@@ -342,7 +342,10 @@ export default function CatechesisClassesScreen() {
                       style={[
                         styles.roleChip,
                         item.status === 'COMPLETED' && { color: colors.success, borderColor: colors.success },
-                        item.status === 'PENDING_APPROVAL' && { color: colors.warning, borderColor: colors.warning },
+                        (item.status === 'PENDING_APPROVAL' || item.status === 'WAITLISTED') && {
+                          color: colors.warning,
+                          borderColor: colors.warning,
+                        },
                         item.status === 'REJECTED' && { color: colors.error, borderColor: colors.error },
                       ]}
                     >
@@ -350,9 +353,11 @@ export default function CatechesisClassesScreen() {
                         ? 'Concluído'
                         : item.status === 'PENDING_APPROVAL'
                           ? 'Aguardando aprovação'
-                          : item.status === 'REJECTED'
-                            ? 'Não aprovada'
-                            : 'Ativo'}
+                          : item.status === 'WAITLISTED'
+                            ? `Fila de espera${item.waitlistPosition ? ` · nº ${item.waitlistPosition}` : ''}`
+                            : item.status === 'REJECTED'
+                              ? 'Não aprovada'
+                              : 'Ativo'}
                     </Text>
                   </View>
                   <Text style={styles.cardStage} numberOfLines={1}>
@@ -399,6 +404,12 @@ export default function CatechesisClassesScreen() {
                       </TouchableOpacity>
                     ) : null}
                   </View>
+                  {item.status === 'WAITLISTED' && (
+                    <Text style={styles.pendingLine} numberOfLines={3}>
+                      ⏳ A turma estava cheia — o pedido está na fila de espera. A coordenação pode
+                      abrir uma vaga; você recebe o aviso por aqui.
+                    </Text>
+                  )}
                   {item.status === 'REJECTED' && (
                     <>
                       {item.rejectionReason ? (

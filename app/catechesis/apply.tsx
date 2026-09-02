@@ -60,6 +60,9 @@ export default function CatechesisApplyScreen() {
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const [selectedClass, setSelectedClass] = useState<CatechesisOpenClass | null>(null);
+  // Filtros de ano e etapa (na virada, 2026 e 2027 convivem na lista)
+  const [yearFilter, setYearFilter] = useState<number | null>(null);
+  const [stageFilter, setStageFilter] = useState<string | null>(null);
   const [who, setWho] = useState<Who>({ kind: 'self' });
   const [childName, setChildName] = useState('');
   const [childBirth, setChildBirth] = useState('');
@@ -75,6 +78,11 @@ export default function CatechesisApplyScreen() {
         getMyDependents().catch(() => [] as MyDependent[]),
       ]);
       setClasses(openClasses);
+      // Padrão do filtro: o MAIOR ano disponível (o ano novo, quando o
+      // coordenador já abriu as turmas dele)
+      const years = [...new Set(openClasses.map((klass) => klass.year))];
+      setYearFilter(years.length > 1 ? Math.max(...years) : null);
+      setStageFilter(null);
       setDependents(myDependents);
       if (presetMemberId) {
         const preset = myDependents.find((dependent) => dependent.id === presetMemberId);
@@ -122,7 +130,7 @@ export default function CatechesisApplyScreen() {
     }
     setSubmitting(true);
     try {
-      await applyCatechesis({
+      const result = await applyCatechesis({
         classId: selectedClass.classId,
         forMemberId: who.kind === 'dependent' ? who.id : undefined,
         newChild:
@@ -131,11 +139,19 @@ export default function CatechesisApplyScreen() {
             : undefined,
         consentGiven: true,
       });
-      Alert.alert(
-        'Inscrição enviada ✓',
-        'A coordenação da catequese vai confirmar a matrícula — você recebe o aviso por aqui.',
-        [{ text: 'OK', onPress: () => router.back() }],
-      );
+      if (result?.status === 'WAITLISTED') {
+        Alert.alert(
+          'Na fila de espera ✓',
+          'A turma está cheia, mas o pedido entrou na fila de espera. A coordenação pode abrir uma vaga — você recebe o aviso por aqui.',
+          [{ text: 'OK', onPress: () => router.back() }],
+        );
+      } else {
+        Alert.alert(
+          'Inscrição enviada ✓',
+          'A coordenação da catequese vai confirmar a matrícula — você recebe o aviso por aqui.',
+          [{ text: 'OK', onPress: () => router.back() }],
+        );
+      }
     } catch (error: any) {
       Alert.alert('Não foi possível inscrever', error?.message ?? 'Tente novamente.');
     } finally {
@@ -176,40 +192,106 @@ export default function CatechesisApplyScreen() {
         ) : (
           <>
             <Text style={styles.stepLabel}>1 · Escolha a turma</Text>
-            {classes.map((klass) => {
-              const full = klass.openSpots !== null && klass.openSpots <= 0;
-              const selected = selectedClass?.classId === klass.classId;
-              return (
-                <TouchableOpacity
-                  key={klass.classId}
-                  style={[styles.classCard, selected && styles.classCardSelected, full && { opacity: 0.55 }]}
-                  disabled={full}
-                  activeOpacity={0.85}
-                  onPress={() => setSelectedClass(klass)}
-                >
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.className} numberOfLines={1}>
-                      {klass.stage.name} · {klass.name}
-                    </Text>
-                    <Text style={styles.classMeta} numberOfLines={1}>
-                      {klass.weekday !== null && klass.weekday !== undefined
-                        ? `${WEEKDAYS[klass.weekday]}`
-                        : ''}
-                      {klass.time ? ` às ${klass.time}` : ''}
-                      {klass.room ? ` · ${klass.room}` : ''}
-                    </Text>
-                    <Text style={styles.classSpots}>
-                      {full
-                        ? 'Sem vagas'
-                        : klass.openSpots === null
-                          ? 'Vagas abertas'
-                          : `${klass.openSpots} vaga${klass.openSpots === 1 ? '' : 's'}`}
-                    </Text>
-                  </View>
-                  {selected && <FontAwesome5 name="check-circle" size={18} color={colors.primary} />}
-                </TouchableOpacity>
+            {(() => {
+              const years = [...new Set(classes.map((klass) => klass.year))].sort((a, b) => b - a);
+              const stages = [...new Set(classes.map((klass) => klass.stage.name))];
+              const visible = classes.filter(
+                (klass) =>
+                  (yearFilter === null || klass.year === yearFilter) &&
+                  (stageFilter === null || klass.stage.name === stageFilter),
               );
-            })}
+              return (
+                <>
+                  {years.length > 1 && (
+                    <View style={styles.filterRow}>
+                      <TouchableOpacity
+                        style={[styles.filterChip, yearFilter === null && styles.filterChipOn]}
+                        onPress={() => setYearFilter(null)}
+                      >
+                        <Text style={[styles.filterChipText, yearFilter === null && styles.filterChipTextOn]}>Todos os anos</Text>
+                      </TouchableOpacity>
+                      {years.map((year) => (
+                        <TouchableOpacity
+                          key={year}
+                          style={[styles.filterChip, yearFilter === year && styles.filterChipOn]}
+                          onPress={() => setYearFilter(year)}
+                        >
+                          <Text style={[styles.filterChipText, yearFilter === year && styles.filterChipTextOn]}>{year}</Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  )}
+                  {stages.length > 1 && (
+                    <View style={styles.filterRow}>
+                      <TouchableOpacity
+                        style={[styles.filterChip, stageFilter === null && styles.filterChipOn]}
+                        onPress={() => setStageFilter(null)}
+                      >
+                        <Text style={[styles.filterChipText, stageFilter === null && styles.filterChipTextOn]}>Todas as etapas</Text>
+                      </TouchableOpacity>
+                      {stages.map((stageName) => (
+                        <TouchableOpacity
+                          key={stageName}
+                          style={[styles.filterChip, stageFilter === stageName && styles.filterChipOn]}
+                          onPress={() => setStageFilter(stageName)}
+                        >
+                          <Text style={[styles.filterChipText, stageFilter === stageName && styles.filterChipTextOn]}>{stageName}</Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  )}
+                  {visible.length === 0 && (
+                    <Text style={styles.emptyText}>Nenhuma turma neste ano/etapa — ajuste os filtros acima.</Text>
+                  )}
+                  {visible.map((klass) => {
+                    const full = klass.openSpots !== null && klass.openSpots <= 0;
+                    const mode = klass.acceptingMode ?? (full ? 'WAITLIST' : 'OPEN');
+                    const blocked = mode === 'FULL_CLOSED';
+                    const selected = selectedClass?.classId === klass.classId;
+                    return (
+                      <TouchableOpacity
+                        key={klass.classId}
+                        style={[styles.classCard, selected && styles.classCardSelected, blocked && { opacity: 0.5 }]}
+                        disabled={blocked}
+                        activeOpacity={0.85}
+                        onPress={() => setSelectedClass(klass)}
+                      >
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.className} numberOfLines={1}>
+                            {klass.name}
+                          </Text>
+                          <Text style={styles.classMeta} numberOfLines={1}>
+                            {klass.stage.name} · {klass.year}
+                            {klass.weekday !== null && klass.weekday !== undefined
+                              ? ` · ${WEEKDAYS[klass.weekday]}`
+                              : ''}
+                            {klass.time ? ` às ${klass.time}` : ''}
+                            {klass.room ? ` · ${klass.room}` : ''}
+                          </Text>
+                          {blocked ? (
+                            <Text style={[styles.classSpots, { color: colors.error }]}>
+                              Turma cheia — não aceita mais inscrições neste ano
+                            </Text>
+                          ) : mode === 'WAITLIST' && full ? (
+                            <Text style={[styles.classSpots, { color: colors.warning }]}>
+                              Turma cheia — fila de espera
+                              {klass.waitlistCount ? ` (${klass.waitlistCount} na fila)` : ''}
+                            </Text>
+                          ) : (
+                            <Text style={styles.classSpots}>
+                              {klass.openSpots === null
+                                ? 'Vagas abertas'
+                                : `${klass.openSpots} vaga${klass.openSpots === 1 ? '' : 's'}`}
+                            </Text>
+                          )}
+                        </View>
+                        {selected && <FontAwesome5 name="check-circle" size={18} color={colors.primary} />}
+                      </TouchableOpacity>
+                    );
+                  })}
+                </>
+              );
+            })()}
 
             <Text style={styles.stepLabel}>2 · Quem vai participar</Text>
             <TouchableOpacity
@@ -276,7 +358,11 @@ export default function CatechesisApplyScreen() {
               onPress={() => void handleSubmit()}
             >
               <Text style={styles.primaryBtnText}>
-                {submitting ? 'Enviando...' : 'Enviar inscrição'}
+                {submitting
+                  ? 'Enviando...'
+                  : selectedClass && selectedClass.openSpots !== null && selectedClass.openSpots <= 0
+                    ? 'Entrar na fila de espera'
+                    : 'Enviar inscrição'}
               </Text>
             </TouchableOpacity>
             <Text style={styles.footNote}>
@@ -317,6 +403,18 @@ const createStyles = (colors: ReturnType<typeof useColors>) =>
       marginTop: 16,
       marginBottom: 8,
     },
+    filterRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 8 },
+    filterChip: {
+      borderWidth: 1.5,
+      borderColor: colors.border,
+      borderRadius: 999,
+      paddingHorizontal: 12,
+      paddingVertical: 6,
+      backgroundColor: colors.card,
+    },
+    filterChipOn: { borderColor: colors.primary, backgroundColor: `${colors.primary}15` },
+    filterChipText: { fontSize: 12.5, fontWeight: '700', color: colors.textSecondary },
+    filterChipTextOn: { color: colors.primary },
     classCard: {
       flexDirection: 'row',
       alignItems: 'center',
