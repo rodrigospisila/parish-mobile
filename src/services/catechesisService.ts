@@ -142,6 +142,9 @@ export interface FamilyCatechesisItem {
     kind: string;
     status: 'SUBMITTED' | 'VERIFIED' | 'REJECTED';
     reviewNotes?: string | null;
+    /** Declaração sem arquivo: não tem o documento / batismo de outra denominação */
+    declaration?: 'NOT_HAVE' | 'OTHER_DENOMINATION' | null;
+    denomination?: string | null;
     createdAt: string;
   }>;
   /** Quantos pareceres do catequista já foram registrados */
@@ -473,9 +476,48 @@ export const getMyNotifications = async (type?: string): Promise<AppNotification
 // DOCUMENTOS DA MATRÍCULA (envio pela família)
 // ============================================
 
+/** Documento que a turma pede na inscrição (padrões quando não configurado). */
+export interface CatechesisDocRequirement {
+  kind: string;
+  required: boolean;
+  allowNotHave: boolean;
+  allowOtherDenomination: boolean;
+  isDefault?: boolean;
+}
+
+export const getClassDocRequirements = async (
+  classId: string,
+): Promise<CatechesisDocRequirement[]> => {
+  try {
+    const { data } = await api.get(`/catechesis/classes/${classId}/doc-requirements`);
+    return data ?? [];
+  } catch (error) {
+    throw new Error(getErrorMessage(error));
+  }
+};
+
+/** Declaração SEM arquivo: "não tenho" ou batismo de outra denominação. */
+export const submitCatechesisDeclaration = async (
+  enrollmentId: string,
+  kind: string,
+  declaration: 'NOT_HAVE' | 'OTHER_DENOMINATION',
+  denomination?: string,
+): Promise<void> => {
+  try {
+    await api.post(`/catechesis/enrollments/${enrollmentId}/documents/declaration`, {
+      kind,
+      declaration,
+      ...(denomination ? { denomination } : {}),
+    });
+  } catch (error) {
+    throw new Error(getErrorMessage(error));
+  }
+};
+
 /**
- * Envia a foto do documento pendente (ex.: Certidão de Batismo).
- * O arquivo vive só até a conferência da coordenação (retenção mínima).
+ * Envia a foto do documento pedido (ex.: Certidão de nascimento). Pode passar
+ * por conferência automática assistida por IA; depois de ACEITO pela equipe,
+ * o arquivo fica guardado no prontuário da matrícula.
  */
 export const submitCatechesisDocument = async (
   enrollmentId: string,

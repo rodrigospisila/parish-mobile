@@ -10,6 +10,7 @@ import {
   Alert,
   Modal,
   Pressable,
+  TextInput,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Stack, useRouter } from 'expo-router';
@@ -31,6 +32,9 @@ import {
   RATING_LABELS,
   getEnrollmentAssessments,
   submitCatechesisDocument,
+  submitCatechesisDeclaration,
+  getClassDocRequirements,
+  CatechesisDocRequirement,
   getEnrollmentAttendance,
   getMyNotifications,
   EnrollmentAttendanceItem,
@@ -59,6 +63,12 @@ export default function CatechesisClassesScreen() {
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [assessView, setAssessView] = useState<{ name: string; items: CatechesisAssessment[] } | null>(null);
   const [uploadingDoc, setUploadingDoc] = useState<string | null>(null);
+  // O que cada turma pede na inscrição (obrigatório / "não tenho" / outra denominação)
+  const [docReqsByClass, setDocReqsByClass] = useState<Record<string, CatechesisDocRequirement[]>>({});
+  // Modal para informar a denominação do batismo (Android não tem Alert.prompt)
+  const [denomView, setDenomView] = useState<{ enrollmentId: string; kind: string } | null>(null);
+  const [denomText, setDenomText] = useState('');
+  const [savingDenom, setSavingDenom] = useState(false);
   const [noticeView, setNoticeView] = useState<AppNotification[] | null>(null);
   const [attendanceView, setAttendanceView] = useState<{ name: string; items: EnrollmentAttendanceItem[] } | null>(null);
   const [agendaView, setAgendaView] = useState<{ name: string; items: Array<{ date: string; topic?: string | null }> } | null>(null);
@@ -106,7 +116,7 @@ export default function CatechesisClassesScreen() {
       await submitCatechesisDocument(enrollmentId, kind, result.assets[0]);
       Alert.alert(
         'Documento enviado ✓',
-        'A coordenação vai conferir e dar baixa na pendência — você recebe o aviso por aqui. O arquivo é apagado após a conferência.',
+        'A coordenação vai conferir e dar baixa na pendência — você recebe o aviso por aqui. Depois de aceito, o documento fica guardado no prontuário da matrícula.',
       );
       await load(true);
     } catch (error: any) {
@@ -143,12 +153,63 @@ export default function CatechesisClassesScreen() {
   };
 
   const handleSendDocument = (enrollmentId: string, kind: string) => {
-    Alert.alert(`Enviar ${kind}`, 'Fotografe, escolha da galeria ou anexe um PDF.', [
-      { text: 'Cancelar', style: 'cancel' },
-      { text: '📷 Tirar foto', onPress: () => void pickAndSubmitDocument(enrollmentId, kind, true) },
-      { text: '🖼 Galeria', onPress: () => void pickAndSubmitDocument(enrollmentId, kind, false) },
-      { text: '📄 Arquivo/PDF', onPress: () => void pickPdfAndSubmit(enrollmentId, kind) },
-    ]);
+    Alert.alert(
+      `Enviar ${kind}`,
+      'Fotografe, escolha da galeria ou anexe um PDF.\n\nO arquivo pode passar por conferência automática assistida por IA (provedor externo); a decisão é sempre da equipe da catequese. Depois de aceito, o documento fica guardado no prontuário da matrícula.',
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        { text: '📷 Tirar foto', onPress: () => void pickAndSubmitDocument(enrollmentId, kind, true) },
+        { text: '🖼 Galeria', onPress: () => void pickAndSubmitDocument(enrollmentId, kind, false) },
+        { text: '📄 Arquivo/PDF', onPress: () => void pickPdfAndSubmit(enrollmentId, kind) },
+      ],
+    );
+  };
+
+  /** "Não tenho o documento" — a coordenação aceita ou recusa a declaração. */
+  const handleDeclareNotHave = (enrollmentId: string, kind: string) => {
+    Alert.alert(
+      `Não tem ${kind}?`,
+      'A coordenação vai receber a sua declaração e pode aceitá-la ou pedir o documento mesmo assim.',
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Declarar que não tem',
+          onPress: async () => {
+            try {
+              await submitCatechesisDeclaration(enrollmentId, kind, 'NOT_HAVE');
+              Alert.alert('Declaração enviada ✓', 'A coordenação vai analisar — você recebe o aviso por aqui.');
+              await load(true);
+            } catch (error: any) {
+              Alert.alert('Declaração', error?.message ?? 'Não foi possível enviar.');
+            }
+          },
+        },
+      ],
+    );
+  };
+
+  const handleSubmitDenomination = async () => {
+    if (!denomView) return;
+    const denomination = denomText.trim();
+    if (denomination.length < 2) {
+      Alert.alert('Denominação', 'Informe em qual igreja o batismo foi realizado.');
+      return;
+    }
+    setSavingDenom(true);
+    try {
+      await submitCatechesisDeclaration(denomView.enrollmentId, denomView.kind, 'OTHER_DENOMINATION', denomination);
+      setDenomView(null);
+      setDenomText('');
+      Alert.alert(
+        'Declaração enviada ✓',
+        'A coordenação vai analisar o batismo de outra denominação e aceitar ou recusar — você recebe o aviso por aqui.',
+      );
+      await load(true);
+    } catch (error: any) {
+      Alert.alert('Declaração', error?.message ?? 'Não foi possível enviar.');
+    } finally {
+      setSavingDenom(false);
+    }
   };
 
   const openFamilyAssessments = async (enrollmentId: string, name: string) => {
@@ -193,6 +254,25 @@ export default function CatechesisClassesScreen() {
       const coordination = mine.length === 0 && isCoordinatorRole ? await getCommunityCatechesisClasses() : [];
       setClasses([...mine, ...coordination]);
       setFamily(familyItems);
+      // O que cada turma pede na inscrição — falha vira lista vazia e o card
+      // cai no comportamento antigo (pendências em texto)
+      const activeClassIds = [
+        ...new Set(
+          familyItems
+            .filter((item) => item.status === 'ACTIVE' || item.status === 'PENDING_APPROVAL')
+            .map((item) => item.class.id),
+        ),
+      ];
+      const reqEntries = await Promise.all(
+        activeClassIds.map(async (classId) => {
+          try {
+            return [classId, await getClassDocRequirements(classId)] as const;
+          } catch {
+            return [classId, [] as CatechesisDocRequirement[]] as const;
+          }
+        }),
+      );
+      setDocReqsByClass(Object.fromEntries(reqEntries));
     } catch (error) {
       console.error('Erro ao carregar turmas de catequese:', error);
     } finally {
@@ -341,41 +421,124 @@ export default function CatechesisClassesScreen() {
                     </>
                   )}
                   {(item.status === 'ACTIVE' || item.status === 'PENDING_APPROVAL') &&
-                  (item.pendingDocuments ?? '')
-                    .split(/[;,]/)
-                    .map((kind) => kind.trim())
-                    .filter(Boolean)
-                    .map((kind) => {
-                      const latest = (item.documents ?? []).find(
-                        (doc) => doc.kind.toLowerCase() === kind.toLowerCase(),
-                      );
-                      const busy = uploadingDoc === item.enrollmentId + kind;
-                      if (latest?.status === 'SUBMITTED') {
-                        return (
-                          <Text key={kind} style={styles.pendingLine} numberOfLines={2}>
-                            📎 {kind}: em conferência pela coordenação
-                          </Text>
-                        );
+                    (() => {
+                      const reqs = docReqsByClass[item.class.id] ?? [];
+                      // Sem os requisitos da turma (offline/erro), cai no
+                      // comportamento antigo: pendências em texto
+                      if (reqs.length === 0) {
+                        return (item.pendingDocuments ?? '')
+                          .split(/[;,]/)
+                          .map((kind) => kind.trim())
+                          .filter(Boolean)
+                          .map((kind) => {
+                            const latest = (item.documents ?? []).find(
+                              (doc) => doc.kind.toLowerCase() === kind.toLowerCase(),
+                            );
+                            const busy = uploadingDoc === item.enrollmentId + kind;
+                            if (latest?.status === 'SUBMITTED') {
+                              return (
+                                <Text key={kind} style={styles.pendingLine} numberOfLines={2}>
+                                  📎 {kind}: em conferência pela coordenação
+                                </Text>
+                              );
+                            }
+                            return (
+                              <View key={kind}>
+                                {latest?.status === 'REJECTED' && (
+                                  <Text style={styles.pendingLine} numberOfLines={2}>
+                                    ⚠️ {kind} recusado{latest.reviewNotes ? `: ${latest.reviewNotes}` : ''} — envie novamente
+                                  </Text>
+                                )}
+                                <TouchableOpacity
+                                  style={styles.docBtn}
+                                  disabled={busy}
+                                  onPress={() => handleSendDocument(item.enrollmentId, kind)}
+                                >
+                                  <Text style={styles.docBtnText}>
+                                    {busy ? 'Enviando...' : `📎 Enviar ${kind}`}
+                                  </Text>
+                                </TouchableOpacity>
+                              </View>
+                            );
+                          });
                       }
-                      return (
-                        <View key={kind}>
-                          {latest?.status === 'REJECTED' && (
-                            <Text style={styles.pendingLine} numberOfLines={2}>
-                              ⚠️ {kind} recusado{latest.reviewNotes ? `: ${latest.reviewNotes}` : ''} — envie novamente
+                      // Requisitos da turma: um bloco por documento pedido
+                      return reqs.map((req) => {
+                        const docs = (item.documents ?? []).filter(
+                          (doc) => doc.kind.toLowerCase() === req.kind.toLowerCase(),
+                        );
+                        const submitted = docs.find((doc) => doc.status === 'SUBMITTED');
+                        const verified = docs.find((doc) => doc.status === 'VERIFIED');
+                        const rejected = docs.find((doc) => doc.status === 'REJECTED');
+                        const busy = uploadingDoc === item.enrollmentId + req.kind;
+                        if (submitted) {
+                          return (
+                            <Text key={req.kind} style={styles.pendingLine} numberOfLines={2}>
+                              📎 {req.kind}:{' '}
+                              {submitted.declaration
+                                ? 'declaração enviada — aguardando a coordenação'
+                                : 'em conferência pela coordenação'}
                             </Text>
-                          )}
-                          <TouchableOpacity
-                            style={styles.docBtn}
-                            disabled={busy}
-                            onPress={() => handleSendDocument(item.enrollmentId, kind)}
-                          >
-                            <Text style={styles.docBtnText}>
-                              {busy ? 'Enviando...' : `📎 Enviar ${kind}`}
+                          );
+                        }
+                        if (verified) {
+                          return (
+                            <Text key={req.kind} style={styles.okLine} numberOfLines={2}>
+                              ✓ {req.kind}:{' '}
+                              {verified.declaration === 'NOT_HAVE'
+                                ? 'dispensado (declarou que não tem)'
+                                : verified.declaration === 'OTHER_DENOMINATION'
+                                  ? `batismo aceito${verified.denomination ? ` (${verified.denomination})` : ''}`
+                                  : 'conferido'}
                             </Text>
-                          </TouchableOpacity>
-                        </View>
-                      );
-                    })}
+                          );
+                        }
+                        return (
+                          <View key={req.kind}>
+                            {rejected ? (
+                              <Text style={styles.pendingLine} numberOfLines={2}>
+                                ⚠️ {req.kind} recusado{rejected.reviewNotes ? `: ${rejected.reviewNotes}` : ''} — envie novamente
+                              </Text>
+                            ) : (
+                              <Text style={styles.pendingLine} numberOfLines={1}>
+                                📄 {req.kind}
+                                {req.required ? ' · obrigatório' : ''}
+                              </Text>
+                            )}
+                            <View style={styles.docBtnRow}>
+                              <TouchableOpacity
+                                style={styles.docBtn}
+                                disabled={busy}
+                                onPress={() => handleSendDocument(item.enrollmentId, req.kind)}
+                              >
+                                <Text style={styles.docBtnText}>{busy ? 'Enviando...' : '📎 Enviar'}</Text>
+                              </TouchableOpacity>
+                              {req.allowNotHave && (
+                                <TouchableOpacity
+                                  style={styles.docBtn}
+                                  disabled={busy}
+                                  onPress={() => handleDeclareNotHave(item.enrollmentId, req.kind)}
+                                >
+                                  <Text style={styles.docBtnText}>Não tenho</Text>
+                                </TouchableOpacity>
+                              )}
+                              {req.allowOtherDenomination && (
+                                <TouchableOpacity
+                                  style={styles.docBtn}
+                                  disabled={busy}
+                                  onPress={() => {
+                                    setDenomText('');
+                                    setDenomView({ enrollmentId: item.enrollmentId, kind: req.kind });
+                                  }}
+                                >
+                                  <Text style={styles.docBtnText}>Outra denominação</Text>
+                                </TouchableOpacity>
+                              )}
+                            </View>
+                          </View>
+                        );
+                      });
+                    })()}
                   {(item.fees ?? [])
                     .filter((fee) => fee.status === 'PENDING')
                     .map((fee) => (
@@ -619,6 +782,43 @@ export default function CatechesisClassesScreen() {
         </Pressable>
       </Modal>
 
+      {/* Batismo em outra denominação: informar qual (Android não tem Alert.prompt) */}
+      <Modal
+        visible={!!denomView}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setDenomView(null)}
+      >
+        <Pressable style={styles.assessOverlay} onPress={() => setDenomView(null)}>
+          <Pressable style={styles.assessSheet} onPress={() => {}}>
+            <Text style={styles.assessTitle}>Batismo em outra denominação</Text>
+            <Text style={styles.assessNotes}>
+              Informe em qual igreja cristã o batismo foi realizado. A coordenação da catequese vai
+              analisar e aceitar ou recusar — você recebe o aviso por aqui.
+            </Text>
+            <TextInput
+              style={styles.denomInput}
+              placeholder="Ex.: Assembleia de Deus"
+              placeholderTextColor={colors.textTertiary}
+              value={denomText}
+              onChangeText={setDenomText}
+              maxLength={80}
+              autoFocus
+            />
+            <TouchableOpacity
+              style={[styles.assessClose, savingDenom && { opacity: 0.6 }]}
+              disabled={savingDenom}
+              onPress={() => void handleSubmitDenomination()}
+            >
+              <Text style={styles.assessCloseText}>{savingDenom ? 'Enviando…' : 'Enviar declaração'}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.denomCancel} disabled={savingDenom} onPress={() => setDenomView(null)}>
+              <Text style={styles.denomCancelText}>Cancelar</Text>
+            </TouchableOpacity>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
       {/* Pareceres (leitura da família) — Modal trata o voltar do Android */}
       <Modal
         visible={!!assessView}
@@ -677,6 +877,21 @@ const createStyles = (colors: ReturnType<typeof useColors>) =>
       marginBottom: 2,
     },
     pendingLine: { fontSize: 12.5, color: colors.warning, marginTop: 6 },
+    okLine: { fontSize: 12.5, color: colors.success, marginTop: 6, fontWeight: '600' },
+    docBtnRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+    denomInput: {
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: 10,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      fontSize: 14.5,
+      color: colors.text,
+      backgroundColor: colors.surface,
+      marginTop: 12,
+    },
+    denomCancel: { alignItems: 'center', paddingVertical: 10, marginTop: 2 },
+    denomCancelText: { color: colors.textSecondary, fontSize: 14, fontWeight: '600' },
     applyBtn: {
       flexDirection: 'row',
       alignItems: 'center',
