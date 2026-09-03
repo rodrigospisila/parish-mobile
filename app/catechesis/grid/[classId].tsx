@@ -63,12 +63,12 @@ export default function AttendanceGridScreen() {
     return map;
   }, [grid]);
 
-  /** Toque: — → presente → falta → falta justificada → presente… (grava na hora). */
+  /** Toque: — → presente → falta → falta justificada → limpar (—). Grava na hora. */
   const cycleCell = async (sessionId: string, enrollmentId: string) => {
     if (!grid) return;
     const key = `${sessionId}:${enrollmentId}`;
     const mark = markMap.get(key);
-    let next: { present: boolean; justified?: boolean };
+    let next: { present: boolean; justified?: boolean; clear?: boolean };
     if (!mark) next = { present: true };
     else if (mark.present) next = { present: false };
     else if (!mark.justified) next = { present: false, justified: true };
@@ -77,7 +77,7 @@ export default function AttendanceGridScreen() {
         const proceed = await new Promise<boolean>((resolve) => {
           Alert.alert(
             'Atestado será removido',
-            'Sair de "falta justificada" remove o atestado anexado a esta falta. Continuar?',
+            'Limpar este lançamento remove também o atestado anexado à falta. Continuar?',
             [
               { text: 'Cancelar', style: 'cancel', onPress: () => resolve(false) },
               { text: 'Continuar', style: 'destructive', onPress: () => resolve(true) },
@@ -86,31 +86,33 @@ export default function AttendanceGridScreen() {
         });
         if (!proceed) return;
       }
-      next = { present: true };
+      // Fecha o ciclo desfazendo o lançamento — toque por engano tem volta
+      next = { present: false, clear: true };
     }
     const previousMarks = grid.marks;
     setSavingCell(key);
-    setGrid((current) =>
-      current
-        ? {
-            ...current,
-            marks: [
-              ...current.marks.filter((m) => !(m.sessionId === sessionId && m.enrollmentId === enrollmentId)),
-              {
-                sessionId,
-                enrollmentId,
-                present: next.present,
-                late: false,
-                justified: !next.present && next.justified === true,
-                hasCertificate: !next.present && next.justified === true ? mark?.hasCertificate ?? false : false,
-              },
-            ],
-          }
-        : current,
-    );
+    setGrid((current) => {
+      if (!current) return current;
+      const others = current.marks.filter((m) => !(m.sessionId === sessionId && m.enrollmentId === enrollmentId));
+      if (next.clear) return { ...current, marks: others };
+      return {
+        ...current,
+        marks: [
+          ...others,
+          {
+            sessionId,
+            enrollmentId,
+            present: next.present,
+            late: false,
+            justified: !next.present && next.justified === true,
+            hasCertificate: !next.present && next.justified === true ? mark?.hasCertificate ?? false : false,
+          },
+        ],
+      };
+    });
     try {
       await markSessionAttendance(sessionId, [
-        { enrollmentId, present: next.present, late: false, justified: next.justified ?? false },
+        { enrollmentId, present: next.present, late: false, justified: next.justified ?? false, clear: next.clear ?? false },
       ]);
     } catch (error: any) {
       setGrid((current) => (current ? { ...current, marks: previousMarks } : current));
@@ -147,7 +149,7 @@ export default function AttendanceGridScreen() {
         <View style={styles.headerBtn} />
       </View>
       <Text style={styles.subtitle}>
-        Toque na célula: presente → falta → falta justificada · cada toque já grava
+        Toque na célula: presente → falta → falta justificada → limpar · cada toque já grava
       </Text>
 
       {isLoading ? (

@@ -246,7 +246,7 @@ export const getSessionAttendance = async (sessionId: string): Promise<SessionAt
 
 export const markSessionAttendance = async (
   sessionId: string,
-  entries: Array<{ enrollmentId: string; present: boolean; late?: boolean; justified?: boolean }>,
+  entries: Array<{ enrollmentId: string; present: boolean; late?: boolean; justified?: boolean; clear?: boolean }>,
 ): Promise<void> => {
   try {
     await api.post(`/catechesis/sessions/${sessionId}/attendance`, { entries });

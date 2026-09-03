@@ -43,14 +43,16 @@ import {
   ClassFeeSummary,
 } from '../../src/services/catechesisService';
 
-/** Estado cíclico da chamada: null → presente → atrasado → ausente → falta justificada. */
+/** Estado cíclico da chamada: null → presente → atrasado → ausente → falta justificada → null. */
 type Mark = 'present' | 'late' | 'absent' | 'justified' | null;
 
 const nextMark = (mark: Mark): Mark => {
-  if (mark === null || mark === 'justified') return 'present';
+  if (mark === null) return 'present';
   if (mark === 'present') return 'late';
   if (mark === 'late') return 'absent';
-  return 'justified';
+  if (mark === 'absent') return 'justified';
+  // justified → limpar (toque por engano tem volta)
+  return null;
 };
 
 const markVisual = (mark: Mark): { label: string; icon: string } => {
@@ -212,6 +214,8 @@ export default function CatechesisClassScreen() {
   // Chamada
   const [attendance, setAttendance] = useState<SessionAttendance | null>(null);
   const [marks, setMarks] = useState<Record<string, Mark>>({});
+  /** Marcação que veio do servidor — null desmarcado vira "limpar" no salvar */
+  const [initialMarks, setInitialMarks] = useState<Record<string, Mark>>({});
   /** Atestado já anexado à falta (por matrícula, na chamada aberta) */
   const [certAttached, setCertAttached] = useState<Record<string, boolean>>({});
   const [savingAttendance, setSavingAttendance] = useState(false);
@@ -428,6 +432,7 @@ export default function CatechesisClassScreen() {
         certs[student.enrollmentId] = !!student.hasCertificate;
       }
       setMarks(initial);
+      setInitialMarks(initial);
       setCertAttached(certs);
       setAttendance(data);
     } catch (error: any) {
@@ -532,14 +537,19 @@ export default function CatechesisClassScreen() {
   const handleSaveAttendance = async () => {
     if (!attendance) return;
     const entries = attendance.students
-      .map((student) => ({ enrollmentId: student.enrollmentId, mark: marks[student.enrollmentId] }))
-      .filter((item) => item.mark !== null)
-      .map((item) => ({
-        enrollmentId: item.enrollmentId,
-        present: item.mark === 'present' || item.mark === 'late',
-        late: item.mark === 'late',
-        justified: item.mark === 'justified',
-      }));
+      .map((student) => ({ enrollmentId: student.enrollmentId, mark: marks[student.enrollmentId] ?? null }))
+      // Desmarcado que TINHA lançamento no servidor vira "limpar"; sem histórico, sai
+      .filter((item) => item.mark !== null || (initialMarks[item.enrollmentId] ?? null) !== null)
+      .map((item) =>
+        item.mark === null
+          ? { enrollmentId: item.enrollmentId, present: false, clear: true }
+          : {
+              enrollmentId: item.enrollmentId,
+              present: item.mark === 'present' || item.mark === 'late',
+              late: item.mark === 'late',
+              justified: item.mark === 'justified',
+            },
+      );
     if (entries.length === 0) {
       Alert.alert('Chamada vazia', 'Toque nos nomes para marcar presente, atrasado ou ausente.');
       return;
@@ -1187,7 +1197,7 @@ export default function CatechesisClassScreen() {
           </View>
           <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
             <Text style={styles.subtitle}>
-              Toque no nome para alternar: presente ✓ → atrasado 🕒 → ausente ✗ → falta justificada
+              Toque no nome para alternar: presente ✓ → atrasado 🕒 → ausente ✗ → falta justificada → limpar
             </Text>
             {(attendance?.students ?? []).map((student) => {
               const mark = marks[student.enrollmentId] ?? null;
