@@ -24,6 +24,16 @@ const NAME_WIDTH = 132;
 const CELL_WIDTH = 46;
 const ROW_HEIGHT = 40;
 
+/** Estado de uma célula ('empty' = sem chamada). */
+type CellState = 'present' | 'late' | 'absent' | 'justified' | 'empty';
+const NEXT_STATE: Record<CellState, CellState> = {
+  empty: 'present',
+  present: 'late',
+  late: 'absent',
+  absent: 'justified',
+  justified: 'empty',
+};
+
 /**
  * Folha de presença (alunos × encontros), como o formulário de papel.
  * Toque na célula lança na hora: presente → falta → falta justificada.
@@ -37,7 +47,10 @@ export default function AttendanceGridScreen() {
 
   const [grid, setGrid] = useState<AttendanceGrid | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [savingCell, setSavingCell] = useState<string | null>(null);
+  // Toques ficam em RASCUNHO — só "Salvar chamada" grava (passar pelo F no
+  // ciclo não pode avisar falta à família)
+  const [draft, setDraft] = useState<Record<string, CellState>>({});
+  const [saving, setSaving] = useState(false);
 
   const load = useCallback(async () => {
     if (!classId) return;
@@ -63,72 +76,85 @@ export default function AttendanceGridScreen() {
     return map;
   }, [grid]);
 
-  /** Toque: — → presente → falta → falta justificada → limpar (—). Grava na hora. */
-  const cycleCell = async (sessionId: string, enrollmentId: string) => {
-    if (!grid) return;
+  /** Estado gravado (o que o servidor conhece). */
+  const stateOf = (mark: AttendanceGridMark | undefined): CellState => {
+    if (!mark) return 'empty';
+    if (mark.present) return mark.late ? 'late' : 'present';
+    return mark.justified ? 'justified' : 'absent';
+  };
+
+  /** Estado efetivo da célula: rascunho por cima do gravado. */
+  const effectiveState = (key: string): CellState => draft[key] ?? stateOf(markMap.get(key));
+
+  /** Toque: só o RASCUNHO muda — presente → atraso → falta → justificada → limpar. */
+  const cycleCell = (sessionId: string, enrollmentId: string) => {
+    if (saving) return;
     const key = `${sessionId}:${enrollmentId}`;
-    const mark = markMap.get(key);
-    let next: { present: boolean; justified?: boolean; clear?: boolean };
-    if (!mark) next = { present: true };
-    else if (mark.present) next = { present: false };
-    else if (!mark.justified) next = { present: false, justified: true };
-    else {
-      if (mark.hasCertificate) {
-        const proceed = await new Promise<boolean>((resolve) => {
-          Alert.alert(
-            'Atestado será removido',
-            'Limpar este lançamento remove também o atestado anexado à falta. Continuar?',
-            [
-              { text: 'Cancelar', style: 'cancel', onPress: () => resolve(false) },
-              { text: 'Continuar', style: 'destructive', onPress: () => resolve(true) },
-            ],
-          );
-        });
-        if (!proceed) return;
-      }
-      // Fecha o ciclo desfazendo o lançamento — toque por engano tem volta
-      next = { present: false, clear: true };
-    }
-    const previousMarks = grid.marks;
-    setSavingCell(key);
-    setGrid((current) => {
-      if (!current) return current;
-      const others = current.marks.filter((m) => !(m.sessionId === sessionId && m.enrollmentId === enrollmentId));
-      if (next.clear) return { ...current, marks: others };
-      return {
-        ...current,
-        marks: [
-          ...others,
-          {
-            sessionId,
-            enrollmentId,
-            present: next.present,
-            late: false,
-            justified: !next.present && next.justified === true,
-            hasCertificate: !next.present && next.justified === true ? mark?.hasCertificate ?? false : false,
-          },
-        ],
-      };
+    setDraft((prev) => {
+      const current = prev[key] ?? stateOf(markMap.get(key));
+      const next = NEXT_STATE[current];
+      const cleaned = { ...prev };
+      if (next === stateOf(markMap.get(key))) delete cleaned[key];
+      else cleaned[key] = next;
+      return cleaned;
     });
+  };
+
+  /** Salvar: agrupa o rascunho por encontro e grava o estado FINAL. */
+  const saveDraft = async () => {
+    if (!grid || saving) return;
+    const entries = Object.entries(draft);
+    if (!entries.length) return;
+    const losesCertificate = entries.some(([key, state]) => {
+      const mark = markMap.get(key);
+      return !!mark?.hasCertificate && stateOf(mark) === 'justified' && state !== 'justified';
+    });
+    if (losesCertificate) {
+      const proceed = await new Promise<boolean>((resolve) => {
+        Alert.alert(
+          'Atestado será removido',
+          'Alguma falta com atestado deixou de ser "falta justificada" — salvar remove o atestado. Continuar?',
+          [
+            { text: 'Cancelar', style: 'cancel', onPress: () => resolve(false) },
+            { text: 'Salvar mesmo assim', style: 'destructive', onPress: () => resolve(true) },
+          ],
+        );
+      });
+      if (!proceed) return;
+    }
+    const bySession = new Map<string, Array<{ enrollmentId: string; present: boolean; late: boolean; justified: boolean; clear: boolean }>>();
+    entries.forEach(([key, state]) => {
+      const [sessionId, enrollmentId] = key.split(':');
+      const list = bySession.get(sessionId) ?? [];
+      list.push({
+        enrollmentId,
+        present: state === 'present' || state === 'late',
+        late: state === 'late',
+        justified: state === 'justified',
+        clear: state === 'empty',
+      });
+      bySession.set(sessionId, list);
+    });
+    setSaving(true);
     try {
-      await markSessionAttendance(sessionId, [
-        { enrollmentId, present: next.present, late: false, justified: next.justified ?? false, clear: next.clear ?? false },
-      ]);
+      for (const [sessionId, sessionEntries] of bySession) {
+        await markSessionAttendance(sessionId, sessionEntries);
+      }
+      setDraft({});
+      await load();
     } catch (error: any) {
-      setGrid((current) => (current ? { ...current, marks: previousMarks } : current));
-      Alert.alert('Não gravado', error?.message ?? 'Tente novamente.');
+      Alert.alert('Não salvo', error?.message ?? 'Tente novamente — os toques continuam em rascunho.');
     } finally {
-      setSavingCell(null);
+      setSaving(false);
     }
   };
 
-  const cellVisual = (mark: AttendanceGridMark | undefined) => {
-    if (!mark) return { label: '·', color: colors.textTertiary, bg: 'transparent' };
-    if (mark.present) {
-      return { label: mark.late ? 'P🕒' : 'P', color: colors.success, bg: colors.success + '18' };
-    }
-    if (mark.justified) {
-      return { label: mark.hasCertificate ? 'FJ📎' : 'FJ', color: colors.warning, bg: colors.warning + '18' };
+  const cellVisual = (state: CellState, hasCertificate: boolean) => {
+    if (state === 'empty') return { label: '·', color: colors.textTertiary, bg: 'transparent' };
+    if (state === 'present') return { label: 'P', color: colors.success, bg: colors.success + '18' };
+    if (state === 'late') return { label: 'P🕒', color: colors.success, bg: colors.success + '18' };
+    if (state === 'justified') {
+      return { label: hasCertificate ? 'FJ📎' : 'FJ', color: colors.warning, bg: colors.warning + '18' };
     }
     return { label: 'F', color: colors.error ?? '#d9534f', bg: (colors.error ?? '#d9534f') + '18' };
   };
@@ -149,7 +175,7 @@ export default function AttendanceGridScreen() {
         <View style={styles.headerBtn} />
       </View>
       <Text style={styles.subtitle}>
-        Toque na célula: presente → falta → falta justificada → limpar · cada toque já grava
+        Toque na célula: presente → atraso → falta → falta justificada → limpar · nada grava até “Salvar chamada”
       </Text>
 
       {isLoading ? (
@@ -178,10 +204,10 @@ export default function AttendanceGridScreen() {
                 let present = 0;
                 let marked = 0;
                 grid.sessions.forEach((session) => {
-                  const mark = markMap.get(`${session.id}:${student.enrollmentId}`);
-                  if (mark) {
+                  const state = effectiveState(`${session.id}:${student.enrollmentId}`);
+                  if (state !== 'empty') {
                     marked += 1;
-                    if (mark.present) present += 1;
+                    if (state === 'present' || state === 'late') present += 1;
                   }
                 });
                 const pct = marked === 0 ? '—' : `${Math.round((present / marked) * 100)}%`;
@@ -194,21 +220,18 @@ export default function AttendanceGridScreen() {
                     </View>
                     {grid.sessions.map((session) => {
                       const key = `${session.id}:${student.enrollmentId}`;
-                      const visual = cellVisual(markMap.get(key));
-                      const saving = savingCell === key;
+                      const state = effectiveState(key);
+                      const dirty = key in draft;
+                      const visual = cellVisual(state, !!markMap.get(key)?.hasCertificate);
                       return (
                         <TouchableOpacity
                           key={session.id}
-                          style={[styles.cell, { backgroundColor: visual.bg }]}
+                          style={[styles.cell, { backgroundColor: visual.bg }, dirty && styles.cellDirty]}
                           activeOpacity={0.6}
                           disabled={saving}
-                          onPress={() => void cycleCell(session.id, student.enrollmentId)}
+                          onPress={() => cycleCell(session.id, student.enrollmentId)}
                         >
-                          {saving ? (
-                            <ActivityIndicator size="small" color={colors.primary} />
-                          ) : (
-                            <Text style={[styles.cellText, { color: visual.color }]}>{visual.label}</Text>
-                          )}
+                          <Text style={[styles.cellText, { color: visual.color }]}>{visual.label}</Text>
                         </TouchableOpacity>
                       );
                     })}
@@ -223,8 +246,24 @@ export default function AttendanceGridScreen() {
         </ScrollView>
       )}
 
+      {Object.keys(draft).length > 0 && (
+        <View style={styles.saveBar}>
+          <TouchableOpacity style={styles.discardBtn} disabled={saving} onPress={() => setDraft({})}>
+            <Text style={styles.discardBtnText}>Descartar</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.saveBtn, saving && { opacity: 0.6 }]}
+            disabled={saving}
+            onPress={() => void saveDraft()}
+          >
+            <Text style={styles.saveBtnText}>
+              {saving ? 'Salvando…' : `Salvar chamada (${Object.keys(draft).length})`}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      )}
       {!isLoading && grid && grid.sessions.length > 0 && (
-        <Text style={styles.legend}>P presente · P🕒 atraso · F falta · FJ justificada · 📎 atestado</Text>
+        <Text style={styles.legend}>P presente · P🕒 atraso · F falta · FJ justificada · 📎 atestado · borda azul = não salvo</Text>
       )}
     </SafeAreaView>
   );
@@ -276,7 +315,34 @@ const createStyles = (colors: ReturnType<typeof useColors>) =>
     headCell: { backgroundColor: colors.card },
     headText: { fontSize: 11, fontWeight: '800', color: colors.textSecondary },
     cellText: { fontSize: 12, fontWeight: '800' },
+    // Alteração em rascunho (não salva): borda azul na célula
+    cellDirty: { borderWidth: 1.5, borderColor: colors.primary, borderRadius: 6 },
     pctText: { fontSize: 11.5, fontWeight: '700', color: colors.textSecondary },
+    saveBar: {
+      flexDirection: 'row',
+      gap: 10,
+      paddingHorizontal: 14,
+      paddingVertical: 10,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: colors.border,
+      backgroundColor: colors.surface,
+    },
+    discardBtn: {
+      paddingHorizontal: 14,
+      justifyContent: 'center',
+      borderWidth: 1.5,
+      borderColor: colors.border,
+      borderRadius: 10,
+    },
+    discardBtnText: { fontSize: 13.5, fontWeight: '700', color: colors.textSecondary },
+    saveBtn: {
+      flex: 1,
+      alignItems: 'center',
+      paddingVertical: 12,
+      backgroundColor: colors.primary,
+      borderRadius: 10,
+    },
+    saveBtnText: { fontSize: 14.5, fontWeight: '800', color: '#fff' },
     legend: {
       fontSize: 11,
       color: colors.textTertiary,
