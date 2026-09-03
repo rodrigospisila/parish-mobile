@@ -148,6 +148,11 @@ export interface FamilyCatechesisItem {
     /** Declaração sem arquivo: não tem o documento / batismo de outra denominação */
     declaration?: 'NOT_HAVE' | 'OTHER_DENOMINATION' | null;
     denomination?: string | null;
+    /** Conferência automática (IA): resultado + o que foi LIDO do documento */
+    autoCheckStatus?: 'MATCH' | 'MISMATCH' | 'UNREADABLE' | 'SKIPPED' | null;
+    autoCheckNotes?: string | null;
+    extractedName?: string | null;
+    extractedBirthDate?: string | null;
     createdAt: string;
   }>;
   /** Quantos pareceres do catequista já foram registrados */
@@ -497,6 +502,19 @@ export const getClassDocRequirements = async (
   try {
     const { data } = await api.get(`/catechesis/classes/${classId}/doc-requirements`);
     return data ?? [];
+  } catch (error) {
+    throw new Error(getErrorMessage(error));
+  }
+};
+
+/** Corrige o cadastro do catequizando conforme o LIDO do documento (nome e/ou
+ * nascimento) — auditado; a conferência automática reexecuta em seguida. */
+export const applyCatechesisDocCorrection = async (
+  documentId: string,
+): Promise<{ member: { id: string; fullName: string; birthDate?: string | null }; applied: string[] }> => {
+  try {
+    const { data } = await api.post(`/catechesis/documents/${documentId}/apply-correction`, {});
+    return data;
   } catch (error) {
     throw new Error(getErrorMessage(error));
   }

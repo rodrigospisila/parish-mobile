@@ -35,6 +35,7 @@ import {
   getEnrollmentAssessments,
   submitCatechesisDocument,
   submitCatechesisDeclaration,
+  applyCatechesisDocCorrection,
   getClassDocRequirements,
   CatechesisDocRequirement,
   getEnrollmentAttendance,
@@ -163,6 +164,41 @@ export default function CatechesisClassesScreen() {
         { text: '📷 Tirar foto', onPress: () => void pickAndSubmitDocument(enrollmentId, kind, true) },
         { text: '🖼 Galeria', onPress: () => void pickAndSubmitDocument(enrollmentId, kind, false) },
         { text: '📄 Arquivo/PDF', onPress: () => void pickPdfAndSubmit(enrollmentId, kind) },
+      ],
+    );
+  };
+
+  /** A conferência automática LEU dados diferentes do cadastro: oferece
+   * corrigir o cadastro conforme o documento (nome e/ou nascimento). */
+  const handleApplyCorrection = (
+    doc: { id: string; extractedName?: string | null; extractedBirthDate?: string | null },
+    memberName: string,
+  ) => {
+    const parts: string[] = [];
+    if (doc.extractedName && doc.extractedName !== memberName) {
+      parts.push(`Nome: "${memberName}" → "${doc.extractedName}"`);
+    }
+    if (doc.extractedBirthDate) {
+      const birth = new Date(doc.extractedBirthDate).toLocaleDateString('pt-BR', { timeZone: 'UTC' });
+      parts.push(`Nascimento: ${birth} (conforme o documento)`);
+    }
+    Alert.alert(
+      'Corrigir o cadastro?',
+      `O documento traz dados diferentes do cadastro:\n\n${parts.join('\n')}\n\nDeseja atualizar o cadastro conforme o documento? A alteração fica registrada e o documento é conferido de novo.`,
+      [
+        { text: 'Manter como está', style: 'cancel' },
+        {
+          text: 'Corrigir cadastro',
+          onPress: async () => {
+            try {
+              await applyCatechesisDocCorrection(doc.id);
+              Alert.alert('Cadastro corrigido ✓', 'O documento será conferido novamente em instantes.');
+              await load(true);
+            } catch (error: any) {
+              Alert.alert('Correção', error?.message ?? 'Não foi possível corrigir.');
+            }
+          },
+        },
       ],
     );
   };
@@ -485,12 +521,72 @@ export default function CatechesisClassesScreen() {
                         const rejected = docs.find((doc) => doc.status === 'REJECTED');
                         const busy = uploadingDoc === item.enrollmentId + req.kind;
                         if (submitted) {
+                          if (submitted.declaration) {
+                            return (
+                              <Text key={req.kind} style={styles.pendingLine} numberOfLines={2}>
+                                📎 {req.kind}: declaração enviada — aguardando a coordenação
+                              </Text>
+                            );
+                          }
+                          // Resultado da conferência automática JÁ para o
+                          // responsável — antes de a coordenação aprovar
+                          const memberName = item.member.isSelf ? '' : item.member.fullName;
+                          if (submitted.autoCheckStatus === 'MATCH') {
+                            return (
+                              <Text key={req.kind} style={styles.okLine} numberOfLines={2}>
+                                ✓ {req.kind}: documento confere — aguardando a coordenação
+                              </Text>
+                            );
+                          }
+                          if (submitted.autoCheckStatus === 'MISMATCH') {
+                            const canFix = !!(submitted.extractedName || submitted.extractedBirthDate);
+                            return (
+                              <View key={req.kind}>
+                                <Text style={styles.pendingLine} numberOfLines={4}>
+                                  ⚠️ {req.kind}: {submitted.autoCheckNotes ?? 'dados diferentes do cadastro'}
+                                </Text>
+                                <View style={styles.docBtnRow}>
+                                  {canFix && (
+                                    <TouchableOpacity
+                                      style={styles.docBtn}
+                                      onPress={() => handleApplyCorrection(submitted, memberName || item.member.fullName)}
+                                    >
+                                      <Text style={styles.docBtnText}>✎ Corrigir cadastro pelo documento</Text>
+                                    </TouchableOpacity>
+                                  )}
+                                  <TouchableOpacity
+                                    style={styles.docBtn}
+                                    disabled={busy}
+                                    onPress={() => handleSendDocument(item.enrollmentId, req.kind)}
+                                  >
+                                    <Text style={styles.docBtnText}>📎 Reenviar outro</Text>
+                                  </TouchableOpacity>
+                                </View>
+                              </View>
+                            );
+                          }
+                          if (submitted.autoCheckStatus === 'UNREADABLE') {
+                            return (
+                              <View key={req.kind}>
+                                <Text style={styles.pendingLine} numberOfLines={3}>
+                                  ⚠️ {req.kind}: não foi possível ler o documento — se a foto ficou ruim, reenvie
+                                </Text>
+                                <TouchableOpacity
+                                  style={styles.docBtn}
+                                  disabled={busy}
+                                  onPress={() => handleSendDocument(item.enrollmentId, req.kind)}
+                                >
+                                  <Text style={styles.docBtnText}>📎 Reenviar</Text>
+                                </TouchableOpacity>
+                              </View>
+                            );
+                          }
                           return (
                             <Text key={req.kind} style={styles.pendingLine} numberOfLines={2}>
                               📎 {req.kind}:{' '}
-                              {submitted.declaration
-                                ? 'declaração enviada — aguardando a coordenação'
-                                : 'em conferência pela coordenação'}
+                              {submitted.autoCheckStatus === 'SKIPPED'
+                                ? 'em conferência pela coordenação'
+                                : 'enviado — lendo o documento…'}
                             </Text>
                           );
                         }
