@@ -46,6 +46,7 @@ import {
   getCommunityCatechesisClasses,
 } from '../../src/services/catechesisService';
 import { useAuth } from '../../src/context/AuthContext';
+import { useCommunity } from '../../src/context/CommunityContext';
 
 const WEEKDAYS = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
 
@@ -325,6 +326,18 @@ export default function CatechesisClassesScreen() {
     }, [load]),
   );
 
+  // A tela acompanha a COMUNIDADE ATIVA (seletor do Início): matrículas e
+  // turmas de outras comunidades ficam ocultas, com aviso de quantas são
+  const { activeCommunityId, activeCommunityName } = useCommunity();
+  const familyShown = activeCommunityId
+    ? family.filter((item) => item.class.community.id === activeCommunityId)
+    : family;
+  const classesShown = activeCommunityId
+    ? classes.filter((klass) => klass.community.id === activeCommunityId)
+    : classes;
+  const hiddenFamily = family.length - familyShown.length;
+  const hiddenClasses = classes.length - classesShown.length;
+
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
       <Stack.Screen options={{ headerShown: false }} />
@@ -335,6 +348,14 @@ export default function CatechesisClassesScreen() {
         <Text style={styles.headerTitle}>Catequese</Text>
         <View style={styles.headerBtn} />
       </View>
+      {!!activeCommunityName && (
+        <View style={styles.communityRow}>
+          <FontAwesome5 name="map-marker-alt" size={11} color={colors.textSecondary} />
+          <Text style={styles.communityRowText} numberOfLines={1}>
+            Exibindo: {activeCommunityName}
+          </Text>
+        </View>
+      )}
 
       <ScrollView
         contentContainerStyle={styles.scroll}
@@ -358,19 +379,20 @@ export default function CatechesisClassesScreen() {
             <Text style={styles.noticesBtnText}>Histórico de avisos</Text>
           </TouchableOpacity>
 
-          {classes.length === 0 && family.length === 0 && (
+          {classesShown.length === 0 && familyShown.length === 0 && (
             <View style={styles.empty}>
               <FontAwesome5 name="book-open" size={28} color={colors.textTertiary} />
               <Text style={styles.emptyText}>
-                Nenhuma turma por aqui ainda — inscreva você ou seus filhos pelo botão acima, ou
-                procure a coordenação da catequese.
+                {hiddenFamily + hiddenClasses > 0
+                  ? `Nada nesta comunidade — mas há ${hiddenFamily + hiddenClasses} item(ns) em outra. Troque a comunidade no Início para ver.`
+                  : 'Nenhuma turma por aqui ainda — inscreva você ou seus filhos pelo botão acima, ou procure a coordenação da catequese.'}
               </Text>
             </View>
           )}
-          {family.length > 0 && (
+          {familyShown.length > 0 && (
             <>
               <Text style={styles.sectionLabel}>Acompanhamento da família</Text>
-              {family.map((item) => (
+              {familyShown.map((item) => (
                 <View key={item.enrollmentId} style={styles.card}>
                   <View style={styles.cardTop}>
                     <Text style={styles.cardTitle} numberOfLines={1}>
@@ -726,17 +748,17 @@ export default function CatechesisClassesScreen() {
             </>
           )}
 
-          {classes.length > 0 && (
+          {classesShown.length > 0 && (
             <Text style={styles.sectionLabel}>
-              {classes.every((klass) => klass.role === 'Coordenação')
+              {classesShown.every((klass) => klass.role === 'Coordenação')
                 ? 'Turmas da comunidade (coordenação)'
                 : family.length > 0
                   ? 'Minhas turmas (catequista)'
                   : 'Suas turmas como catequista ou auxiliar'}
             </Text>
           )}
-          {classes.length > 0 && (
-          classes.map((klass) => (
+          {classesShown.length > 0 && (
+          classesShown.map((klass) => (
             <TouchableOpacity
               key={klass.classId}
               style={styles.card}
@@ -778,6 +800,14 @@ export default function CatechesisClassesScreen() {
               )}
             </TouchableOpacity>
           ))
+          )}
+          {hiddenFamily + hiddenClasses > 0 && (classesShown.length > 0 || familyShown.length > 0) && (
+            <Text style={styles.otherCommunityNote}>
+              {hiddenFamily > 0 ? `${hiddenFamily} matrícula(s) da família` : ''}
+              {hiddenFamily > 0 && hiddenClasses > 0 ? ' e ' : ''}
+              {hiddenClasses > 0 ? `${hiddenClasses} turma(s) sua(s)` : ''}
+              {' '}em outra comunidade — troque a comunidade no Início para ver.
+            </Text>
           )}
           </>
         )}
@@ -976,6 +1006,25 @@ const createStyles = (colors: ReturnType<typeof useColors>) =>
     },
     headerBtn: { width: 38, height: 38, alignItems: 'center', justifyContent: 'center' },
     headerTitle: { fontSize: 17, fontWeight: '800', color: colors.text },
+    communityRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 6,
+      paddingVertical: 6,
+      paddingHorizontal: 14,
+      backgroundColor: colors.card,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: colors.border,
+    },
+    communityRowText: { fontSize: 12, fontWeight: '600', color: colors.textSecondary },
+    otherCommunityNote: {
+      fontSize: 12,
+      color: colors.textTertiary,
+      textAlign: 'center',
+      marginTop: 6,
+      paddingHorizontal: 10,
+    },
     scroll: { padding: 16, paddingBottom: 40, gap: 10 },
     subtitle: { fontSize: 13, color: colors.textSecondary, marginBottom: 4 },
     sectionLabel: {
