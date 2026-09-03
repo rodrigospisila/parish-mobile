@@ -22,6 +22,7 @@ import { useCommunity } from '../../src/context/CommunityContext';
 import { getMyCatechesisClasses, getMyFamilyCatechesis } from '../../src/services/catechesisService';
 import { useColors } from '../../src/context/ThemeContext';
 import { useNotifications } from '../../src/context/NotificationContext';
+import UserAvatar from '../../src/components/UserAvatar';
 import { FontAwesome5 } from '@expo/vector-icons';
 import { getUpcomingEvents, Event, getEventTypeLabel, getEventTypeColor } from '../../src/services/eventService';
 import { getTodayLiturgy, LiturgyData, LiturgyReading } from '../../src/services/liturgyService';
@@ -841,11 +842,10 @@ export default function HomeScreen() {
               <FontAwesome5 name="bell" size={16} color="#fff" />
             </TouchableOpacity>
             <TouchableOpacity
-              style={styles.heroAvatar}
               activeOpacity={0.8}
               onPress={() => router.push('/(tabs)/profile' as never)}
             >
-              <Text style={styles.heroAvatarText}>{initialsOf(user?.name)}</Text>
+              <UserAvatar userId={user?.id} name={user?.name} size={52} />
             </TouchableOpacity>
           </View>
 

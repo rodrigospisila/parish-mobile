@@ -21,6 +21,9 @@ import { removeMyCommunity } from '../../src/services/memberCommunitiesService';
 import { getMyCatechesisClasses, getMyFamilyCatechesis } from '../../src/services/catechesisService';
 import { getParishById } from '../../src/services/churchService';
 import { Linking } from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
+import UserAvatar from '../../src/components/UserAvatar';
+import { uploadMyAvatar, deleteMyAvatar } from '../../src/services/avatarService';
 
 export default function ProfileScreen() {
   const { user, signOut, updateCommunity, refreshUser } = useAuth();
@@ -166,15 +169,77 @@ export default function ProfileScreen() {
     return `${minutes} minutos`;
   };
 
+  /** Trocar/remover a foto de perfil (aparece em todos os avatares do app). */
+  const handleChangeAvatar = () => {
+    const send = async (asset: { uri: string; mimeType?: string | null; fileName?: string | null }) => {
+      try {
+        await uploadMyAvatar(asset);
+        Alert.alert('Foto atualizada ✓', 'Sua foto de perfil foi trocada.');
+      } catch (error: any) {
+        Alert.alert('Não foi possível', error?.response?.data?.message ?? 'Tente novamente.');
+      }
+    };
+    Alert.alert('Foto de perfil', 'O que deseja fazer?', [
+      {
+        text: 'Tirar foto',
+        onPress: async () => {
+          const perm = await ImagePicker.requestCameraPermissionsAsync();
+          if (!perm.granted) return;
+          const picked = await ImagePicker.launchCameraAsync({
+            quality: 0.6,
+            allowsEditing: true,
+            aspect: [1, 1],
+          });
+          const asset = picked.assets?.[0];
+          if (asset) void send({ uri: asset.uri, mimeType: asset.mimeType, fileName: asset.fileName ?? 'avatar.jpg' });
+        },
+      },
+      {
+        text: 'Escolher da galeria',
+        onPress: async () => {
+          const picked = await ImagePicker.launchImageLibraryAsync({
+            mediaTypes: ['images'],
+            quality: 0.6,
+            allowsEditing: true,
+            aspect: [1, 1],
+          });
+          const asset = picked.assets?.[0];
+          if (asset) void send({ uri: asset.uri, mimeType: asset.mimeType, fileName: asset.fileName ?? 'avatar.jpg' });
+        },
+      },
+      {
+        text: 'Remover foto',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await deleteMyAvatar();
+          } catch (error: any) {
+            Alert.alert('Não foi possível', error?.response?.data?.message ?? 'Tente novamente.');
+          }
+        },
+      },
+      { text: 'Cancelar', style: 'cancel' },
+    ]);
+  };
+
   const styles = createStyles(colors);
 
   return (
     <SafeAreaView style={styles.safeArea}>
       <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
         <View style={styles.header}>
-          <View style={styles.avatar}>
-            <Text style={styles.avatarText}>{user?.name?.charAt(0).toUpperCase() || 'U'}</Text>
-          </View>
+          <TouchableOpacity activeOpacity={0.8} onPress={handleChangeAvatar}>
+            <UserAvatar
+              userId={user?.id}
+              name={user?.name}
+              size={84}
+              style={{ backgroundColor: colors.primary }}
+            />
+            <View style={styles.avatarEditBadge}>
+              <Ionicons name="camera" size={13} color="#fff" />
+            </View>
+          </TouchableOpacity>
+          <Text style={styles.avatarHint}>Toque para trocar a foto</Text>
           <Text style={styles.userName}>{user?.name || 'Usuário'}</Text>
           <Text style={styles.userEmail}>{user?.email || ''}</Text>
           <TouchableOpacity style={styles.headerAction} onPress={() => router.push('/member-availability')}>
@@ -532,6 +597,20 @@ const createStyles = (colors: ReturnType<typeof useColors>) =>
       marginBottom: 12,
     },
     avatarText: { fontSize: 32, fontWeight: 'bold', color: colors.textInverse },
+    avatarEditBadge: {
+      position: 'absolute',
+      right: -2,
+      bottom: -2,
+      width: 26,
+      height: 26,
+      borderRadius: 13,
+      backgroundColor: colors.primary,
+      borderWidth: 2,
+      borderColor: colors.background,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    avatarHint: { fontSize: 11.5, color: colors.textSecondary, marginTop: 6, marginBottom: 6 },
     userName: { fontSize: 22, fontWeight: 'bold', color: colors.text },
     userEmail: { fontSize: 14, color: colors.textSecondary, marginTop: 4 },
     headerAction: {
