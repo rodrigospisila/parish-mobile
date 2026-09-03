@@ -43,6 +43,8 @@ import {
   ClassFeeSummary,
 } from '../../src/services/catechesisService';
 
+const WEEKDAYS = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
+
 /** Estado cíclico da chamada: null → presente → atrasado → ausente → falta justificada → null. */
 type Mark = 'present' | 'late' | 'absent' | 'justified' | null;
 
@@ -590,7 +592,21 @@ export default function CatechesisClassScreen() {
         <TouchableOpacity style={styles.headerBtn} onPress={() => router.back()} hitSlop={10}>
           <FontAwesome5 name="arrow-left" size={17} color={colors.text} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Turma</Text>
+        <View style={{ flex: 1, alignItems: 'center' }}>
+          <Text style={styles.headerTitle} numberOfLines={1}>
+            {report?.class?.name ?? 'Turma'}
+          </Text>
+          {report?.class && (
+            <Text style={styles.headerSub} numberOfLines={1}>
+              {report.class.year}
+              {report.class.weekday !== null && report.class.weekday !== undefined
+                ? ` · ${WEEKDAYS[report.class.weekday]}`
+                : ''}
+              {report.class.time ? ` às ${report.class.time}` : ''}
+              {report.class.room ? ` · ${report.class.room}` : ''}
+            </Text>
+          )}
+        </View>
         <View style={styles.headerBtn} />
       </View>
 
@@ -1273,6 +1289,7 @@ const createStyles = (colors: ReturnType<typeof useColors>) =>
     },
     headerBtn: { width: 38, height: 38, alignItems: 'center', justifyContent: 'center' },
     headerTitle: { fontSize: 17, fontWeight: '800', color: colors.text },
+    headerSub: { fontSize: 11.5, color: colors.textSecondary },
     scroll: { padding: 16, paddingBottom: 40 },
     subtitle: { fontSize: 13, color: colors.textSecondary, marginBottom: 12 },
 

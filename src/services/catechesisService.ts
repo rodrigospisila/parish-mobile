@@ -80,6 +80,8 @@ export interface CatechesisStudentReport {
 }
 
 export interface CatechesisClassReport {
+  /** Identidade da turma (cabeçalho: nome · ano · dia/horário) */
+  class?: { id: string; name: string; year: number; weekday?: number | null; time?: string | null; room?: string | null } | null;
   /** Equipe da turma (catequistas e auxiliares) */
   catechists: Array<{ memberId: string; fullName: string; role: string }>;
   total: number;
