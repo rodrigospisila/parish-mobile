@@ -11,6 +11,8 @@ import {
   Modal,
   Pressable,
   TextInput,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Stack, useRouter } from 'expo-router';
@@ -361,7 +363,7 @@ export default function CatechesisClassesScreen() {
                     </Text>
                   </View>
                   <Text style={styles.cardStage} numberOfLines={1}>
-                    {item.class.stage.name} · {item.class.name}
+                    {item.class.name} · {item.class.year}
                   </Text>
                   <Text style={styles.cardMeta} numberOfLines={1}>
                     {item.class.community.name}
@@ -800,6 +802,7 @@ export default function CatechesisClassesScreen() {
         animationType="fade"
         onRequestClose={() => setDenomView(null)}
       >
+        <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <Pressable style={styles.assessOverlay} onPress={() => setDenomView(null)}>
           <Pressable style={styles.assessSheet} onPress={() => {}}>
             <Text style={styles.assessTitle}>Batismo em outra denominação</Text>
@@ -828,6 +831,7 @@ export default function CatechesisClassesScreen() {
             </TouchableOpacity>
           </Pressable>
         </Pressable>
+        </KeyboardAvoidingView>
       </Modal>
 
       {/* Pareceres (leitura da família) — Modal trata o voltar do Android */}

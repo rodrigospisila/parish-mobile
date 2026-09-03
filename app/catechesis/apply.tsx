@@ -8,19 +8,30 @@ import {
   ActivityIndicator,
   TextInput,
   Alert,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  Pressable,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import { FontAwesome5, Ionicons } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
+import * as DocumentPicker from 'expo-document-picker';
 import { useColors } from '../../src/context/ThemeContext';
 import { useCommunity } from '../../src/context/CommunityContext';
 import {
+  CatechesisDocRequirement,
   CatechesisOpenClass,
   MyDependent,
   applyCatechesis,
   getCatechesisOpenClasses,
+  getClassDocRequirements,
   getMyDependents,
+  getMyFamilyCatechesis,
+  submitCatechesisDeclaration,
+  submitCatechesisDocument,
 } from '../../src/services/catechesisService';
 
 const WEEKDAYS = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
@@ -45,6 +56,11 @@ const birthToIso = (value: string): string | null => {
 
 type Who = { kind: 'self' } | { kind: 'dependent'; id: string; name: string } | { kind: 'new' };
 
+/** Documento resolvido AINDA NA INSCRIÇÃO: arquivo anexado ou declaração. */
+type DocDraft =
+  | { type: 'file'; asset: { uri: string; mimeType?: string | null; fileName?: string | null } }
+  | { type: 'declaration'; declaration: 'NOT_HAVE' | 'OTHER_DENOMINATION'; denomination?: string };
+
 /** Inscrição online na catequese (responsável ou o próprio adulto). */
 export default function CatechesisApplyScreen() {
   const router = useRouter();
@@ -56,8 +72,19 @@ export default function CatechesisApplyScreen() {
 
   const [classes, setClasses] = useState<CatechesisOpenClass[]>([]);
   const [dependents, setDependents] = useState<MyDependent[]>([]);
+  // Quem JÁ está inscrito (ativa/aguardando/fila) não aparece para inscrever —
+  // realocação é papel do coordenador
+  const [enrolledMemberIds, setEnrolledMemberIds] = useState<Set<string>>(new Set());
+  const [selfEnrolled, setSelfEnrolled] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+
+  // Documentos da turma escolhida, resolvidos NA inscrição
+  const [docReqs, setDocReqs] = useState<CatechesisDocRequirement[] | null>(null);
+  const [docsDraft, setDocsDraft] = useState<Record<string, DocDraft>>({});
+  const [denomFor, setDenomFor] = useState<string | null>(null);
+  const [denomText, setDenomText] = useState('');
+  const docReqsCache = useRef<Map<string, CatechesisDocRequirement[]>>(new Map());
 
   const [selectedClass, setSelectedClass] = useState<CatechesisOpenClass | null>(null);
   // Filtros de ano e etapa (na virada, 2026 e 2027 convivem na lista)
@@ -66,7 +93,8 @@ export default function CatechesisApplyScreen() {
   // Defaults dos filtros só na primeira carga por comunidade — reexecuções do
   // load (refoco) não podem descartar a escolha do usuário
   const defaultsAppliedFor = useRef<string | null>(null);
-  const [who, setWho] = useState<Who>({ kind: 'self' });
+  // Padrão: cadastrar um filho novo — o caso mais comum da inscrição
+  const [who, setWho] = useState<Who>({ kind: 'new' });
 
   // Turma selecionada que sai da lista visível (filtro mudou) é desmarcada —
   // sem isso o envio ia para uma turma que o usuário nem está vendo
@@ -80,6 +108,35 @@ export default function CatechesisApplyScreen() {
       return visible ? prev : null;
     });
   }, [classes, yearFilter, stageFilter]);
+
+  // Turma escolhida → carrega o que ela pede de documentos (rascunho zera)
+  useEffect(() => {
+    setDocsDraft({});
+    if (!selectedClass) {
+      setDocReqs(null);
+      return;
+    }
+    const cached = docReqsCache.current.get(selectedClass.classId);
+    if (cached) {
+      setDocReqs(cached);
+      return;
+    }
+    let alive = true;
+    setDocReqs(null);
+    getClassDocRequirements(selectedClass.classId)
+      .then((reqs) => {
+        docReqsCache.current.set(selectedClass.classId, reqs);
+        if (alive) setDocReqs(reqs);
+      })
+      .catch(() => {
+        // Sem os requisitos (rede), a inscrição segue — documentos ficam
+        // para depois, pelo card da matrícula
+        if (alive) setDocReqs([]);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [selectedClass?.classId]);
   const [childName, setChildName] = useState('');
   const [childBirth, setChildBirth] = useState('');
   const [consent, setConsent] = useState(false);
@@ -89,10 +146,17 @@ export default function CatechesisApplyScreen() {
     setIsLoading(true);
     setLoadError(null);
     try {
-      const [openClasses, myDependents] = await Promise.all([
+      const [openClasses, myDependents, familyItems] = await Promise.all([
         getCatechesisOpenClasses(activeCommunityId),
         getMyDependents().catch(() => [] as MyDependent[]),
+        getMyFamilyCatechesis().catch(() => []),
       ]);
+      // Já inscritos (ativa/aguardando aprovação/fila) saem da lista de "quem"
+      const effective = familyItems.filter((item) =>
+        ['ACTIVE', 'PENDING_APPROVAL', 'WAITLISTED'].includes(item.status),
+      );
+      setEnrolledMemberIds(new Set(effective.map((item) => item.member.id)));
+      setSelfEnrolled(effective.some((item) => item.member.isSelf));
       setClasses(openClasses);
       // Seleção re-resolvida contra a lista nova (turma pode ter saído)
       setSelectedClass((prev) => (prev ? openClasses.find((k) => k.classId === prev.classId) ?? null : null));
@@ -124,7 +188,119 @@ export default function CatechesisApplyScreen() {
     }, [load]),
   );
 
-  const handleSubmit = async () => {
+  // ---- documentos resolvidos na própria inscrição ----
+  const attachFileFor = (kind: string) => {
+    const pickImage = async (useCamera: boolean) => {
+      const permission = useCamera
+        ? await ImagePicker.requestCameraPermissionsAsync()
+        : await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permission.granted) {
+        Alert.alert('Permissão', 'Autorize o acesso para anexar a foto do documento.');
+        return;
+      }
+      const result = useCamera
+        ? await ImagePicker.launchCameraAsync({ quality: 0.7 })
+        : await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.7 });
+      if (result.canceled || !result.assets?.length) return;
+      setDocsDraft((prev) => ({ ...prev, [kind]: { type: 'file', asset: result.assets[0] } }));
+    };
+    const pickPdf = async () => {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: ['application/pdf', 'image/*'],
+        copyToCacheDirectory: true,
+      });
+      if (result.canceled || !result.assets?.length) return;
+      const asset = result.assets[0];
+      setDocsDraft((prev) => ({
+        ...prev,
+        [kind]: {
+          type: 'file',
+          asset: { uri: asset.uri, mimeType: asset.mimeType ?? 'application/pdf', fileName: asset.name ?? 'documento.pdf' },
+        },
+      }));
+    };
+    Alert.alert(`Anexar ${kind}`, 'Fotografe, escolha da galeria ou anexe um PDF.', [
+      { text: 'Cancelar', style: 'cancel' },
+      { text: '📷 Tirar foto', onPress: () => void pickImage(true) },
+      { text: '🖼 Galeria', onPress: () => void pickImage(false) },
+      { text: '📄 Arquivo/PDF', onPress: () => void pickPdf() },
+    ]);
+  };
+
+  const handleConfirmDenomination = () => {
+    if (!denomFor) return;
+    const denomination = denomText.trim();
+    if (denomination.length < 2) {
+      Alert.alert('Denominação', 'Informe em qual igreja o batismo foi realizado.');
+      return;
+    }
+    setDocsDraft((prev) => ({ ...prev, [denomFor]: { type: 'declaration', declaration: 'OTHER_DENOMINATION', denomination } }));
+    setDenomFor(null);
+    setDenomText('');
+  };
+
+  /** Rótulo curto do que foi escolhido para o requisito. */
+  const draftLabel = (draft: DocDraft): string => {
+    if (draft.type === 'file') return `📎 ${draft.asset.fileName ?? 'foto anexada'}`;
+    return draft.declaration === 'NOT_HAVE' ? 'Declarado: não tem' : `Outra denominação: ${draft.denomination}`;
+  };
+
+  const doSubmit = async () => {
+    if (!selectedClass) return;
+    setSubmitting(true);
+    try {
+      const result = await applyCatechesis({
+        classId: selectedClass.classId,
+        forMemberId: who.kind === 'dependent' ? who.id : undefined,
+        newChild:
+          who.kind === 'new'
+            ? { fullName: childName.trim(), birthDate: birthToIso(childBirth) || undefined }
+            : undefined,
+        consentGiven: true,
+      });
+
+      // Envia os documentos resolvidos na inscrição (um a um; falha não
+      // derruba a inscrição — dá para reenviar pelo card depois)
+      const failures: string[] = [];
+      let sent = 0;
+      for (const [kind, draft] of Object.entries(docsDraft)) {
+        try {
+          if (draft.type === 'file') {
+            await submitCatechesisDocument(result.id, kind, draft.asset);
+          } else {
+            await submitCatechesisDeclaration(result.id, kind, draft.declaration, draft.denomination);
+          }
+          sent += 1;
+        } catch {
+          failures.push(kind);
+        }
+      }
+
+      const docsLine = sent > 0 ? ` ${sent} documento(s)/declaração(ões) enviados junto.` : '';
+      const failLine = failures.length
+        ? ` Atenção: ${failures.join(', ')} não foi enviado — reenvie pelo cartão da matrícula.`
+        : '';
+      if (result?.status === 'WAITLISTED') {
+        Alert.alert(
+          'Na fila de espera ✓',
+          `A turma está cheia, mas o pedido entrou na fila de espera. A coordenação pode abrir uma vaga — você recebe o aviso por aqui.${docsLine}${failLine}`,
+          [{ text: 'OK', onPress: () => router.back() }],
+        );
+      } else {
+        Alert.alert(
+          'Inscrição enviada ✓',
+          `A coordenação da catequese vai confirmar a matrícula — você recebe o aviso por aqui.${docsLine}${failLine}`,
+          [{ text: 'OK', onPress: () => router.back() }],
+        );
+      }
+    } catch (error: any) {
+      Alert.alert('Não foi possível inscrever', error?.message ?? 'Tente novamente.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleSubmit = () => {
     if (!selectedClass) {
       Alert.alert('Escolha a turma', 'Toque numa turma para selecionar.');
       return;
@@ -149,35 +325,21 @@ export default function CatechesisApplyScreen() {
       );
       return;
     }
-    setSubmitting(true);
-    try {
-      const result = await applyCatechesis({
-        classId: selectedClass.classId,
-        forMemberId: who.kind === 'dependent' ? who.id : undefined,
-        newChild:
-          who.kind === 'new'
-            ? { fullName: childName.trim(), birthDate: birthToIso(childBirth) || undefined }
-            : undefined,
-        consentGiven: true,
-      });
-      if (result?.status === 'WAITLISTED') {
-        Alert.alert(
-          'Na fila de espera ✓',
-          'A turma está cheia, mas o pedido entrou na fila de espera. A coordenação pode abrir uma vaga — você recebe o aviso por aqui.',
-          [{ text: 'OK', onPress: () => router.back() }],
-        );
-      } else {
-        Alert.alert(
-          'Inscrição enviada ✓',
-          'A coordenação da catequese vai confirmar a matrícula — você recebe o aviso por aqui.',
-          [{ text: 'OK', onPress: () => router.back() }],
-        );
-      }
-    } catch (error: any) {
-      Alert.alert('Não foi possível inscrever', error?.message ?? 'Tente novamente.');
-    } finally {
-      setSubmitting(false);
+    // Documentos obrigatórios sem anexo/declaração: avisa, mas não trava a
+    // inscrição — a família pode não estar com o papel em mãos agora
+    const missingRequired = (docReqs ?? []).filter((req) => req.required && !docsDraft[req.kind]);
+    if (missingRequired.length) {
+      Alert.alert(
+        'Documento obrigatório pendente',
+        `Falta anexar: ${missingRequired.map((req) => req.kind).join(', ')}. Você pode enviar agora ou depois, pelo cartão da matrícula.`,
+        [
+          { text: 'Voltar e anexar', style: 'cancel' },
+          { text: 'Enviar mesmo assim', onPress: () => void doSubmit() },
+        ],
+      );
+      return;
     }
+    void doSubmit();
   };
 
   return (
@@ -191,7 +353,15 @@ export default function CatechesisApplyScreen() {
         <View style={styles.headerBtn} />
       </View>
 
-      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
+      <ScrollView
+        contentContainerStyle={styles.scroll}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+      >
         {isLoading ? (
           <ActivityIndicator size="large" color={colors.primary} style={{ marginTop: 40 }} />
         ) : loadError ? (
@@ -319,29 +489,35 @@ export default function CatechesisApplyScreen() {
 
             <Text style={styles.stepLabel}>2 · Quem vai participar</Text>
             <TouchableOpacity
-              style={[styles.whoRow, who.kind === 'self' && styles.whoSelected]}
-              onPress={() => setWho({ kind: 'self' })}
-            >
-              <Text style={styles.whoText}>Eu mesmo(a)</Text>
-            </TouchableOpacity>
-            {dependents.map((dependent) => (
-              <TouchableOpacity
-                key={dependent.id}
-                style={[
-                  styles.whoRow,
-                  who.kind === 'dependent' && who.id === dependent.id && styles.whoSelected,
-                ]}
-                onPress={() => setWho({ kind: 'dependent', id: dependent.id, name: dependent.fullName })}
-              >
-                <Text style={styles.whoText}>{dependent.fullName}</Text>
-              </TouchableOpacity>
-            ))}
-            <TouchableOpacity
               style={[styles.whoRow, who.kind === 'new' && styles.whoSelected]}
               onPress={() => setWho({ kind: 'new' })}
             >
               <Text style={styles.whoText}>＋ Cadastrar filho(a)</Text>
             </TouchableOpacity>
+            {dependents
+              // Quem já está inscrito (ativa/aguardando/fila) não reaparece —
+              // trocar de turma é com a coordenação
+              .filter((dependent) => !enrolledMemberIds.has(dependent.id))
+              .map((dependent) => (
+                <TouchableOpacity
+                  key={dependent.id}
+                  style={[
+                    styles.whoRow,
+                    who.kind === 'dependent' && who.id === dependent.id && styles.whoSelected,
+                  ]}
+                  onPress={() => setWho({ kind: 'dependent', id: dependent.id, name: dependent.fullName })}
+                >
+                  <Text style={styles.whoText}>{dependent.fullName}</Text>
+                </TouchableOpacity>
+              ))}
+            {!selfEnrolled && (
+              <TouchableOpacity
+                style={[styles.whoRow, who.kind === 'self' && styles.whoSelected]}
+                onPress={() => setWho({ kind: 'self' })}
+              >
+                <Text style={styles.whoText}>Eu mesmo(a)</Text>
+              </TouchableOpacity>
+            )}
             {who.kind === 'new' && (
               <View style={styles.newChildBox}>
                 <Text style={styles.fieldLabel}>Nome completo *</Text>
@@ -365,7 +541,84 @@ export default function CatechesisApplyScreen() {
               </View>
             )}
 
-            <Text style={styles.stepLabel}>3 · Consentimento</Text>
+            {selectedClass && (
+              <>
+                <Text style={styles.stepLabel}>3 · Documentos da turma</Text>
+                {docReqs === null ? (
+                  <Text style={styles.footNote}>Carregando o que a turma pede…</Text>
+                ) : docReqs.length === 0 ? (
+                  <Text style={styles.footNote}>
+                    Não foi possível listar os documentos agora — dá para enviar depois pelo cartão da matrícula.
+                  </Text>
+                ) : (
+                  <>
+                    {docReqs.map((req) => {
+                      const draft = docsDraft[req.kind];
+                      return (
+                        <View key={req.kind} style={styles.docReqRow}>
+                          <Text style={styles.docReqName}>
+                            {req.kind}
+                            {req.required ? <Text style={styles.docReqRequired}> · obrigatório</Text> : null}
+                          </Text>
+                          {draft ? (
+                            <View style={styles.docChosenRow}>
+                              <Text style={styles.docChosenText} numberOfLines={1}>
+                                {draftLabel(draft)}
+                              </Text>
+                              <TouchableOpacity
+                                hitSlop={8}
+                                onPress={() =>
+                                  setDocsDraft((prev) => {
+                                    const next = { ...prev };
+                                    delete next[req.kind];
+                                    return next;
+                                  })
+                                }
+                              >
+                                <Text style={styles.docRemove}>✕</Text>
+                              </TouchableOpacity>
+                            </View>
+                          ) : (
+                            <View style={styles.docBtnRow}>
+                              <TouchableOpacity style={styles.docBtn} onPress={() => attachFileFor(req.kind)}>
+                                <Text style={styles.docBtnText}>📎 Anexar</Text>
+                              </TouchableOpacity>
+                              {req.allowNotHave && (
+                                <TouchableOpacity
+                                  style={styles.docBtn}
+                                  onPress={() =>
+                                    setDocsDraft((prev) => ({ ...prev, [req.kind]: { type: 'declaration', declaration: 'NOT_HAVE' } }))
+                                  }
+                                >
+                                  <Text style={styles.docBtnText}>Não tenho</Text>
+                                </TouchableOpacity>
+                              )}
+                              {req.allowOtherDenomination && (
+                                <TouchableOpacity
+                                  style={styles.docBtn}
+                                  onPress={() => {
+                                    setDenomText('');
+                                    setDenomFor(req.kind);
+                                  }}
+                                >
+                                  <Text style={styles.docBtnText}>Outra denominação</Text>
+                                </TouchableOpacity>
+                              )}
+                            </View>
+                          )}
+                        </View>
+                      );
+                    })}
+                    <Text style={styles.footNote}>
+                      Os arquivos podem passar por conferência automática assistida por IA (provedor externo); a
+                      decisão é sempre da equipe. O que faltar dá para enviar depois pelo cartão da matrícula.
+                    </Text>
+                  </>
+                )}
+              </>
+            )}
+
+            <Text style={styles.stepLabel}>4 · Consentimento</Text>
             <TouchableOpacity style={styles.consentRow} onPress={() => setConsent((v) => !v)} activeOpacity={0.8}>
               <View style={[styles.checkbox, consent && styles.checkboxChecked]}>
                 {consent && <Ionicons name="checkmark" size={15} color="#fff" />}
@@ -396,6 +649,36 @@ export default function CatechesisApplyScreen() {
           </>
         )}
       </ScrollView>
+      </KeyboardAvoidingView>
+
+      {/* Batismo em outra denominação: informar qual */}
+      <Modal visible={!!denomFor} transparent animationType="fade" onRequestClose={() => setDenomFor(null)}>
+        <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+          <Pressable style={styles.denomOverlay} onPress={() => setDenomFor(null)}>
+            <Pressable style={styles.denomSheet} onPress={() => {}}>
+              <Text style={styles.denomTitle}>Batismo em outra denominação</Text>
+              <Text style={styles.footNote}>
+                Informe em qual igreja cristã o batismo foi realizado — a coordenação aceita ou recusa.
+              </Text>
+              <TextInput
+                style={[styles.input, { marginTop: 10 }]}
+                placeholder="Ex.: Assembleia de Deus"
+                placeholderTextColor={colors.textTertiary}
+                value={denomText}
+                onChangeText={setDenomText}
+                maxLength={80}
+                autoFocus
+              />
+              <TouchableOpacity style={styles.primaryBtn} onPress={handleConfirmDenomination}>
+                <Text style={styles.primaryBtnText}>Confirmar</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.denomCancel} onPress={() => setDenomFor(null)}>
+                <Text style={styles.denomCancelText}>Cancelar</Text>
+              </TouchableOpacity>
+            </Pressable>
+          </Pressable>
+        </KeyboardAvoidingView>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -499,4 +782,36 @@ const createStyles = (colors: ReturnType<typeof useColors>) =>
     },
     primaryBtnText: { color: '#fff', fontSize: 15, fontWeight: '800' },
     footNote: { fontSize: 12, color: colors.textTertiary, marginTop: 10, lineHeight: 17 },
+    docReqRow: {
+      backgroundColor: colors.card,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: colors.border,
+      padding: 12,
+      marginBottom: 6,
+    },
+    docReqName: { fontSize: 14, fontWeight: '700', color: colors.text },
+    docReqRequired: { color: colors.error, fontSize: 12, fontWeight: '800' },
+    docBtnRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8 },
+    docBtn: {
+      borderWidth: 1.5,
+      borderColor: colors.primary,
+      borderRadius: 10,
+      paddingHorizontal: 12,
+      paddingVertical: 7,
+    },
+    docBtnText: { color: colors.primary, fontSize: 13, fontWeight: '700' },
+    docChosenRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 8 },
+    docChosenText: { flex: 1, fontSize: 13, fontWeight: '600', color: colors.success },
+    docRemove: { fontSize: 16, fontWeight: '800', color: colors.textSecondary, paddingHorizontal: 4 },
+    denomOverlay: {
+      flex: 1,
+      backgroundColor: 'rgba(0,0,0,0.45)',
+      justifyContent: 'center',
+      padding: 24,
+    },
+    denomSheet: { backgroundColor: colors.card, borderRadius: 16, padding: 18 },
+    denomTitle: { fontSize: 16.5, fontWeight: '800', color: colors.text },
+    denomCancel: { alignItems: 'center', paddingVertical: 10, marginTop: 2 },
+    denomCancelText: { color: colors.textSecondary, fontSize: 14, fontWeight: '600' },
   });
