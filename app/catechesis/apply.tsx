@@ -140,6 +140,8 @@ export default function CatechesisApplyScreen() {
   const [childName, setChildName] = useState('');
   const [childBirth, setChildBirth] = useState('');
   const [consent, setConsent] = useState(false);
+  /** Uso de imagem: exige resposta explícita (null = ainda não escolheu) */
+  const [imageConsent, setImageConsent] = useState<boolean | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   const load = useCallback(async () => {
@@ -257,6 +259,7 @@ export default function CatechesisApplyScreen() {
             ? { fullName: childName.trim(), birthDate: birthToIso(childBirth) || undefined }
             : undefined,
         consentGiven: true,
+        imageConsent: imageConsent === true,
       });
 
       // Envia os documentos resolvidos na inscrição (um a um; falha não
@@ -322,6 +325,13 @@ export default function CatechesisApplyScreen() {
       Alert.alert(
         'Consentimento necessário',
         'Autorize o tratamento dos dados do catequizando para concluir a inscrição.',
+      );
+      return;
+    }
+    if (imageConsent === null) {
+      Alert.alert(
+        'Uso de imagem',
+        'Escolha se autoriza ou não o uso da imagem do catequizando — a inscrição vale nos dois casos.',
       );
       return;
     }
@@ -629,6 +639,39 @@ export default function CatechesisApplyScreen() {
               </Text>
             </TouchableOpacity>
 
+            <Text style={styles.imageConsentTitle}>📷 Uso de imagem</Text>
+            <Text style={styles.imageConsentText}>
+              Nos encontros, celebrações e eventos podem ser feitas fotos e vídeos, usados nos murais
+              e nos canais de comunicação da paróquia. Escolha uma opção (a inscrição vale nos dois
+              casos):
+            </Text>
+            <TouchableOpacity
+              style={[styles.imageOption, imageConsent === true && styles.imageOptionOn]}
+              activeOpacity={0.8}
+              onPress={() => setImageConsent(true)}
+            >
+              <View style={[styles.radio, imageConsent === true && styles.radioOn]}>
+                {imageConsent === true && <View style={styles.radioDot} />}
+              </View>
+              <Text style={styles.imageOptionText}>
+                <Text style={{ fontWeight: '700' }}>Autorizo</Text> o uso da imagem do catequizando
+                pela paróquia
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.imageOption, imageConsent === false && styles.imageOptionOn]}
+              activeOpacity={0.8}
+              onPress={() => setImageConsent(false)}
+            >
+              <View style={[styles.radio, imageConsent === false && styles.radioOn]}>
+                {imageConsent === false && <View style={styles.radioDot} />}
+              </View>
+              <Text style={styles.imageOptionText}>
+                <Text style={{ fontWeight: '700' }}>Não autorizo</Text> — a equipe será avisada para
+                preservar o catequizando em fotos e vídeos
+              </Text>
+            </TouchableOpacity>
+
             <TouchableOpacity
               style={[styles.primaryBtn, submitting && { opacity: 0.6 }]}
               disabled={submitting}
@@ -761,6 +804,33 @@ const createStyles = (colors: ReturnType<typeof useColors>) =>
       backgroundColor: colors.surface,
     },
     consentRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
+    imageConsentTitle: { fontSize: 14, fontWeight: '800', color: colors.text, marginTop: 14 },
+    imageConsentText: { fontSize: 12.5, color: colors.textSecondary, lineHeight: 18, marginTop: 4, marginBottom: 8 },
+    imageOption: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+      borderWidth: 1.5,
+      borderColor: colors.border,
+      borderRadius: 10,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      marginBottom: 8,
+      backgroundColor: colors.card,
+    },
+    imageOptionOn: { borderColor: colors.primary, backgroundColor: colors.primary + '10' },
+    imageOptionText: { flex: 1, fontSize: 13, color: colors.text, lineHeight: 18 },
+    radio: {
+      width: 20,
+      height: 20,
+      borderRadius: 10,
+      borderWidth: 2,
+      borderColor: colors.border,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    radioOn: { borderColor: colors.primary },
+    radioDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: colors.primary },
     checkbox: {
       width: 24,
       height: 24,

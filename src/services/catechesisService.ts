@@ -360,6 +360,8 @@ export const applyCatechesis = async (dto: {
   forMemberId?: string;
   newChild?: { fullName: string; birthDate?: string };
   consentGiven: boolean;
+  /** Uso de imagem: true autoriza, false nega (resposta explícita do responsável) */
+  imageConsent?: boolean;
 }): Promise<{ id: string; status?: string }> => {
   try {
     const { data } = await api.post('/catechesis/apply', dto);
