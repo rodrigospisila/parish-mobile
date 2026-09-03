@@ -97,6 +97,10 @@ export interface SessionAttendanceStudent {
   /** null = chamada ainda não marcada para este catequizando */
   present: boolean | null;
   late: boolean;
+  /** Falta justificada (present=false) */
+  justified?: boolean;
+  /** Atestado anexado à falta */
+  hasCertificate?: boolean;
 }
 
 export interface SessionAttendance {
@@ -242,10 +246,57 @@ export const getSessionAttendance = async (sessionId: string): Promise<SessionAt
 
 export const markSessionAttendance = async (
   sessionId: string,
-  entries: Array<{ enrollmentId: string; present: boolean; late?: boolean }>,
+  entries: Array<{ enrollmentId: string; present: boolean; late?: boolean; justified?: boolean }>,
 ): Promise<void> => {
   try {
     await api.post(`/catechesis/sessions/${sessionId}/attendance`, { entries });
+  } catch (error) {
+    throw new Error(getErrorMessage(error));
+  }
+};
+
+/** Anexa o atestado à falta — a marcação vira falta justificada na hora. */
+export const attachAbsenceCertificate = async (
+  sessionId: string,
+  enrollmentId: string,
+  asset: { uri: string; mimeType?: string | null; fileName?: string | null },
+): Promise<void> => {
+  try {
+    const form = new FormData();
+    form.append('file', {
+      uri: asset.uri,
+      type: asset.mimeType ?? 'image/jpeg',
+      name: asset.fileName ?? 'atestado.jpg',
+    } as any);
+    await api.post(`/catechesis/sessions/${sessionId}/attendance/${enrollmentId}/certificate`, form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  } catch (error) {
+    throw new Error(getErrorMessage(error));
+  }
+};
+
+export interface AttendanceGridMark {
+  sessionId: string;
+  enrollmentId: string;
+  present: boolean;
+  late: boolean;
+  justified: boolean;
+  hasCertificate: boolean;
+}
+
+export interface AttendanceGrid {
+  classId: string;
+  sessions: Array<{ id: string; date: string; topic?: string | null }>;
+  students: Array<{ enrollmentId: string; status: string; member: { id: string; fullName: string } }>;
+  marks: AttendanceGridMark[];
+}
+
+/** Folha de presença da turma (alunos × encontros, como o formulário de papel). */
+export const getAttendanceGrid = async (classId: string): Promise<AttendanceGrid> => {
+  try {
+    const { data } = await api.get(`/catechesis/classes/${classId}/attendance-grid`);
+    return data;
   } catch (error) {
     throw new Error(getErrorMessage(error));
   }

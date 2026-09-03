@@ -16,6 +16,8 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import { FontAwesome5 } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
+import * as DocumentPicker from 'expo-document-picker';
 import { useColors } from '../../src/context/ThemeContext';
 import {
   CatechesisClassReport,
@@ -26,6 +28,7 @@ import {
   getCatechesisSessions,
   getSessionAttendance,
   markSessionAttendance,
+  attachAbsenceCertificate,
   notifyClassFamilies,
   approveCatechesisEnrollment,
   rejectCatechesisEnrollment,
@@ -40,19 +43,21 @@ import {
   ClassFeeSummary,
 } from '../../src/services/catechesisService';
 
-/** Estado cíclico da chamada: null (sem marcação) → presente → atrasado → ausente. */
-type Mark = 'present' | 'late' | 'absent' | null;
+/** Estado cíclico da chamada: null → presente → atrasado → ausente → falta justificada. */
+type Mark = 'present' | 'late' | 'absent' | 'justified' | null;
 
 const nextMark = (mark: Mark): Mark => {
-  if (mark === null || mark === 'absent') return 'present';
+  if (mark === null || mark === 'justified') return 'present';
   if (mark === 'present') return 'late';
-  return 'absent';
+  if (mark === 'late') return 'absent';
+  return 'justified';
 };
 
 const markVisual = (mark: Mark): { label: string; icon: string } => {
   if (mark === 'present') return { label: 'Presente', icon: '✓' };
   if (mark === 'late') return { label: 'Atrasado', icon: '🕒' };
   if (mark === 'absent') return { label: 'Ausente', icon: '✗' };
+  if (mark === 'justified') return { label: 'Falta justificada', icon: '✗' };
   return { label: 'Marcar', icon: '·' };
 };
 
@@ -207,6 +212,8 @@ export default function CatechesisClassScreen() {
   // Chamada
   const [attendance, setAttendance] = useState<SessionAttendance | null>(null);
   const [marks, setMarks] = useState<Record<string, Mark>>({});
+  /** Atestado já anexado à falta (por matrícula, na chamada aberta) */
+  const [certAttached, setCertAttached] = useState<Record<string, boolean>>({});
   const [savingAttendance, setSavingAttendance] = useState(false);
 
   const load = useCallback(
@@ -406,15 +413,74 @@ export default function CatechesisClassScreen() {
     try {
       const data = await getSessionAttendance(sessionId);
       const initial: Record<string, Mark> = {};
+      const certs: Record<string, boolean> = {};
       for (const student of data.students) {
         initial[student.enrollmentId] =
-          student.present === null ? null : student.late ? 'late' : student.present ? 'present' : 'absent';
+          student.present === null
+            ? null
+            : student.late
+              ? 'late'
+              : student.present
+                ? 'present'
+                : student.justified
+                  ? 'justified'
+                  : 'absent';
+        certs[student.enrollmentId] = !!student.hasCertificate;
       }
       setMarks(initial);
+      setCertAttached(certs);
       setAttendance(data);
     } catch (error: any) {
       Alert.alert('Erro', error?.message ?? 'Não foi possível abrir a chamada.');
     }
+  };
+
+  /** Anexa o atestado à falta (grava na hora — a falta vira justificada). */
+  const handleAttachCertificate = (enrollmentId: string) => {
+    if (!attendance) return;
+    const sessionId = attendance.sessionId;
+    const send = async (asset: { uri: string; mimeType?: string | null; fileName?: string | null }) => {
+      try {
+        await attachAbsenceCertificate(sessionId, enrollmentId, asset);
+        setCertAttached((prev) => ({ ...prev, [enrollmentId]: true }));
+        setMarks((prev) => ({ ...prev, [enrollmentId]: 'justified' }));
+        Alert.alert('Atestado anexado ✓', 'A falta ficou registrada como justificada.');
+      } catch (error: any) {
+        Alert.alert('Não anexado', error?.message ?? 'Tente novamente.');
+      }
+    };
+    Alert.alert('Anexar atestado', 'De onde vem o arquivo?', [
+      {
+        text: 'Tirar foto',
+        onPress: async () => {
+          const perm = await ImagePicker.requestCameraPermissionsAsync();
+          if (!perm.granted) return;
+          const picked = await ImagePicker.launchCameraAsync({ quality: 0.7 });
+          const asset = picked.assets?.[0];
+          if (asset) void send({ uri: asset.uri, mimeType: asset.mimeType, fileName: asset.fileName ?? 'atestado.jpg' });
+        },
+      },
+      {
+        text: 'Galeria',
+        onPress: async () => {
+          const picked = await ImagePicker.launchImageLibraryAsync({ quality: 0.7 });
+          const asset = picked.assets?.[0];
+          if (asset) void send({ uri: asset.uri, mimeType: asset.mimeType, fileName: asset.fileName ?? 'atestado.jpg' });
+        },
+      },
+      {
+        text: 'Arquivo (PDF)',
+        onPress: async () => {
+          const picked = await DocumentPicker.getDocumentAsync({
+            type: ['application/pdf', 'image/jpeg', 'image/png', 'image/webp'],
+            copyToCacheDirectory: true,
+          });
+          const asset = picked.assets?.[0];
+          if (asset) void send({ uri: asset.uri, mimeType: asset.mimeType, fileName: asset.name });
+        },
+      },
+      { text: 'Cancelar', style: 'cancel' },
+    ]);
   };
 
   const handleCreateSession = async () => {
@@ -472,10 +538,28 @@ export default function CatechesisClassScreen() {
         enrollmentId: item.enrollmentId,
         present: item.mark === 'present' || item.mark === 'late',
         late: item.mark === 'late',
+        justified: item.mark === 'justified',
       }));
     if (entries.length === 0) {
       Alert.alert('Chamada vazia', 'Toque nos nomes para marcar presente, atrasado ou ausente.');
       return;
+    }
+    // Sair de "falta justificada" apaga o atestado anexado — confirmar antes
+    const losesCertificate = attendance.students.some(
+      (student) => certAttached[student.enrollmentId] && marks[student.enrollmentId] !== 'justified',
+    );
+    if (losesCertificate) {
+      const proceed = await new Promise<boolean>((resolve) => {
+        Alert.alert(
+          'Atestado será removido',
+          'Alguma falta com atestado anexado deixou de ser "falta justificada" — salvar assim remove o atestado. Continuar?',
+          [
+            { text: 'Cancelar', style: 'cancel', onPress: () => resolve(false) },
+            { text: 'Salvar mesmo assim', style: 'destructive', onPress: () => resolve(true) },
+          ],
+        );
+      });
+      if (!proceed) return;
     }
     setSavingAttendance(true);
     try {
@@ -608,6 +692,16 @@ export default function CatechesisClassScreen() {
                 </TouchableOpacity>
               </View>
             </View>
+            {sessions.length > 0 && (
+              <TouchableOpacity
+                style={styles.gridBtn}
+                activeOpacity={0.85}
+                onPress={() => router.push(`/catechesis/grid/${classId}` as never)}
+              >
+                <FontAwesome5 name="table" size={13} color={colors.primary} />
+                <Text style={styles.gridBtnText}>Folha de presença (todos os encontros)</Text>
+              </TouchableOpacity>
+            )}
             {sessions.length === 0 ? (
               <Text style={styles.emptyLine}>
                 Nenhum encontro registrado — crie o primeiro e faça a chamada.
@@ -1093,11 +1187,12 @@ export default function CatechesisClassScreen() {
           </View>
           <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
             <Text style={styles.subtitle}>
-              Toque no nome para alternar: presente ✓ → atrasado 🕒 → ausente ✗
+              Toque no nome para alternar: presente ✓ → atrasado 🕒 → ausente ✗ → falta justificada
             </Text>
             {(attendance?.students ?? []).map((student) => {
               const mark = marks[student.enrollmentId] ?? null;
               const visual = markVisual(mark);
+              const hasCert = !!certAttached[student.enrollmentId];
               return (
                 <TouchableOpacity
                   key={student.enrollmentId}
@@ -1106,6 +1201,7 @@ export default function CatechesisClassScreen() {
                     mark === 'present' && styles.callPresent,
                     mark === 'late' && styles.callLate,
                     mark === 'absent' && styles.callAbsent,
+                    mark === 'justified' && styles.callJustified,
                   ]}
                   activeOpacity={0.8}
                   onPress={() =>
@@ -1118,6 +1214,18 @@ export default function CatechesisClassScreen() {
                   <Text style={styles.callName} numberOfLines={1}>
                     {student.member.fullName}
                   </Text>
+                  {mark === 'justified' && (
+                    <TouchableOpacity
+                      style={styles.callClip}
+                      hitSlop={8}
+                      onPress={() => handleAttachCertificate(student.enrollmentId)}
+                    >
+                      <FontAwesome5 name="paperclip" size={13} color={hasCert ? colors.primary : colors.textTertiary} />
+                      <Text style={[styles.callClipText, hasCert && { color: colors.primary }]}>
+                        {hasCert ? 'atestado ✓' : 'atestado'}
+                      </Text>
+                    </TouchableOpacity>
+                  )}
                   <Text style={styles.callMark}>
                     {visual.icon} {visual.label}
                   </Text>
@@ -1349,6 +1457,22 @@ const createStyles = (colors: ReturnType<typeof useColors>) =>
     callPresent: { borderColor: colors.success },
     callLate: { borderColor: colors.warning },
     callAbsent: { borderColor: colors.error ?? '#d9534f' },
+    // Falta justificada: âmbar tracejado — diferente da falta "seca"
+    callJustified: { borderColor: colors.warning, borderStyle: 'dashed' },
     callName: { flex: 1, fontSize: 15, fontWeight: '600', color: colors.text },
     callMark: { fontSize: 13.5, fontWeight: '700', color: colors.textSecondary },
+    callClip: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 4 },
+    callClipText: { fontSize: 11.5, fontWeight: '700', color: colors.textTertiary },
+    gridBtn: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 8,
+      borderWidth: 1.5,
+      borderColor: colors.primary,
+      borderRadius: 10,
+      paddingVertical: 9,
+      marginBottom: 10,
+    },
+    gridBtnText: { fontSize: 13.5, fontWeight: '700', color: colors.primary },
   });
