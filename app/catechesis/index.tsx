@@ -492,7 +492,10 @@ export default function CatechesisClassesScreen() {
                     </>
                   )}
                   {(item.status === 'ACTIVE' || item.status === 'PENDING_APPROVAL') &&
-                    (() => {
+                    ((docReqsByClass[item.class.id] ?? []).length > 0 || (item.pendingDocuments ?? '').trim() !== '') && (
+                    <View style={styles.docSection}>
+                      <Text style={styles.docSectionTitle}>Documentos da inscrição</Text>
+                    {(() => {
                       const reqs = docReqsByClass[item.class.id] ?? [];
                       // Sem os requisitos da turma (offline/erro), cai no
                       // comportamento antigo: pendências em texto
@@ -670,6 +673,8 @@ export default function CatechesisClassesScreen() {
                         );
                       });
                     })()}
+                    </View>
+                  )}
                   {(item.fees ?? [])
                     .filter((fee) => fee.status === 'PENDING')
                     .map((fee) => (
@@ -678,70 +683,72 @@ export default function CatechesisClassesScreen() {
                         (procure a coordenação)
                       </Text>
                     ))}
-                  {(item.fees ?? [])
-                    .filter((fee) => fee.status === 'PAID' && fee.paymentId)
-                    .map((fee) => (
-                      <TouchableOpacity
-                        key={fee.id}
-                        style={styles.docBtn}
-                        disabled={downloadingId === fee.paymentId}
-                        onPress={async () => {
-                          setDownloadingId(fee.paymentId!);
-                          try {
-                            await shareFeeReceipt(fee.paymentId!, fee.description);
-                          } catch (error: any) {
-                            Alert.alert('Recibo', error?.message ?? 'Não foi possível gerar.');
-                          } finally {
-                            setDownloadingId(null);
-                          }
-                        }}
-                      >
-                        <Text style={styles.docBtnText}>
-                          {downloadingId === fee.paymentId ? 'Gerando...' : `🧾 Recibo · ${fee.description}`}
-                        </Text>
-                      </TouchableOpacity>
-                    ))}
-                  {(item.status === 'ACTIVE' || item.status === 'PENDING_APPROVAL') && (
-                    <TouchableOpacity
-                      style={styles.docBtn}
-                      onPress={() => router.push(`/catechesis/chat/${item.enrollmentId}` as never)}
-                    >
-                      <Text style={styles.docBtnText}>
-                        💬 Falar com a catequista{item.unreadMessages ? ` (${item.unreadMessages} nova(s))` : ''}
-                      </Text>
-                    </TouchableOpacity>
-                  )}
-                  {(item.status === 'ACTIVE' || item.status === 'COMPLETED') && (
-                    <TouchableOpacity
-                      style={styles.docBtn}
-                      onPress={() => void openFamilyAssessments(item.enrollmentId, item.member.isSelf ? 'Você' : item.member.fullName)}
-                    >
-                      <Text style={styles.docBtnText}>
-                        📝 Pareceres do catequista ({item.assessmentsCount ?? 0})
-                      </Text>
-                    </TouchableOpacity>
-                  )}
-                  {item.status === 'COMPLETED' && (
-                    <TouchableOpacity
-                      style={styles.docBtn}
-                      disabled={downloadingId === item.enrollmentId}
-                      onPress={() => void handleShareDocument(item.enrollmentId, 'certificate', item.member.fullName)}
-                    >
-                      <Text style={styles.docBtnText}>
-                        {downloadingId === item.enrollmentId ? 'Gerando...' : '🎓 Baixar certificado'}
-                      </Text>
-                    </TouchableOpacity>
-                  )}
-                  {item.status === 'ACTIVE' && (
-                    <TouchableOpacity
-                      style={styles.docBtn}
-                      disabled={downloadingId === item.enrollmentId}
-                      onPress={() => void handleShareDocument(item.enrollmentId, 'declaration', item.member.fullName)}
-                    >
-                      <Text style={styles.docBtnText}>
-                        {downloadingId === item.enrollmentId ? 'Gerando...' : '📄 Declaração de matrícula'}
-                      </Text>
-                    </TouchableOpacity>
+                  {(item.status === 'ACTIVE' || item.status === 'PENDING_APPROVAL' || item.status === 'COMPLETED') && (
+                    <View style={styles.actionRow}>
+                      {(item.status === 'ACTIVE' || item.status === 'PENDING_APPROVAL') && (
+                        <TouchableOpacity
+                          style={styles.actionChip}
+                          onPress={() => router.push(`/catechesis/chat/${item.enrollmentId}` as never)}
+                        >
+                          <Text style={styles.actionChipText}>
+                            💬 Conversa{item.unreadMessages ? ` (${item.unreadMessages})` : ''}
+                          </Text>
+                        </TouchableOpacity>
+                      )}
+                      {(item.status === 'ACTIVE' || item.status === 'COMPLETED') && (
+                        <TouchableOpacity
+                          style={styles.actionChip}
+                          onPress={() => void openFamilyAssessments(item.enrollmentId, item.member.isSelf ? 'Você' : item.member.fullName)}
+                        >
+                          <Text style={styles.actionChipText}>📝 Pareceres ({item.assessmentsCount ?? 0})</Text>
+                        </TouchableOpacity>
+                      )}
+                      {item.status === 'COMPLETED' && (
+                        <TouchableOpacity
+                          style={styles.actionChip}
+                          disabled={downloadingId === item.enrollmentId}
+                          onPress={() => void handleShareDocument(item.enrollmentId, 'certificate', item.member.fullName)}
+                        >
+                          <Text style={styles.actionChipText}>
+                            {downloadingId === item.enrollmentId ? 'Gerando…' : '🎓 Certificado'}
+                          </Text>
+                        </TouchableOpacity>
+                      )}
+                      {item.status === 'ACTIVE' && (
+                        <TouchableOpacity
+                          style={styles.actionChip}
+                          disabled={downloadingId === item.enrollmentId}
+                          onPress={() => void handleShareDocument(item.enrollmentId, 'declaration', item.member.fullName)}
+                        >
+                          <Text style={styles.actionChipText}>
+                            {downloadingId === item.enrollmentId ? 'Gerando…' : '📄 Declaração'}
+                          </Text>
+                        </TouchableOpacity>
+                      )}
+                      {(item.fees ?? [])
+                        .filter((fee) => fee.status === 'PAID' && fee.paymentId)
+                        .map((fee) => (
+                          <TouchableOpacity
+                            key={fee.id}
+                            style={styles.actionChip}
+                            disabled={downloadingId === fee.paymentId}
+                            onPress={async () => {
+                              setDownloadingId(fee.paymentId!);
+                              try {
+                                await shareFeeReceipt(fee.paymentId!, fee.description);
+                              } catch (error: any) {
+                                Alert.alert('Recibo', error?.message ?? 'Não foi possível gerar.');
+                              } finally {
+                                setDownloadingId(null);
+                              }
+                            }}
+                          >
+                            <Text style={styles.actionChipText}>
+                              {downloadingId === fee.paymentId ? 'Gerando…' : `🧾 ${fee.description}`}
+                            </Text>
+                          </TouchableOpacity>
+                        ))}
+                    </View>
                   )}
                 </View>
               ))}
@@ -1064,14 +1071,48 @@ const createStyles = (colors: ReturnType<typeof useColors>) =>
     applyBtnText: { color: '#fff', fontSize: 14.5, fontWeight: '800' },
     docBtn: {
       alignSelf: 'flex-start',
-      borderWidth: 1.5,
+      borderWidth: 1.25,
       borderColor: colors.primary,
+      borderRadius: 8,
+      paddingHorizontal: 10,
+      paddingVertical: 5,
+      marginTop: 6,
+    },
+    docBtnText: { color: colors.primary, fontSize: 12.5, fontWeight: '700' },
+    // Bloco delimitado dos documentos da inscrição (o miolo do card)
+    docSection: {
+      marginTop: 10,
+      padding: 10,
+      paddingTop: 8,
       borderRadius: 10,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.background,
+    },
+    docSectionTitle: {
+      fontSize: 10.5,
+      fontWeight: '800',
+      letterSpacing: 0.6,
+      textTransform: 'uppercase',
+      color: colors.textTertiary,
+      marginBottom: 2,
+    },
+    // Rodapé do card: ações gerais como chips numa linha (com quebra)
+    actionRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 8,
+      marginTop: 12,
+    },
+    actionChip: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      borderRadius: 999,
       paddingHorizontal: 12,
       paddingVertical: 7,
-      marginTop: 8,
+      backgroundColor: colors.primary + '12',
     },
-    docBtnText: { color: colors.primary, fontSize: 13, fontWeight: '700' },
+    actionChipText: { color: colors.primary, fontSize: 12.5, fontWeight: '700' },
     assessOverlay: {
       position: 'absolute',
       top: 0,
