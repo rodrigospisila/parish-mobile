@@ -644,6 +644,8 @@ export interface CatechesisChatMessage {
   mine: boolean;
   createdAt: string;
   readAt?: string | null;
+  /** Notificação criada para o outro lado (tick duplo; destaque quando readAt) */
+  deliveredAt?: string | null;
 }
 
 export interface CatechesisChatThread {

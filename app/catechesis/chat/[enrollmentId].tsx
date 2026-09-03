@@ -138,25 +138,38 @@ export default function CatechesisChatScreen() {
                 <Text style={styles.emptyText}>Nenhuma mensagem ainda — escreva a primeira.</Text>
               )}
               {thread.messages.map((message) => {
-                const mine = message.mine;
+                // Conversa de dois lados (família ↔ equipe): alinha pelo LADO —
+                // mensagem de outra pessoa do meu lado também fica à direita
+                const ownSide = message.fromTeam === thread.isTeam;
+                const read = !!message.readAt;
+                const delivered = !!message.deliveredAt;
                 return (
-                  <View key={message.id} style={[styles.row, mine ? styles.rowMine : styles.rowOther]}>
-                    <View style={[styles.bubble, mine ? styles.bubbleMine : styles.bubbleOther]}>
-                      {!mine && (
-                        <Text style={styles.author}>
+                  <View key={message.id} style={[styles.row, ownSide ? styles.rowMine : styles.rowOther]}>
+                    <View style={[styles.bubble, ownSide ? styles.bubbleMine : styles.bubbleOther]}>
+                      {!message.mine && (
+                        <Text style={[styles.author, ownSide && styles.authorMine]}>
                           {message.fromTeam ? `Equipe · ${message.authorName}` : `Família · ${message.authorName}`}
                         </Text>
                       )}
-                      <Text style={[styles.body, mine && styles.bodyMine]}>{message.body}</Text>
-                      <Text style={[styles.time, mine && styles.timeMine]}>
-                        {new Date(message.createdAt).toLocaleString('pt-BR', {
-                          day: '2-digit',
-                          month: '2-digit',
-                          hour: '2-digit',
-                          minute: '2-digit',
-                        })}
-                        {mine && message.readAt ? ' · lida' : ''}
-                      </Text>
+                      <Text style={[styles.body, ownSide && styles.bodyMine]}>{message.body}</Text>
+                      <View style={styles.foot}>
+                        <Text style={[styles.time, ownSide && styles.timeMine]}>
+                          {new Date(message.createdAt).toLocaleString('pt-BR', {
+                            day: '2-digit',
+                            month: '2-digit',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })}
+                        </Text>
+                        {ownSide && (
+                          <Text
+                            style={[styles.ticks, read && styles.ticksRead]}
+                            accessibilityLabel={read ? 'Lida' : delivered ? 'Entregue' : 'Enviada'}
+                          >
+                            {read || delivered ? '✓✓' : '✓'}
+                          </Text>
+                        )}
+                      </View>
                     </View>
                   </View>
                 );
@@ -223,10 +236,15 @@ const createStyles = (colors: ReturnType<typeof useColors>) =>
       borderBottomLeftRadius: 4,
     },
     author: { fontSize: 11, fontWeight: '700', color: colors.textSecondary },
+    authorMine: { color: 'rgba(255,255,255,0.85)' },
     body: { fontSize: 14.5, lineHeight: 20, color: colors.text },
     bodyMine: { color: '#fff' },
-    time: { fontSize: 10.5, color: colors.textTertiary, alignSelf: 'flex-end' },
+    foot: { flexDirection: 'row', alignItems: 'center', gap: 4, alignSelf: 'flex-end' },
+    time: { fontSize: 10.5, color: colors.textTertiary },
     timeMine: { color: 'rgba(255,255,255,0.75)' },
+    // ✓ enviada · ✓✓ entregue · ✓✓ verde-claro lida (sobre a bolha azul)
+    ticks: { fontSize: 11, fontWeight: '800', letterSpacing: -1.5, color: 'rgba(255,255,255,0.75)' },
+    ticksRead: { color: '#86efac' },
     composer: {
       flexDirection: 'row',
       alignItems: 'flex-end',
