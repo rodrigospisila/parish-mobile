@@ -48,3 +48,4 @@ yarn-error.*
 # Assinatura Android (NUNCA commitar — guarde backup seguro)
 credentials.json
 credentials/
+google-play-key.json
