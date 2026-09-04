@@ -44,3 +44,7 @@ yarn-error.*
 .env
 .env.local
 .env.*.local
+
+# Assinatura Android (NUNCA commitar — guarde backup seguro)
+credentials.json
+credentials/

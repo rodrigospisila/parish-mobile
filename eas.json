@@ -13,6 +13,7 @@
       "distribution": "internal",
       "channel": "preview",
       "ios": { "simulator": false },
+      "android": { "credentialsSource": "local", "buildType": "apk" },
       "env": {
         "EXPO_PUBLIC_API_URL": "https://parish-backend-production.up.railway.app/api/v1"
       }
