@@ -21,6 +21,7 @@
     "production": {
       "autoIncrement": true,
       "channel": "production",
+      "android": { "credentialsSource": "local" },
       "env": {
         "EXPO_PUBLIC_API_URL": "https://parish-backend-production.up.railway.app/api/v1"
       }
