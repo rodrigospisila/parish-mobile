@@ -409,9 +409,11 @@ export const getErrorMessage = (error: any): string => {
   if (axios.isAxiosError(error)) {
     const axiosError = error as AxiosError<ApiError>;
     
-    // Erro de rede
+    // Erro de rede — inclui o motivo técnico quando houver (ex.: falha de
+    // TLS/DNS), para diagnóstico em campo sem precisar de logs
     if (!axiosError.response) {
-      return 'Erro de conexão. Verifique sua internet.';
+      const detail = axiosError.message && axiosError.message !== 'Network Error' ? ` (${axiosError.message})` : '';
+      return `Erro de conexão. Verifique sua internet.${detail}`;
     }
 
     // Erro da API
