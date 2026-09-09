@@ -23,6 +23,7 @@ import { getMyCatechesisClasses, getMyFamilyCatechesis } from '../../src/service
 import { useColors } from '../../src/context/ThemeContext';
 import { useNotifications } from '../../src/context/NotificationContext';
 import UserAvatar from '../../src/components/UserAvatar';
+import { getDisabledMobileFeatures } from '../../src/services/settingsService';
 import { FontAwesome5 } from '@expo/vector-icons';
 import { getUpcomingEvents, Event, getEventTypeLabel, getEventTypeColor } from '../../src/services/eventService';
 import { getTodayLiturgy, LiturgyData, LiturgyReading } from '../../src/services/liturgyService';
@@ -802,12 +803,27 @@ export default function HomeScreen() {
       .catch(() => setCatechesisClassCount(0));
   }, [user?.id]);
 
-  const quickActions: { icon: string; label: string; route?: string; kind?: 'liturgy' }[] = [
-    { icon: 'calendar-alt', label: 'Calendário', route: '/(tabs)/calendar' },
-    { icon: 'clipboard-list', label: 'Minha Escala', route: '/(tabs)/schedule' },
-    { icon: 'users', label: 'Pastorais', route: '/(tabs)/pastorals' },
-    { icon: 'book-open', label: 'Liturgia', kind: 'liturgy' },
+  // Recursos desligados pelo administrador do sistema (Configurações → Aplicativo)
+  const [hiddenFeatures, setHiddenFeatures] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    let cancelled = false;
+    void getDisabledMobileFeatures().then((set) => {
+      if (!cancelled) setHiddenFeatures(set);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id]);
+  const feat = (key: string) => !hiddenFeatures.has(key);
+
+  type QuickAction = { key: string; icon: string; label: string; route?: string; kind?: 'liturgy' };
+  const allQuickActions: QuickAction[] = [
+    { key: 'calendar', icon: 'calendar-alt', label: 'Calendário', route: '/(tabs)/calendar' },
+    { key: 'my-schedule', icon: 'clipboard-list', label: 'Minha Escala', route: '/(tabs)/schedule' },
+    { key: 'pastorals', icon: 'users', label: 'Pastorais', route: '/(tabs)/pastorals' },
+    { key: 'liturgy', icon: 'book-open', label: 'Liturgia', kind: 'liturgy' },
   ];
+  const quickActions = allQuickActions.filter((action) => feat(action.key));
 
   const liturgyDot = getLiturgicalColor(liturgy?.liturgicalColor);
 
@@ -1005,6 +1021,7 @@ export default function HomeScreen() {
         </View>
 
         {/* MISSAS POR PERTO */}
+        {feat('nearby-masses') && (
         <TouchableOpacity
           style={styles.nearbyBanner}
           activeOpacity={0.9}
@@ -1021,6 +1038,7 @@ export default function HomeScreen() {
           </View>
           <FontAwesome5 name="chevron-right" size={14} color={colors.textTertiary} />
         </TouchableOpacity>
+        )}
 
         {/* PENDÊNCIAS DA COORDENAÇÃO (Onda 4) */}
         {overview && overview.total > 0 && (
@@ -1069,6 +1087,7 @@ export default function HomeScreen() {
         )}
 
         {/* DÍZIMO E OFERTAS */}
+        {feat('tithe') && (
         <TouchableOpacity
           style={styles.nearbyBanner}
           activeOpacity={0.9}
@@ -1085,8 +1104,10 @@ export default function HomeScreen() {
           </View>
           <FontAwesome5 name="chevron-right" size={14} color={colors.textTertiary} />
         </TouchableOpacity>
+        )}
 
         {/* MURAL DE ORAÇÃO */}
+        {feat('prayer-wall') && (
         <TouchableOpacity
           style={styles.nearbyBanner}
           activeOpacity={0.9}
@@ -1103,9 +1124,10 @@ export default function HomeScreen() {
           </View>
           <FontAwesome5 name="chevron-right" size={14} color={colors.textTertiary} />
         </TouchableOpacity>
+        )}
 
         {/* CATEQUESE — inscrição aberta a todos; turmas/chamada para catequistas */}
-        {(
+        {feat('catechesis') && (
           <TouchableOpacity
             style={styles.nearbyBanner}
             activeOpacity={0.9}
@@ -1127,12 +1149,15 @@ export default function HomeScreen() {
         )}
 
         {/* PRÓXIMA MISSA */}
+        {feat('next-celebration') && (
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Próxima celebração</Text>
           {renderNextMass()}
         </View>
+        )}
 
         {/* PALAVRA PASTORAL */}
+        {feat('pastoral-word') && (
         <View style={styles.section}>
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
             <Text style={styles.sectionTitle}>📜 Palavra Pastoral</Text>
@@ -1142,8 +1167,10 @@ export default function HomeScreen() {
           </View>
           <View style={styles.sectionCard}>{renderClergyMessages()}</View>
         </View>
+        )}
 
         {/* PRÓXIMOS EVENTOS */}
+        {feat('upcoming-events') && (
         <View style={styles.section}>
           <View style={styles.sectionHeaderRow}>
             <Text style={styles.sectionTitle}>Próximos eventos</Text>
@@ -1153,8 +1180,10 @@ export default function HomeScreen() {
           </View>
           {renderUpcomingEvents()}
         </View>
+        )}
 
         {/* MISSAS FIXAS */}
+        {feat('mass-schedules') && (
         <View style={styles.section}>
           <View style={styles.sectionHeaderRow}>
             <Text style={styles.sectionTitle}>Missas fixas</Text>
@@ -1168,12 +1197,15 @@ export default function HomeScreen() {
           </View>
           <View style={styles.sectionCard}>{renderMassSchedules()}</View>
         </View>
+        )}
 
         {/* LITURGIA DO DIA */}
+        {feat('liturgy') && (
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Liturgia do dia</Text>
           <View style={styles.sectionCard}>{renderLiturgy()}</View>
         </View>
+        )}
       </ScrollView>
     </SafeAreaView>
   );
