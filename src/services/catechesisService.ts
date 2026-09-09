@@ -687,6 +687,61 @@ export const shareCatechesisDeclaration = (enrollmentId: string, memberName?: st
     `declaracao-${memberName ? pdfSlug(memberName) : enrollmentId.slice(-8)}.pdf`,
   );
 
+// ===== Ferramentas da turma (equipe): as mesmas do painel web =====
+
+/** Lista da turma em PDF (catequizandos, responsáveis, contatos, assinaturas). */
+export const shareClassRoster = (classId: string, className?: string) =>
+  downloadCatechesisPdf(
+    `/catechesis/classes/${classId}/roster.pdf`,
+    `lista-${className ? pdfSlug(className) : classId.slice(-8)}.pdf`,
+  );
+
+/**
+ * Cria os encontros das datas informadas (AAAA-MM-DD) de uma vez; dias que já
+ * têm encontro são pulados e as famílias recebem um único aviso-resumo.
+ */
+export const generateClassSessions = async (
+  classId: string,
+  dates: string[],
+): Promise<{ created: number; skipped: number }> => {
+  try {
+    const { data } = await api.post(`/catechesis/classes/${classId}/generate-sessions`, { dates });
+    return { created: Number(data?.created ?? 0), skipped: Number(data?.skipped ?? 0) };
+  } catch (error) {
+    throw new Error(getErrorMessage(error));
+  }
+};
+
+/** Define/limpa o tema de vários encontros de uma vez (tema vazio = limpar). */
+export const updateClassSessionTopics = async (
+  classId: string,
+  items: { sessionId: string; topic: string }[],
+): Promise<{ updated: number }> => {
+  try {
+    const { data } = await api.post(`/catechesis/classes/${classId}/sessions/topics`, { items });
+    return { updated: Number(data?.updated ?? 0) };
+  } catch (error) {
+    throw new Error(getErrorMessage(error));
+  }
+};
+
+export interface SentNotice {
+  title: string;
+  body: string;
+  sentAt: string;
+  kind: 'message' | 'agenda' | 'session-moved' | 'family-message' | string;
+}
+
+/** Histórico do que a equipe já enviou às famílias da turma (só leitura). */
+export const getClassSentNotices = async (classId: string): Promise<SentNotice[]> => {
+  try {
+    const { data } = await api.get(`/catechesis/classes/${classId}/sent-notices`);
+    return Array.isArray(data) ? data : [];
+  } catch (error) {
+    throw new Error(getErrorMessage(error));
+  }
+};
+
 // ============================================
 // CONVERSA FAMÍLIA ↔ EQUIPE (Onda 4)
 // ============================================

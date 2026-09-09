@@ -41,7 +41,13 @@ import {
   notifyEnrollmentFamily,
   getClassFees,
   ClassFeeSummary,
+  generateClassSessions,
+  updateClassSessionTopics,
+  getClassSentNotices,
+  SentNotice,
+  shareClassRoster,
 } from '../../src/services/catechesisService';
+import { holidayLabel, isoToBr, maskBrDate, parseBrDate } from '../../src/utils/holidays';
 
 const WEEKDAYS = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
 
@@ -95,11 +101,25 @@ export default function CatechesisClassScreen() {
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
-  // Novo encontro
+  // Novo encontro (data digitada em dd/mm/aaaa)
   const [showNewSession, setShowNewSession] = useState(false);
-  const [newDate, setNewDate] = useState(todayIso());
+  const [newDate, setNewDate] = useState(isoToBr(todayIso()));
   const [newTopic, setNewTopic] = useState('');
   const [creating, setCreating] = useState(false);
+
+  // Ferramentas da turma (as mesmas do painel web)
+  const [showAgenda, setShowAgenda] = useState(false);
+  const [agendaFrom, setAgendaFrom] = useState('');
+  const [agendaTo, setAgendaTo] = useState('');
+  const [agendaDates, setAgendaDates] = useState<Record<string, boolean>>({});
+  const [generatingAgenda, setGeneratingAgenda] = useState(false);
+  const [showTopics, setShowTopics] = useState(false);
+  const [topicsDraft, setTopicsDraft] = useState<Record<string, string>>({});
+  const [topicsBaseline, setTopicsBaseline] = useState<Record<string, string>>({});
+  const [savingTopics, setSavingTopics] = useState(false);
+  const [showNotices, setShowNotices] = useState(false);
+  const [notices, setNotices] = useState<SentNotice[] | null>(null);
+  const [sharingRoster, setSharingRoster] = useState(false);
 
   // Mensagem às famílias
   const [showNotify, setShowNotify] = useState(false);
@@ -490,18 +510,158 @@ export default function CatechesisClassScreen() {
     ]);
   };
 
+  // ===== Ferramentas da turma =====
+
+  /** Prévia da agenda: todos os dias da semana da turma no período (feriados desmarcados). */
+  const buildAgendaPreview = () => {
+    const weekday = report?.class?.weekday;
+    if (weekday === null || weekday === undefined) {
+      Alert.alert('Agenda', 'Defina o dia da semana da turma (no painel web) para gerar a agenda.');
+      return;
+    }
+    const from = parseBrDate(agendaFrom);
+    const to = parseBrDate(agendaTo);
+    if (!from || !to || from > to) {
+      Alert.alert('Período inválido', 'Informe início e fim em dd/mm/aaaa, com o início antes do fim.');
+      return;
+    }
+    const start = new Date(`${from}T00:00:00Z`);
+    const end = new Date(`${to}T00:00:00Z`);
+    if ((end.getTime() - start.getTime()) / 86400000 > 370) {
+      Alert.alert('Período muito longo', 'Gere um ano letivo por vez (máximo de 12 meses).');
+      return;
+    }
+    const dates: Record<string, boolean> = {};
+    for (let cursor = new Date(start); cursor <= end; cursor.setUTCDate(cursor.getUTCDate() + 1)) {
+      if (cursor.getUTCDay() !== weekday) continue;
+      const iso = cursor.toISOString().slice(0, 10);
+      dates[iso] = holidayLabel(iso) === null;
+    }
+    if (!Object.keys(dates).length) {
+      Alert.alert('Agenda', `Nenhuma ${WEEKDAYS[weekday].toLowerCase()} dentro do período.`);
+      return;
+    }
+    setAgendaDates(dates);
+  };
+
+  const handleGenerateAgenda = async () => {
+    if (!classId) return;
+    const dates = Object.keys(agendaDates).filter((iso) => agendaDates[iso]).sort();
+    if (!dates.length) {
+      Alert.alert('Agenda', 'Marque pelo menos uma data.');
+      return;
+    }
+    setGeneratingAgenda(true);
+    try {
+      const result = await generateClassSessions(classId, dates);
+      setShowAgenda(false);
+      setAgendaDates({});
+      setAgendaFrom('');
+      setAgendaTo('');
+      await load(true);
+      Alert.alert(
+        'Agenda criada',
+        `${result.created} encontro(s) criado(s)${result.skipped ? ` (${result.skipped} já existiam)` : ''} — as famílias receberam um único aviso-resumo.`,
+      );
+    } catch (error: any) {
+      Alert.alert('Agenda', error?.message ?? 'Não foi possível gerar a agenda.');
+    } finally {
+      setGeneratingAgenda(false);
+    }
+  };
+
+  /** Temas dos encontros futuros; guarda o estado inicial para enviar só o que mudou. */
+  const openTopics = async () => {
+    if (!classId) return;
+    let list = sessions;
+    try {
+      list = await getCatechesisSessions(classId);
+      setSessions(list);
+    } catch {
+      // usa a lista em memória
+    }
+    const now = new Date();
+    const todayUtc = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+    const upcoming = list
+      .filter((session) => new Date(session.date).getTime() >= todayUtc)
+      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+    if (!upcoming.length) {
+      Alert.alert('Planejar temas', 'Nenhum encontro futuro — gere a agenda primeiro.');
+      return;
+    }
+    const draft: Record<string, string> = {};
+    for (const session of upcoming) draft[session.id] = session.topic ?? '';
+    setTopicsBaseline(draft);
+    setTopicsDraft({ ...draft });
+    setShowTopics(true);
+  };
+
+  const handleSaveTopics = async () => {
+    if (!classId) return;
+    const items = Object.entries(topicsDraft)
+      .filter(([sessionId, topic]) => (topicsBaseline[sessionId] ?? '') !== topic)
+      .map(([sessionId, topic]) => ({ sessionId, topic: topic.trim() }));
+    if (!items.length) {
+      setShowTopics(false);
+      return;
+    }
+    setSavingTopics(true);
+    try {
+      const result = await updateClassSessionTopics(classId, items);
+      setShowTopics(false);
+      await load(true);
+      Alert.alert('Temas salvos', `${result.updated} encontro(s) atualizado(s).`);
+    } catch (error: any) {
+      Alert.alert('Planejar temas', error?.message ?? 'Não foi possível salvar os temas.');
+    } finally {
+      setSavingTopics(false);
+    }
+  };
+
+  const openNotices = async () => {
+    if (!classId) return;
+    setNotices(null);
+    setShowNotices(true);
+    try {
+      setNotices(await getClassSentNotices(classId));
+    } catch (error: any) {
+      setShowNotices(false);
+      Alert.alert('Avisos enviados', error?.message ?? 'Não foi possível carregar o histórico.');
+    }
+  };
+
+  const handleShareRoster = async () => {
+    if (!classId) return;
+    setSharingRoster(true);
+    try {
+      await shareClassRoster(classId, report?.class?.name);
+    } catch (error: any) {
+      Alert.alert('Lista da turma', error?.message ?? 'Não foi possível gerar a lista.');
+    } finally {
+      setSharingRoster(false);
+    }
+  };
+
+  const NOTICE_KIND: Record<string, string> = {
+    'family-message': 'aviso individual',
+    agenda: 'agenda publicada',
+    'session-moved': 'remarcação',
+    message: 'aviso da turma',
+  };
+
   const handleCreateSession = async () => {
     if (!classId) return;
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(newDate.trim())) {
-      Alert.alert('Data inválida', 'Use o formato AAAA-MM-DD (ex.: 2026-08-23).');
+    const isoDate = parseBrDate(newDate);
+    if (!isoDate) {
+      Alert.alert('Data inválida', 'Use o formato dd/mm/aaaa (ex.: 23/08/2026).');
       return;
     }
     setCreating(true);
     try {
-      const created = await createCatechesisSession(classId, newDate.trim(), newTopic.trim() || undefined);
+      const created = await createCatechesisSession(classId, isoDate, newTopic.trim() || undefined);
       setShowNewSession(false);
       setNewTopic('');
-      setNewDate(todayIso());
+      setNewDate(isoToBr(todayIso()));
       await load(true);
       // Abre a chamada do encontro recém-criado
       await openAttendance(created.id);
@@ -718,6 +878,40 @@ export default function CatechesisClassScreen() {
                 </TouchableOpacity>
               </View>
             </View>
+
+            {/* Ferramentas da turma — as mesmas do painel web */}
+            <View style={styles.toolRow}>
+              <TouchableOpacity
+                style={styles.toolChip}
+                onPress={() => {
+                  setAgendaDates({});
+                  setAgendaFrom('');
+                  setAgendaTo('');
+                  setShowAgenda(true);
+                }}
+                accessibilityRole="button"
+              >
+                <FontAwesome5 name="calendar-alt" size={12} color={colors.primary} />
+                <Text style={styles.toolChipText}>Gerar agenda</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.toolChip} onPress={() => void openTopics()} accessibilityRole="button">
+                <FontAwesome5 name="clipboard-list" size={12} color={colors.primary} />
+                <Text style={styles.toolChipText}>Planejar temas</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.toolChip} onPress={() => void openNotices()} accessibilityRole="button">
+                <FontAwesome5 name="envelope-open-text" size={12} color={colors.primary} />
+                <Text style={styles.toolChipText}>Avisos enviados</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.toolChip, sharingRoster && { opacity: 0.6 }]}
+                disabled={sharingRoster}
+                onPress={() => void handleShareRoster()}
+                accessibilityRole="button"
+              >
+                <FontAwesome5 name="print" size={12} color={colors.primary} />
+                <Text style={styles.toolChipText}>{sharingRoster ? 'Gerando…' : 'Lista da turma'}</Text>
+              </TouchableOpacity>
+            </View>
             {sessions.length > 0 && (
               <TouchableOpacity
                 style={styles.gridBtn}
@@ -860,19 +1054,208 @@ export default function CatechesisClassScreen() {
         )}
       </ScrollView>
 
+      {/* Gerar agenda */}
+      <Modal visible={showAgenda} animationType="slide" onRequestClose={() => setShowAgenda(false)}>
+        <View style={[styles.safe, { paddingTop: insets.top }]}>
+          <View style={styles.header}>
+            <TouchableOpacity style={styles.headerBtn} onPress={() => setShowAgenda(false)} hitSlop={10}>
+              <FontAwesome5 name="times" size={18} color={colors.text} />
+            </TouchableOpacity>
+            <Text style={styles.headerTitle}>Gerar agenda</Text>
+            <View style={styles.headerBtn} />
+          </View>
+          <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+            <Text style={styles.subtitle}>
+              Cria um encontro em cada{' '}
+              {report?.class?.weekday !== null && report?.class?.weekday !== undefined
+                ? WEEKDAYS[report.class.weekday].toLowerCase()
+                : 'dia da turma'}{' '}
+              do período. Feriados já vêm desmarcados; dias que já têm encontro são pulados. As famílias recebem um
+              único aviso-resumo.
+            </Text>
+            <View style={{ flexDirection: 'row', gap: 10 }}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.fieldLabel}>Início (dd/mm/aaaa)</Text>
+                <TextInput
+                  style={styles.input}
+                  value={agendaFrom}
+                  onChangeText={(text) => {
+                    setAgendaFrom(maskBrDate(text));
+                    setAgendaDates({});
+                  }}
+                  placeholder="01/02/2026"
+                  placeholderTextColor={colors.textTertiary}
+                  keyboardType="number-pad"
+                  maxLength={10}
+                />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.fieldLabel}>Fim (dd/mm/aaaa)</Text>
+                <TextInput
+                  style={styles.input}
+                  value={agendaTo}
+                  onChangeText={(text) => {
+                    setAgendaTo(maskBrDate(text));
+                    setAgendaDates({});
+                  }}
+                  placeholder="30/11/2026"
+                  placeholderTextColor={colors.textTertiary}
+                  keyboardType="number-pad"
+                  maxLength={10}
+                />
+              </View>
+            </View>
+            <TouchableOpacity style={styles.gridBtn} onPress={buildAgendaPreview}>
+              <FontAwesome5 name="search" size={12} color={colors.primary} />
+              <Text style={styles.gridBtnText}>Gerar prévia</Text>
+            </TouchableOpacity>
+            {Object.keys(agendaDates).length > 0 && (
+              <>
+                <Text style={styles.groupLabel}>
+                  {Object.values(agendaDates).filter(Boolean).length} de {Object.keys(agendaDates).length} datas
+                  marcadas · toque para marcar/desmarcar
+                </Text>
+                {Object.keys(agendaDates)
+                  .sort()
+                  .map((iso) => {
+                    const checked = agendaDates[iso];
+                    const holiday = holidayLabel(iso);
+                    return (
+                      <TouchableOpacity
+                        key={iso}
+                        style={[styles.callRow, checked && styles.callPresent]}
+                        activeOpacity={0.8}
+                        accessibilityRole="button"
+                        accessibilityState={{ selected: checked }}
+                        onPress={() => setAgendaDates((prev) => ({ ...prev, [iso]: !prev[iso] }))}
+                      >
+                        <Text style={styles.callName} numberOfLines={1}>
+                          {isoToBr(iso)}
+                          {holiday ? `  🎉 ${holiday}` : ''}
+                        </Text>
+                        <Text style={styles.callMark}>{checked ? '✓' : '·'}</Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                <TouchableOpacity
+                  style={[styles.primaryBtn, generatingAgenda && { opacity: 0.6 }]}
+                  disabled={generatingAgenda}
+                  onPress={() => void handleGenerateAgenda()}
+                >
+                  <Text style={styles.primaryBtnText}>
+                    {generatingAgenda
+                      ? 'Criando...'
+                      : `Criar ${Object.values(agendaDates).filter(Boolean).length} encontro(s)`}
+                  </Text>
+                </TouchableOpacity>
+              </>
+            )}
+            <View style={{ height: insets.bottom + 24 }} />
+          </ScrollView>
+        </View>
+      </Modal>
+
+      {/* Planejar temas */}
+      <Modal visible={showTopics} animationType="slide" onRequestClose={() => setShowTopics(false)}>
+        <View style={[styles.safe, { paddingTop: insets.top }]}>
+          <View style={styles.header}>
+            <TouchableOpacity style={styles.headerBtn} onPress={() => setShowTopics(false)} hitSlop={10}>
+              <FontAwesome5 name="times" size={18} color={colors.text} />
+            </TouchableOpacity>
+            <Text style={styles.headerTitle}>Planejar temas</Text>
+            <View style={styles.headerBtn} />
+          </View>
+          <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+            <Text style={styles.subtitle}>
+              {Object.values(topicsDraft).filter((topic) => topic.trim()).length} de {Object.keys(topicsDraft).length}{' '}
+              encontros futuros com tema. Só o que você alterar é salvo.
+            </Text>
+            {sessionGroups.upcoming
+              .filter((session) => session.id in topicsDraft)
+              .map((session, index) => (
+                <View key={session.id} style={[styles.topicRow, index === 0 && styles.topicRowNext]}>
+                  <Text style={styles.topicDate}>
+                    {dateLabel(session.date)}
+                    {index === 0 ? ' · próximo' : ''}
+                  </Text>
+                  <TextInput
+                    style={styles.topicInput}
+                    value={topicsDraft[session.id] ?? ''}
+                    onChangeText={(text) => setTopicsDraft((prev) => ({ ...prev, [session.id]: text }))}
+                    placeholder="Tema do encontro"
+                    placeholderTextColor={colors.textTertiary}
+                    maxLength={120}
+                  />
+                </View>
+              ))}
+            <TouchableOpacity
+              style={[styles.primaryBtn, savingTopics && { opacity: 0.6 }]}
+              disabled={savingTopics}
+              onPress={() => void handleSaveTopics()}
+            >
+              <Text style={styles.primaryBtnText}>{savingTopics ? 'Salvando...' : 'Salvar temas'}</Text>
+            </TouchableOpacity>
+            <View style={{ height: insets.bottom + 24 }} />
+          </ScrollView>
+        </View>
+      </Modal>
+
+      {/* Avisos enviados */}
+      <Modal visible={showNotices} animationType="slide" onRequestClose={() => setShowNotices(false)}>
+        <View style={[styles.safe, { paddingTop: insets.top }]}>
+          <View style={styles.header}>
+            <TouchableOpacity style={styles.headerBtn} onPress={() => setShowNotices(false)} hitSlop={10}>
+              <FontAwesome5 name="times" size={18} color={colors.text} />
+            </TouchableOpacity>
+            <Text style={styles.headerTitle}>Avisos enviados</Text>
+            <View style={styles.headerBtn} />
+          </View>
+          <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+            {notices === null ? (
+              <ActivityIndicator color={colors.primary} style={{ marginTop: 24 }} />
+            ) : notices.length === 0 ? (
+              <Text style={styles.emptyLine}>Nenhum aviso enviado às famílias ainda.</Text>
+            ) : (
+              notices.map((notice, index) => (
+                <View key={`${notice.sentAt}-${index}`} style={styles.noticeCard}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 8 }}>
+                    <Text style={styles.noticeTitle} numberOfLines={2}>
+                      {notice.title}
+                    </Text>
+                    <Text style={styles.noticeMeta}>
+                      {new Date(notice.sentAt).toLocaleString('pt-BR', {
+                        day: '2-digit',
+                        month: '2-digit',
+                        year: '2-digit',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })}
+                    </Text>
+                  </View>
+                  <Text style={styles.noticeBody}>{notice.body}</Text>
+                  <Text style={styles.noticeKind}>{NOTICE_KIND[notice.kind] ?? 'aviso da turma'}</Text>
+                </View>
+              ))
+            )}
+            <View style={{ height: insets.bottom + 24 }} />
+          </ScrollView>
+        </View>
+      </Modal>
+
       {/* Novo encontro */}
       <Modal visible={showNewSession} transparent animationType="fade" onRequestClose={() => setShowNewSession(false)}>
         <Pressable style={styles.modalOverlay} onPress={() => setShowNewSession(false)}>
           <Pressable style={styles.modalCard} onPress={() => {}}>
             <Text style={styles.modalTitle}>Novo encontro</Text>
-            <Text style={styles.fieldLabel}>Data (AAAA-MM-DD)</Text>
+            <Text style={styles.fieldLabel}>Data (dd/mm/aaaa)</Text>
             <TextInput
               style={styles.input}
               value={newDate}
-              onChangeText={setNewDate}
-              placeholder="2026-08-23"
+              onChangeText={(text) => setNewDate(maskBrDate(text))}
+              placeholder="23/08/2026"
               placeholderTextColor={colors.textTertiary}
-              autoCapitalize="none"
+              keyboardType="number-pad"
+              maxLength={10}
             />
             <Text style={styles.fieldLabel}>Tema (opcional)</Text>
             <TextInput
@@ -1502,4 +1885,53 @@ const createStyles = (colors: ReturnType<typeof useColors>) =>
       marginBottom: 10,
     },
     gridBtnText: { fontSize: 13.5, fontWeight: '700', color: colors.primary },
+
+    // Ferramentas da turma (chips)
+    toolRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 12 },
+    toolChip: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.card,
+      borderRadius: 999,
+      paddingHorizontal: 12,
+      paddingVertical: 7,
+    },
+    toolChipText: { fontSize: 12.5, fontWeight: '700', color: colors.text },
+    topicRow: {
+      backgroundColor: colors.card,
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: 12,
+      padding: 10,
+      marginBottom: 8,
+      gap: 6,
+    },
+    topicRowNext: { borderColor: colors.primary, borderWidth: 1.5 },
+    topicDate: { fontSize: 12.5, fontWeight: '800', color: colors.textSecondary },
+    topicInput: {
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: 10,
+      paddingHorizontal: 10,
+      paddingVertical: 8,
+      color: colors.text,
+      fontSize: 14.5,
+      backgroundColor: colors.surface,
+    },
+    noticeCard: {
+      backgroundColor: colors.card,
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: 12,
+      padding: 12,
+      marginBottom: 8,
+      gap: 4,
+    },
+    noticeTitle: { flex: 1, fontSize: 14, fontWeight: '800', color: colors.text },
+    noticeMeta: { fontSize: 11.5, color: colors.textTertiary, fontWeight: '600' },
+    noticeBody: { fontSize: 13.5, color: colors.textSecondary, lineHeight: 19 },
+    noticeKind: { alignSelf: 'flex-start', fontSize: 11, fontWeight: '700', color: colors.primary, marginTop: 2 },
   });
