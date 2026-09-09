@@ -11,9 +11,11 @@ import {
   Modal,
   ScrollView,
   SectionList,
-  SafeAreaView,
   RefreshControl,
 } from 'react-native';
+// SafeAreaView do react-native NÃO aplica a barra de status no Android — o
+// da safe-area-context sim (o topo colidia com relógio/notificações)
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Calendar, DateData, LocaleConfig, Timeline } from 'react-native-calendars';
 import * as ExpoCalendar from 'expo-calendar';
 import { Ionicons } from '@expo/vector-icons';
@@ -179,6 +181,9 @@ export default function CalendarScreen() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [selectedDate, setSelectedDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [viewMode, setViewMode] = useState<'agenda' | 'week' | 'calendar'>('agenda');
+  // Modo Mês: ao rolar a lista de eventos, o calendário encolhe para a faixa
+  // da semana do dia selecionado (a lista ganha a tela); "Mês" expande de novo
+  const [monthCollapsed, setMonthCollapsed] = useState(false);
   // Mês exibido no grid (permite botão "Hoje" e swipe entre meses)
   const [visibleMonth, setVisibleMonth] = useState<string>(new Date().toISOString().split('T')[0]);
   // Grupos de eventos repetidos expandidos na agenda
@@ -758,7 +763,7 @@ export default function CalendarScreen() {
 
   if (!communityId) {
     return (
-      <SafeAreaView style={styles.safeArea}>
+      <SafeAreaView style={styles.safeArea} edges={['top']}>
         <View style={styles.centered}>
           <Text style={styles.message}>Selecione sua comunidade para ver o calendário.</Text>
         </View>
@@ -768,7 +773,7 @@ export default function CalendarScreen() {
 
   if (isLoading) {
     return (
-      <SafeAreaView style={styles.safeArea}>
+      <SafeAreaView style={styles.safeArea} edges={['top']}>
         <View style={styles.centered}>
           <ActivityIndicator size="large" color={colors.primary} />
           <Text style={styles.loadingText}>Carregando Calendário...</Text>
@@ -777,8 +782,41 @@ export default function CalendarScreen() {
     );
   }
 
+  /** Faixa com os 7 dias da semana do dia selecionado (modo Semana e modo Mês recolhido). */
+  const renderWeekStrip = () => (
+    <View style={styles.weekStrip}>
+      <Pressable style={styles.weekNav} onPress={() => shiftWeek(-7)}>
+        <Ionicons name="chevron-back" size={18} color={colors.textSecondary} />
+      </Pressable>
+      {weekDays.map((day) => {
+        const dayKey = DAY_KEY(day);
+        const isSel = dayKey === selectedDate;
+        const today = DAY_KEY(new Date()) === dayKey;
+        const hasEvents = !!markedDates[dayKey]?.periods?.length;
+        return (
+          <Pressable
+            key={dayKey}
+            style={[styles.weekDay, isSel && styles.weekDaySelected]}
+            onPress={() => setSelectedDate(dayKey)}
+          >
+            <Text style={[styles.weekDayName, isSel && styles.weekDayTextSel]}>
+              {format(day, 'EEEEEE', { locale: ptBR })}
+            </Text>
+            <Text style={[styles.weekDayNum, isSel && styles.weekDayTextSel, today && !isSel && styles.weekDayToday]}>
+              {format(day, 'd')}
+            </Text>
+            {hasEvents && <View style={[styles.weekDot, isSel && { backgroundColor: colors.textInverse }]} />}
+          </Pressable>
+        );
+      })}
+      <Pressable style={styles.weekNav} onPress={() => shiftWeek(7)}>
+        <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
+      </Pressable>
+    </View>
+  );
+
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView style={styles.safeArea} edges={['top']}>
       <View style={styles.container}>
         <View style={styles.toolbar}>
           <View style={styles.toolbarTopRow}>
@@ -793,7 +831,11 @@ export default function CalendarScreen() {
                   <Pressable
                     key={option.mode}
                     style={[styles.viewToggleButton, active && styles.viewToggleButtonActive]}
-                    onPress={() => setViewMode(option.mode)}
+                    onPress={() => {
+                      // Entrar no Mês sempre mostra o mês inteiro
+                      if (option.mode === 'calendar') setMonthCollapsed(false);
+                      setViewMode(option.mode);
+                    }}
                   >
                     <Ionicons
                       name={option.icon}
@@ -920,17 +962,27 @@ export default function CalendarScreen() {
                 <Ionicons name="today-outline" size={14} color={colors.highlight} />
                 <Text style={styles.todayButtonText}>Hoje</Text>
               </Pressable>
+              {monthCollapsed && (
+                <Pressable style={styles.todayButton} onPress={() => setMonthCollapsed(false)}>
+                  <Ionicons name="chevron-up" size={14} color={colors.highlight} />
+                  <Text style={styles.todayButtonText}>Mês inteiro</Text>
+                </Pressable>
+              )}
             </View>
-            <Calendar
-              key={isDark ? 'dark' : 'light'}
-              current={visibleMonth}
-              onDayPress={onDayPress}
-              onMonthChange={(month) => setVisibleMonth(month.dateString)}
-              enableSwipeMonths
-              markedDates={markedDates}
-              markingType={'multi-period'}
-              theme={calendarTheme}
-            />
+            {monthCollapsed ? (
+              renderWeekStrip()
+            ) : (
+              <Calendar
+                key={isDark ? 'dark' : 'light'}
+                current={visibleMonth}
+                onDayPress={onDayPress}
+                onMonthChange={(month) => setVisibleMonth(month.dateString)}
+                enableSwipeMonths
+                markedDates={markedDates}
+                markingType={'multi-period'}
+                theme={calendarTheme}
+              />
+            )}
 
             <View style={styles.eventsContainer}>
               <Text style={styles.eventsTitle}>
@@ -939,6 +991,12 @@ export default function CalendarScreen() {
               <ScrollView
                 style={styles.eventsList}
                 contentContainerStyle={styles.eventsListContent}
+                scrollEventThrottle={16}
+                onScroll={(e) => {
+                  // Rolou a lista: o mês recolhe para a semana (não volta sozinho —
+                  // "Mês inteiro" expande, evitando o sobe-e-desce a cada toque)
+                  if (!monthCollapsed && e.nativeEvent.contentOffset.y > 24) setMonthCollapsed(true);
+                }}
                 refreshControl={
                   <RefreshControl refreshing={isRefreshing} onRefresh={() => loadEvents(true)} />
                 }
@@ -956,35 +1014,7 @@ export default function CalendarScreen() {
         ) : viewMode === 'week' ? (
           <View style={styles.weekContainer}>
             {/* Faixa de dias da semana */}
-            <View style={styles.weekStrip}>
-              <Pressable style={styles.weekNav} onPress={() => shiftWeek(-7)}>
-                <Ionicons name="chevron-back" size={18} color={colors.textSecondary} />
-              </Pressable>
-              {weekDays.map((day) => {
-                const dayKey = DAY_KEY(day);
-                const isSel = dayKey === selectedDate;
-                const today = DAY_KEY(new Date()) === dayKey;
-                const hasEvents = !!markedDates[dayKey]?.periods?.length;
-                return (
-                  <Pressable
-                    key={dayKey}
-                    style={[styles.weekDay, isSel && styles.weekDaySelected]}
-                    onPress={() => setSelectedDate(dayKey)}
-                  >
-                    <Text style={[styles.weekDayName, isSel && styles.weekDayTextSel]}>
-                      {format(day, 'EEEEEE', { locale: ptBR })}
-                    </Text>
-                    <Text style={[styles.weekDayNum, isSel && styles.weekDayTextSel, today && !isSel && styles.weekDayToday]}>
-                      {format(day, 'd')}
-                    </Text>
-                    {hasEvents && <View style={[styles.weekDot, isSel && { backgroundColor: colors.textInverse }]} />}
-                  </Pressable>
-                );
-              })}
-              <Pressable style={styles.weekNav} onPress={() => shiftWeek(7)}>
-                <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
-              </Pressable>
-            </View>
+            {renderWeekStrip()}
 
             {/* Eventos "dia todo" / vários dias */}
             {allDayForSelected.length > 0 && (
@@ -1481,6 +1511,7 @@ const createStyles = (colors: ReturnType<typeof useColors>) =>
     calBar: {
       flexDirection: 'row',
       justifyContent: 'flex-end',
+      gap: 8,
       paddingHorizontal: 16,
       paddingTop: 6,
     },
