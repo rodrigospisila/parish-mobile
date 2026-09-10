@@ -827,7 +827,8 @@ export const getCommunityCatechesisClasses = async (): Promise<MyCatechesisClass
         room: c.room,
         status: c.status,
         stage: c.stage,
-        community: c.community,
+        // A lista da API traz `communityId` na raiz; o filtro da aba compara `community.id`
+        community: { id: c.community?.id ?? c.communityId, name: c.community?.name ?? '' },
         activeEnrollments: c._count?.enrollments ?? 0,
         sessionsCount: c._count?.sessions ?? 0,
         pendingApprovals: pend?.pendingApproval ?? 0,
