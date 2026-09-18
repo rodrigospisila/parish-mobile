@@ -49,6 +49,28 @@ import { useAuth } from '../../src/context/AuthContext';
 import { useCommunity } from '../../src/context/CommunityContext';
 
 const WEEKDAYS = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
+const WEEKDAYS_SHORT = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+
+/** Tipos de pendência que o painel da coordenação conta e filtra. */
+type PendKind = 'aprovar' | 'documentos' | 'mensagens' | 'chamadas' | 'mensalidades';
+type SortKey = 'pendencias' | 'nome' | 'etapa' | 'dia';
+
+const PEND_META: Record<PendKind, { label: string; icon: string; get: (k: MyCatechesisClass) => number }> = {
+  aprovar: { label: 'inscrições para aprovar', icon: 'user-check', get: (k) => k.pendingApprovals ?? 0 },
+  documentos: { label: 'documentos para conferir', icon: 'file-alt', get: (k) => k.documentsToReview ?? 0 },
+  mensagens: { label: 'mensagens da família', icon: 'comment-dots', get: (k) => k.unreadFamilyMessages ?? 0 },
+  chamadas: { label: 'chamadas em aberto', icon: 'clipboard-check', get: (k) => k.sessionsWithoutAttendance ?? 0 },
+  mensalidades: { label: 'mensalidades em aberto', icon: 'hand-holding-usd', get: (k) => k.feesPendingCount ?? 0 },
+};
+const PEND_ORDER: PendKind[] = ['aprovar', 'documentos', 'mensagens', 'chamadas', 'mensalidades'];
+
+/** Soma das pendências mostradas à coordenação — inclui mensalidade, que o
+ *  total do catequista (classPendingTotal) não conta. */
+const coordPendingTotal = (klass: MyCatechesisClass): number =>
+  PEND_ORDER.reduce((acc, kind) => acc + PEND_META[kind].get(klass), 0);
+
+const stripAccents = (value: string) =>
+  value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
 
 /** Minhas turmas de catequese (catequista/auxiliar). */
 export default function CatechesisClassesScreen() {
@@ -76,6 +98,12 @@ export default function CatechesisClassesScreen() {
   const [noticeView, setNoticeView] = useState<AppNotification[] | null>(null);
   const [attendanceView, setAttendanceView] = useState<{ name: string; items: EnrollmentAttendanceItem[] } | null>(null);
   const [agendaView, setAgendaView] = useState<{ name: string; items: Array<{ date: string; topic?: string | null }> } | null>(null);
+  // Filtros da visão da coordenação (a lista da comunidade pode passar de 30 turmas)
+  const [search, setSearch] = useState('');
+  const [stageFilter, setStageFilter] = useState<string | null>(null);
+  const [pendFilter, setPendFilter] = useState<PendKind | null>(null);
+  const [sortBy, setSortBy] = useState<SortKey>('pendencias');
+  const [filtersOpen, setFiltersOpen] = useState(false);
 
   const openNotices = async () => {
     try {
@@ -288,10 +316,28 @@ export default function CatechesisClassesScreen() {
         getMyCatechesisClasses(),
         getMyFamilyCatechesis().catch(() => [] as FamilyCatechesisItem[]),
       ]);
-      // Coordenação sem turma própria: lista as turmas da comunidade (o backend
-      // já autoriza aprovar/conversar por papel + escopo)
-      const coordination = mine.length === 0 && isCoordinatorRole ? await getCommunityCatechesisClasses() : [];
-      setClasses([...mine, ...coordination]);
+      // Coordenação vê SEMPRE as turmas da comunidade (o backend já autoriza
+      // aprovar/conversar por papel + escopo). Antes só carregava quando o
+      // coordenador não tinha turma própria, e quem acumulava as duas funções
+      // enxergava apenas a sua — ficava sem a visão do conjunto.
+      const coordination = isCoordinatorRole
+        ? await getCommunityCatechesisClasses().catch(() => [] as MyCatechesisClass[])
+        : [];
+      // A ficha da coordenação é a mais completa (vagas, mensalidades, documentos),
+      // então ela é a base; da turma própria vem só o papel, para o card dizer
+      // "Catequista" em vez de "Coordenação" onde o usuário dá aula.
+      const coordIds = new Set(coordination.map((k) => k.classId));
+      setClasses(
+        coordination.length
+          ? [
+              ...coordination.map((k) => {
+                const own = mine.find((m) => m.classId === k.classId);
+                return own ? { ...k, role: own.role } : k;
+              }),
+              ...mine.filter((m) => !coordIds.has(m.classId)),
+            ]
+          : mine,
+      );
       setFamily(familyItems);
       // O que cada turma pede na inscrição — falha vira lista vazia e o card
       // cai no comportamento antigo (pendências em texto)
@@ -338,6 +384,51 @@ export default function CatechesisClassesScreen() {
   const hiddenFamily = family.length - familyShown.length;
   const hiddenClasses = classes.length - classesShown.length;
 
+  // ---- Visão da coordenação -------------------------------------------------
+  // O painel e os filtros só aparecem quando há turma de coordenação na
+  // comunidade ativa: para o catequista com duas ou três turmas a tela antiga
+  // já bastava, e encher de filtro só atrapalharia.
+  // O painel cobre TODAS as turmas da comunidade, inclusive aquelas em que o
+  // coordenador também é catequista — ele responde por elas do mesmo jeito.
+  const isCoordView = isCoordinatorRole && classesShown.length > 0;
+  const coordClasses = isCoordView ? classesShown : [];
+  const sum = (get: (k: MyCatechesisClass) => number) => coordClasses.reduce((acc, k) => acc + (get(k) || 0), 0);
+  const totals = {
+    turmas: coordClasses.length,
+    catequizandos: sum((k) => k.activeEnrollments),
+    encontros: sum((k) => k.sessionsCount),
+    vagas: coordClasses.some((k) => k.capacity != null)
+      ? sum((k) => (k.capacity == null ? 0 : k.openSpots ?? 0))
+      : null,
+    semTurma: coordClasses.filter((k) => k.activeEnrollments === 0).length,
+    semEncontro: coordClasses.filter((k) => k.sessionsCount === 0).length,
+  };
+  const pendTotals = PEND_ORDER.map((kind) => ({ kind, total: sum(PEND_META[kind].get) })).filter((x) => x.total > 0);
+  const pendGrandTotal = pendTotals.reduce((acc, x) => acc + x.total, 0);
+  const stages = [...new Set(coordClasses.map((k) => k.stage.name))].sort((a, b) => a.localeCompare(b, 'pt-BR'));
+
+  const query = stripAccents(search.trim());
+  const visibleClasses = (() => {
+    if (!isCoordView) return classesShown;
+    let list = classesShown;
+    if (query) {
+      list = list.filter((k) =>
+        [k.name, k.stage.name, k.room ?? '', String(k.year)].some((field) => stripAccents(field).includes(query)),
+      );
+    }
+    if (stageFilter) list = list.filter((k) => k.stage.name === stageFilter);
+    if (pendFilter) list = list.filter((k) => PEND_META[pendFilter].get(k) > 0);
+    const byName = (a: MyCatechesisClass, b: MyCatechesisClass) => a.name.localeCompare(b.name, 'pt-BR');
+    return [...list].sort((a, b) => {
+      if (sortBy === 'nome') return byName(a, b);
+      if (sortBy === 'etapa') return a.stage.name.localeCompare(b.stage.name, 'pt-BR') || byName(a, b);
+      if (sortBy === 'dia') return (a.weekday ?? 9) - (b.weekday ?? 9) || String(a.time ?? '').localeCompare(String(b.time ?? '')) || byName(a, b);
+      return coordPendingTotal(b) - coordPendingTotal(a) || byName(a, b);
+    });
+  })();
+  const filtrosAtivos = (query ? 1 : 0) + (stageFilter ? 1 : 0) + (pendFilter ? 1 : 0);
+  const limparFiltros = () => { setSearch(''); setStageFilter(null); setPendFilter(null); };
+
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
       <Stack.Screen options={{ headerShown: false }} />
@@ -378,6 +469,172 @@ export default function CatechesisClassesScreen() {
             <FontAwesome5 name="bell" size={13} color={colors.primary} />
             <Text style={styles.noticesBtnText}>Histórico de avisos</Text>
           </TouchableOpacity>
+
+          {isCoordView && (
+            <View style={styles.panel}>
+              <View style={styles.panelHead}>
+                <FontAwesome5 name="clipboard-list" size={13} color={colors.primary} />
+                <Text style={styles.panelTitle}>Coordenação da catequese</Text>
+              </View>
+              <View style={styles.kpiRow}>
+                <View style={styles.kpi}>
+                  <Text style={styles.kpiValue}>{totals.turmas}</Text>
+                  <Text style={styles.kpiLabel}>turma{totals.turmas === 1 ? '' : 's'}</Text>
+                </View>
+                <View style={styles.kpi}>
+                  <Text style={styles.kpiValue}>{totals.catequizandos}</Text>
+                  <Text style={styles.kpiLabel}>catequizandos</Text>
+                </View>
+                <View style={styles.kpi}>
+                  <Text style={styles.kpiValue}>{totals.encontros}</Text>
+                  <Text style={styles.kpiLabel}>encontros</Text>
+                </View>
+                {totals.vagas !== null && (
+                  <View style={styles.kpi}>
+                    <Text style={styles.kpiValue}>{totals.vagas}</Text>
+                    <Text style={styles.kpiLabel}>vagas abertas</Text>
+                  </View>
+                )}
+              </View>
+
+              {pendGrandTotal > 0 ? (
+                <>
+                  <Text style={styles.panelSub}>
+                    {pendGrandTotal} pendência{pendGrandTotal === 1 ? '' : 's'} — toque para filtrar
+                  </Text>
+                  <View style={styles.pendGrid}>
+                    {pendTotals.map(({ kind, total }) => {
+                      const on = pendFilter === kind;
+                      return (
+                        <TouchableOpacity
+                          key={kind}
+                          style={[styles.pendChip, on && styles.pendChipOn]}
+                          activeOpacity={0.8}
+                          onPress={() => setPendFilter(on ? null : kind)}
+                          accessibilityRole="button"
+                          accessibilityState={{ selected: on }}
+                        >
+                          <FontAwesome5
+                            name={PEND_META[kind].icon as never}
+                            size={11}
+                            color={on ? '#fff' : colors.warning}
+                          />
+                          <Text style={[styles.pendChipText, on && styles.pendChipTextOn]}>
+                            {total} {PEND_META[kind].label}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                </>
+              ) : (
+                <Text style={styles.panelOk}>Nenhuma pendência nas turmas desta comunidade.</Text>
+              )}
+
+              {(totals.semTurma > 0 || totals.semEncontro > 0) && (
+                <Text style={styles.panelNote}>
+                  {totals.semTurma > 0 ? `${totals.semTurma} turma(s) ainda sem catequizando` : ''}
+                  {totals.semTurma > 0 && totals.semEncontro > 0 ? ' · ' : ''}
+                  {totals.semEncontro > 0 ? `${totals.semEncontro} sem encontro marcado` : ''}
+                </Text>
+              )}
+            </View>
+          )}
+
+          {isCoordView && (
+            <View style={styles.filterBox}>
+              <View style={styles.searchRow}>
+                <FontAwesome5 name="search" size={13} color={colors.textTertiary} />
+                <TextInput
+                  style={styles.searchInput}
+                  value={search}
+                  onChangeText={setSearch}
+                  placeholder="Buscar turma, etapa ou sala"
+                  placeholderTextColor={colors.placeholder}
+                  returnKeyType="search"
+                  autoCorrect={false}
+                />
+                {search.length > 0 && (
+                  <TouchableOpacity onPress={() => setSearch('')} hitSlop={10}>
+                    <FontAwesome5 name="times-circle" size={15} color={colors.textTertiary} />
+                  </TouchableOpacity>
+                )}
+                <TouchableOpacity
+                  style={[styles.filterToggle, filtersOpen && styles.filterToggleOn]}
+                  onPress={() => setFiltersOpen((v) => !v)}
+                  hitSlop={8}
+                  accessibilityLabel="Filtros e ordenação"
+                >
+                  <FontAwesome5 name="sliders-h" size={13} color={filtersOpen ? '#fff' : colors.primary} />
+                </TouchableOpacity>
+              </View>
+
+              {filtersOpen && (
+                <>
+                  {stages.length > 1 && (
+                    <>
+                      <Text style={styles.filterLabel}>Etapa</Text>
+                      <View style={styles.chipRow}>
+                        <TouchableOpacity
+                          style={[styles.chip, !stageFilter && styles.chipOn]}
+                          onPress={() => setStageFilter(null)}
+                        >
+                          <Text style={[styles.chipText, !stageFilter && styles.chipTextOn]}>Todas</Text>
+                        </TouchableOpacity>
+                        {stages.map((name) => {
+                          const on = stageFilter === name;
+                          return (
+                            <TouchableOpacity
+                              key={name}
+                              style={[styles.chip, on && styles.chipOn]}
+                              onPress={() => setStageFilter(on ? null : name)}
+                            >
+                              <Text style={[styles.chipText, on && styles.chipTextOn]}>{name}</Text>
+                            </TouchableOpacity>
+                          );
+                        })}
+                      </View>
+                    </>
+                  )}
+                  <Text style={styles.filterLabel}>Ordenar por</Text>
+                  <View style={styles.chipRow}>
+                    {(
+                      [
+                        ['pendencias', 'Pendências'],
+                        ['nome', 'Nome'],
+                        ['etapa', 'Etapa'],
+                        ['dia', 'Dia e hora'],
+                      ] as Array<[SortKey, string]>
+                    ).map(([key, label]) => {
+                      const on = sortBy === key;
+                      return (
+                        <TouchableOpacity
+                          key={key}
+                          style={[styles.chip, on && styles.chipOn]}
+                          onPress={() => setSortBy(key)}
+                        >
+                          <Text style={[styles.chipText, on && styles.chipTextOn]}>{label}</Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                </>
+              )}
+
+              {filtrosAtivos > 0 && (
+                <View style={styles.filterActive}>
+                  <Text style={styles.filterActiveText}>
+                    {visibleClasses.length} de {classesShown.length} turma{classesShown.length === 1 ? '' : 's'}
+                    {pendFilter ? ` · ${PEND_META[pendFilter].label}` : ''}
+                    {stageFilter ? ` · ${stageFilter}` : ''}
+                  </Text>
+                  <TouchableOpacity onPress={limparFiltros} hitSlop={8}>
+                    <Text style={styles.filterClear}>Limpar</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+            </View>
+          )}
 
           {classesShown.length === 0 && familyShown.length === 0 && (
             <View style={styles.empty}>
@@ -757,57 +1014,90 @@ export default function CatechesisClassesScreen() {
 
           {classesShown.length > 0 && (
             <Text style={styles.sectionLabel}>
-              {classesShown.every((klass) => klass.role === 'Coordenação')
-                ? 'Turmas da comunidade (coordenação)'
+              {isCoordView
+                ? 'Turmas da comunidade'
                 : family.length > 0
                   ? 'Minhas turmas (catequista)'
                   : 'Suas turmas como catequista ou auxiliar'}
             </Text>
           )}
-          {classesShown.length > 0 && (
-          classesShown.map((klass) => (
-            <TouchableOpacity
-              key={klass.classId}
-              style={styles.card}
-              activeOpacity={0.85}
-              onPress={() => router.push(`/catechesis/${klass.classId}` as never)}
-            >
-              <View style={styles.cardTop}>
-                <Text style={styles.cardTitle} numberOfLines={1}>
-                  {klass.name}
-                </Text>
-                {classPendingTotal(klass) > 0 && (
-                  <View style={styles.pendBadge} accessibilityLabel={`${classPendingTotal(klass)} pendências`}>
-                    <Text style={styles.pendBadgeText}>{classPendingTotal(klass)}</Text>
-                  </View>
-                )}
-                <Text style={styles.roleChip}>{klass.role}</Text>
-              </View>
-              <Text style={styles.cardStage} numberOfLines={1}>
-                {klass.stage.name} · {klass.year}
-              </Text>
-              <Text style={styles.cardMeta} numberOfLines={1}>
-                {klass.community.name}
-                {klass.weekday !== null && klass.weekday !== undefined
-                  ? ` · ${WEEKDAYS[klass.weekday]}`
-                  : ''}
-                {klass.time ? ` às ${klass.time}` : ''}
-                {klass.room ? ` · ${klass.room}` : ''}
-              </Text>
-              <View style={styles.cardStats}>
-                <Text style={styles.cardStat}>
-                  👥 {klass.activeEnrollments} catequizando{klass.activeEnrollments === 1 ? '' : 's'}
-                </Text>
-                <Text style={styles.cardStat}>
-                  📅 {klass.sessionsCount} encontro{klass.sessionsCount === 1 ? '' : 's'}
-                </Text>
-              </View>
-              {classPendingTotal(klass) > 0 && (
-                <Text style={styles.pendLine}>⚠️ {classPendingParts(klass).join(' · ')} ›</Text>
-              )}
-            </TouchableOpacity>
-          ))
+          {isCoordView && visibleClasses.length === 0 && (
+            <View style={styles.empty}>
+              <FontAwesome5 name="filter" size={24} color={colors.textTertiary} />
+              <Text style={styles.emptyText}>Nenhuma turma com esse filtro.</Text>
+              <TouchableOpacity style={styles.docBtn} onPress={limparFiltros}>
+                <Text style={styles.docBtnText}>Limpar filtros</Text>
+              </TouchableOpacity>
+            </View>
           )}
+          {visibleClasses.length > 0 &&
+            visibleClasses.map((klass) => {
+              const isCoord = isCoordView;
+              const pendTotal = isCoord ? coordPendingTotal(klass) : classPendingTotal(klass);
+              return (
+                <TouchableOpacity
+                  key={klass.classId}
+                  style={[styles.card, pendTotal > 0 && styles.cardPend]}
+                  activeOpacity={0.85}
+                  onPress={() => router.push(`/catechesis/${klass.classId}` as never)}
+                >
+                  <View style={styles.cardTop}>
+                    <Text style={styles.cardTitle} numberOfLines={1}>
+                      {klass.name}
+                    </Text>
+                    {pendTotal > 0 && (
+                      <View style={styles.pendBadge} accessibilityLabel={`${pendTotal} pendências`}>
+                        <Text style={styles.pendBadgeText}>{pendTotal}</Text>
+                      </View>
+                    )}
+                    <Text style={styles.roleChip}>{klass.role}</Text>
+                  </View>
+                  <Text style={styles.cardStage} numberOfLines={1}>
+                    {klass.stage.name} · {klass.year}
+                  </Text>
+                  <Text style={styles.cardMeta} numberOfLines={1}>
+                    {klass.community.name}
+                    {klass.weekday !== null && klass.weekday !== undefined ? ` · ${WEEKDAYS[klass.weekday]}` : ''}
+                    {klass.time ? ` às ${klass.time}` : ''}
+                    {klass.room ? ` · ${klass.room}` : ''}
+                  </Text>
+                  <View style={styles.cardStats}>
+                    <Text style={styles.cardStat}>
+                      👥 {klass.activeEnrollments} catequizando{klass.activeEnrollments === 1 ? '' : 's'}
+                    </Text>
+                    <Text style={styles.cardStat}>
+                      📅 {klass.sessionsCount} encontro{klass.sessionsCount === 1 ? '' : 's'}
+                    </Text>
+                    {isCoord && klass.capacity != null && (
+                      <Text style={[styles.cardStat, klass.isFull && styles.cardStatFull]}>
+                        {klass.isFull
+                          ? '🔒 turma cheia'
+                          : `🎟️ ${klass.openSpots} vaga${klass.openSpots === 1 ? '' : 's'} de ${klass.capacity}`}
+                      </Text>
+                    )}
+                    {isCoord && (klass.completedCount ?? 0) > 0 && (
+                      <Text style={styles.cardStat}>🎓 {klass.completedCount} concluído(s)</Text>
+                    )}
+                  </View>
+                  {/* Coordenação: cada pendência vira etiqueta própria, para saber o que fazer
+                      antes de abrir a turma. Catequista continua com a linha corrida. */}
+                  {pendTotal > 0 && isCoord ? (
+                    <View style={styles.tagRow}>
+                      {PEND_ORDER.filter((kind) => PEND_META[kind].get(klass) > 0).map((kind) => (
+                        <View key={kind} style={styles.tag}>
+                          <FontAwesome5 name={PEND_META[kind].icon as never} size={9.5} color={colors.warning} />
+                          <Text style={styles.tagText}>
+                            {PEND_META[kind].get(klass)} {PEND_META[kind].label}
+                          </Text>
+                        </View>
+                      ))}
+                    </View>
+                  ) : (
+                    pendTotal > 0 && <Text style={styles.pendLine}>⚠️ {classPendingParts(klass).join(' · ')} ›</Text>
+                  )}
+                </TouchableOpacity>
+              );
+            })}
           {hiddenFamily + hiddenClasses > 0 && (classesShown.length > 0 || familyShown.length > 0) && (
             <Text style={styles.otherCommunityNote}>
               {hiddenFamily > 0 ? `${hiddenFamily} matrícula(s) da família` : ''}
@@ -1172,6 +1462,122 @@ const createStyles = (colors: ReturnType<typeof useColors>) =>
     attendanceMark: { fontSize: 13, fontWeight: '800' },
     empty: { alignItems: 'center', gap: 12, marginTop: 48, paddingHorizontal: 24 },
     emptyText: { fontSize: 14, color: colors.textSecondary, textAlign: 'center', lineHeight: 20 },
+    // --- Visão da coordenação: painel de pendências, busca e filtros ---
+    panel: {
+      backgroundColor: colors.card,
+      borderRadius: 14,
+      borderWidth: 1,
+      borderColor: colors.border,
+      padding: 14,
+      gap: 8,
+    },
+    panelHead: { flexDirection: 'row', alignItems: 'center', gap: 7 },
+    panelTitle: {
+      fontSize: 11,
+      fontWeight: '800',
+      letterSpacing: 0.6,
+      textTransform: 'uppercase',
+      color: colors.primary,
+    },
+    kpiRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 18, marginTop: 2 },
+    kpi: { minWidth: 62 },
+    kpiValue: { fontSize: 21, fontWeight: '800', color: colors.text, lineHeight: 25 },
+    kpiLabel: { fontSize: 11.5, color: colors.textSecondary },
+    panelSub: {
+      fontSize: 11,
+      fontWeight: '700',
+      letterSpacing: 0.4,
+      textTransform: 'uppercase',
+      color: colors.textTertiary,
+      marginTop: 4,
+    },
+    panelOk: { fontSize: 13, color: colors.success, fontWeight: '600', marginTop: 2 },
+    panelNote: { fontSize: 12, color: colors.textSecondary, marginTop: 2 },
+    pendGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 7 },
+    pendChip: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      borderWidth: 1,
+      borderColor: colors.warning,
+      borderRadius: 999,
+      paddingHorizontal: 10,
+      paddingVertical: 6,
+    },
+    pendChipOn: { backgroundColor: colors.warning, borderColor: colors.warning },
+    pendChipText: { fontSize: 12, fontWeight: '700', color: colors.warning },
+    pendChipTextOn: { color: '#fff' },
+    filterBox: {
+      backgroundColor: colors.card,
+      borderRadius: 14,
+      borderWidth: 1,
+      borderColor: colors.border,
+      padding: 10,
+      gap: 8,
+    },
+    searchRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      backgroundColor: colors.inputBackground,
+      borderRadius: 10,
+      paddingHorizontal: 10,
+      paddingVertical: Platform.OS === 'ios' ? 9 : 2,
+    },
+    searchInput: { flex: 1, fontSize: 14.5, color: colors.text, paddingVertical: 6 },
+    filterToggle: {
+      width: 30,
+      height: 30,
+      borderRadius: 8,
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderWidth: 1.25,
+      borderColor: colors.primary,
+    },
+    filterToggleOn: { backgroundColor: colors.primary },
+    filterLabel: {
+      fontSize: 10.5,
+      fontWeight: '800',
+      letterSpacing: 0.5,
+      textTransform: 'uppercase',
+      color: colors.textTertiary,
+    },
+    chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 7 },
+    chip: {
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: 999,
+      paddingHorizontal: 11,
+      paddingVertical: 6,
+      backgroundColor: colors.surface,
+    },
+    chipOn: { backgroundColor: colors.primary, borderColor: colors.primary },
+    chipText: { fontSize: 12.5, fontWeight: '600', color: colors.textSecondary },
+    chipTextOn: { color: '#fff', fontWeight: '700' },
+    filterActive: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 10,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: colors.border,
+      paddingTop: 8,
+    },
+    filterActiveText: { flex: 1, fontSize: 12, color: colors.textSecondary },
+    filterClear: { fontSize: 12.5, fontWeight: '800', color: colors.primary },
+    cardPend: { borderColor: colors.warning },
+    cardStatFull: { color: colors.error, fontWeight: '700' },
+    tagRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 8 },
+    tag: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 5,
+      borderRadius: 7,
+      paddingHorizontal: 8,
+      paddingVertical: 4,
+      backgroundColor: colors.inputBackground,
+    },
+    tagText: { fontSize: 11.5, fontWeight: '600', color: colors.textSecondary },
     card: {
       backgroundColor: colors.card,
       borderRadius: 14,

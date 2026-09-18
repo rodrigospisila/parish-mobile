@@ -24,6 +24,16 @@ export interface MyCatechesisClass {
   unreadFamilyMessages?: number;
   documentsToReview?: number;
   sessionsWithoutAttendance?: number;
+  /** Ocupação e vagas — só a visão da coordenação recebe (a lista /classes traz) */
+  capacity?: number | null;
+  occupied?: number;
+  openSpots?: number | null;
+  isFull?: boolean;
+  completedCount?: number;
+  /** Matrículas ativas que ainda devem documento (não conta como pendência de ação) */
+  pendingDocumentsCount?: number;
+  /** Catequizandos sem a mensalidade quitada */
+  feesPendingCount?: number;
 }
 
 /** Soma das pendências de uma turma (0 quando o backend ainda não envia). */
@@ -831,10 +841,17 @@ export const getCommunityCatechesisClasses = async (): Promise<MyCatechesisClass
         community: { id: c.community?.id ?? c.communityId, name: c.community?.name ?? '' },
         activeEnrollments: c._count?.enrollments ?? 0,
         sessionsCount: c._count?.sessions ?? 0,
-        pendingApprovals: pend?.pendingApproval ?? 0,
+        pendingApprovals: pend?.pendingApproval ?? c.pendingApprovalCount ?? 0,
         unreadFamilyMessages: pend?.unreadFamilyMessages ?? 0,
-        documentsToReview: pend?.documentsToReview ?? 0,
+        documentsToReview: pend?.documentsToReview ?? c.docsToReviewCount ?? 0,
         sessionsWithoutAttendance: pend?.pastSessionsWithoutAttendance ?? 0,
+        capacity: c.capacity ?? null,
+        occupied: c.occupied ?? c._count?.enrollments ?? 0,
+        openSpots: c.openSpots ?? null,
+        isFull: Boolean(c.isFull),
+        completedCount: c.completedCount ?? 0,
+        pendingDocumentsCount: pend?.pendingDocumentsCount ?? 0,
+        feesPendingCount: pend?.feesPendingCount ?? 0,
       };
     });
   } catch {
