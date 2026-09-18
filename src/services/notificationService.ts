@@ -5,6 +5,7 @@ import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Event } from './eventService';
 import { MassSchedule, eventTypeLabels } from '../types';
+import { descreverRecorrencia, ehMensal, proximaOcorrencia } from '../utils/recorrencia';
 
 // Chaves para AsyncStorage
 const NOTIFICATION_SETTINGS_KEY = '@parish_notification_settings';
@@ -298,6 +299,33 @@ export const scheduleMassScheduleNotification = async (
         },
       });
     }
+
+    // Recorrência mensal: um único aviso para a próxima ocorrência. Repetir
+    // toda semana anunciaria missas que não acontecem.
+    if (ehMensal(schedule)) {
+      const proxima = proximaOcorrencia(schedule, schedule.time, new Date());
+      if (!proxima) return null;
+      const lembrete = new Date(proxima.getTime() - minutesBefore * 60 * 1000);
+      if (lembrete <= new Date()) return null;
+      const quando = descreverRecorrencia(schedule);
+      return await Notifications.scheduleNotificationAsync({
+        content: {
+          title: `${typeLabel} em ${timeLabel}`,
+          body: schedule.notes
+            ? `${quando}, ${schedule.time} - ${schedule.notes}`
+            : `${quando}, ${schedule.time}`,
+          data: { massScheduleId: schedule.id, type: 'mass_schedule_reminder' },
+          sound: true,
+        },
+        trigger: {
+          type: Notifications.SchedulableTriggerInputTypes.DATE,
+          date: lembrete,
+          channelId: 'events',
+        },
+      });
+    }
+
+    if (schedule.dayOfWeek === null || schedule.dayOfWeek === undefined) return null;
 
     const { reminderDay, reminderHour, reminderMinute } = computeReminderTime(
       schedule.dayOfWeek,

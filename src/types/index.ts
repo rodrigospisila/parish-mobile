@@ -393,7 +393,11 @@ export type MassScheduleType = 'MASS' | 'CONFESSION' | 'ADORATION' | 'ROSARY';
  */
 export interface MassSchedule {
   id: string;
-  dayOfWeek: number;
+  /** Nulo em recorrência de data fixa do mês ("todo dia 13"). */
+  dayOfWeek: number | null;
+  recurrence?: 'WEEKLY' | 'MONTHLY_NTH' | 'MONTHLY_DAY';
+  weeksOfMonth?: number[];
+  dayOfMonth?: number | null;
   time: string;
   type: MassScheduleType;
   notes?: string;

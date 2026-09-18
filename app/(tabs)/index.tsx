@@ -17,6 +17,12 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { useAuth } from '../../src/context/AuthContext';
+import {
+  descreverRecorrencia,
+  ehMensal,
+  proximaOcorrencia,
+  rotuloCurto,
+} from '../../src/utils/recorrencia';
 import { getCoordinatorOverview, CoordinatorOverview } from '../../src/services/pastoralService';
 import { useCommunity } from '../../src/context/CommunityContext';
 import { getMyCatechesisClasses, getMyFamilyCatechesis } from '../../src/services/catechesisService';
@@ -60,9 +66,6 @@ function initialsOf(name?: string): string {
 }
 
 const SHORT_DAYS = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
-function shortDayLabel(dayOfWeek: number): string {
-  return SHORT_DAYS[dayOfWeek] ?? '';
-}
 
 /**
  * Separa o texto de uma leitura em versículos, para exibir um por linha.
@@ -90,16 +93,7 @@ function splitIntoVerses(text?: string): { num?: string; text: string }[] {
   return verses;
 }
 
-/** Próxima data (>= from) de um horário semanal (dia da semana + HH:MM). */
-function weeklyNextDate(dayOfWeek: number, time: string, from: Date): Date {
-  const [hh, mm] = (time || '00:00').split(':').map((n) => parseInt(n, 10) || 0);
-  const c = new Date(from);
-  const daysAhead = (dayOfWeek - c.getDay() + 7) % 7;
-  c.setDate(c.getDate() + daysAhead);
-  c.setHours(hh, mm, 0, 0);
-  if (c.getTime() < from.getTime()) c.setDate(c.getDate() + 7); // já passou hoje → próxima semana
-  return c;
-}
+
 
 /** Ocorrência mais próxima entre os horários fixos (semanais + especiais). */
 function nextFixedOccurrence(
@@ -115,7 +109,12 @@ function nextFixedOccurrence(
       date.setHours(hh, mm, 0, 0);
       if (date.getTime() < from.getTime()) continue; // especial no passado
     } else {
-      date = weeklyNextDate(s.dayOfWeek, s.time, from);
+      // Respeita a recorrência: "1º e 3º sábado" não é "todo sábado", e a
+      // missa de data fixa nem tem dia da semana. Null = sem ocorrência à
+      // vista, e aí o horário simplesmente não concorre.
+      const proxima = proximaOcorrencia(s, s.time, from);
+      if (!proxima) continue;
+      date = proxima;
     }
     if (!best || date.getTime() < best.date.getTime()) best = { date, schedule: s };
   }
@@ -458,14 +457,17 @@ export default function HomeScreen() {
           return (
             <View key={schedule.id} style={[styles.massItem, isFavorite && styles.massItemFav]}>
               <View style={styles.massTimeBlock}>
-                <Text style={styles.massTimeDay}>{shortDayLabel(schedule.dayOfWeek)}</Text>
+                <Text style={styles.massTimeDay}>{rotuloCurto(schedule)}</Text>
                 <Text style={styles.massTimeHour}>{schedule.time}</Text>
               </View>
               <View style={styles.massItemInfo}>
                 <Text style={styles.massItemTitle} numberOfLines={2}>
                   {schedule.notes || 'Santa Missa'}
                 </Text>
-                <Text style={styles.massItemDay}>{getDayLabel(schedule.dayOfWeek)}</Text>
+                <Text style={styles.massItemDay}>
+                  {descreverRecorrencia(schedule)}
+                  {ehMensal(schedule) ? ' · uma vez por mês' : ''}
+                </Text>
                 {schedule.isSpecial && schedule.specialDate ? (
                   <Text style={styles.massScheduleSpecial}>
                     Especial: {formatDateBR(schedule.specialDate)}
