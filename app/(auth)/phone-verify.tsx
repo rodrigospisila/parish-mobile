@@ -1,19 +1,18 @@
 import { Stack, useRouter } from 'expo-router';
 import React, { useState } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  TextInput,
-  TouchableOpacity,
-  ActivityIndicator,
-  KeyboardAvoidingView,
-  Platform,
-  ScrollView,
-  Alert,
-} from 'react-native';
-import { useColors } from '../../src/context/ThemeContext';
+import { Keyboard, StyleSheet, Text, View } from 'react-native';
 import authService from '../../src/services/authService';
+import {
+  AuthButton,
+  AuthCard,
+  AuthErrorBox,
+  AuthField,
+  AuthLink,
+  AuthScreen,
+  authErrorMessage,
+  useAnnouncedError,
+  useAuthPalette,
+} from '../../src/components/auth';
 
 function formatPhone(raw: string): string {
   const digits = raw.replace(/\D/g, '').slice(0, 11);
@@ -22,23 +21,43 @@ function formatPhone(raw: string): string {
   return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7)}`;
 }
 
+/** Passo 1 do cadastro: confirma o celular por SMS antes de pedir os dados */
 export default function PhoneVerifyScreen() {
-  const colors = useColors();
+  const { colors } = useAuthPalette();
   const router = useRouter();
   const [phone, setPhone] = useState('');
   const [loading, setLoading] = useState(false);
+  const [errorMessage, showError, clearError] = useAnnouncedError();
+  // Número já cadastrado: oferece entrar em vez de criar outra conta
+  const [alreadyRegistered, setAlreadyRegistered] = useState(false);
 
   const rawDigits = phone.replace(/\D/g, '');
   const isValid = rawDigits.length === 11;
 
+  // Volta para o login que já está na pilha (sem empilhar um login duplicado);
+  // se não houver login atrás, troca esta tela por ele
+  const goToLogin = () => router.dismissTo('/(auth)/login');
+
   const handleSend = async () => {
-    if (!isValid) return;
+    if (!isValid) {
+      setAlreadyRegistered(false);
+      showError(
+        rawDigits.length === 0
+          ? 'Digite o número do seu celular com DDD.'
+          : 'O número está incompleto. São 11 números contando o DDD, por exemplo (42) 99999-9999.',
+      );
+      return;
+    }
+    Keyboard.dismiss();
+    clearError();
+    setAlreadyRegistered(false);
     setLoading(true);
     try {
       await authService.sendOtp(rawDigits);
       router.push({ pathname: '/(auth)/otp-verify', params: { phone: rawDigits } });
     } catch (error: any) {
-      Alert.alert('Erro', error?.message ?? 'Não foi possível enviar o código');
+      setAlreadyRegistered(error?.status === 409);
+      showError(authErrorMessage(error, 'Não foi possível enviar o código. Tente novamente.'));
     } finally {
       setLoading(false);
     }
@@ -47,106 +66,66 @@ export default function PhoneVerifyScreen() {
   const styles = createStyles(colors);
 
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+    <AuthScreen
+      subtitle="Crie sua conta"
+      onBack={() => (router.canGoBack() ? router.back() : router.replace('/(auth)/login'))}
     >
-      <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
-        <Stack.Screen options={{ title: 'Verificar Celular', headerShown: false }} />
+      <Stack.Screen options={{ title: 'Verificar Celular', headerShown: false }} />
 
-        <View style={styles.header}>
-          <Text style={styles.icon}>📱</Text>
-          <Text style={styles.title}>Verificar Celular</Text>
-          <Text style={styles.subtitle}>
-            Digite seu número de celular com DDD. Enviaremos um código de verificação por SMS.
-          </Text>
+      <AuthCard
+        eyebrow="Passo 1 de 3"
+        icon="mobile-alt"
+        title="Qual é o seu celular?"
+        subtitle="Vamos mandar um código por mensagem de texto (SMS) para confirmar que o número é seu."
+      >
+        <AuthErrorBox message={errorMessage}>
+          {alreadyRegistered && (
+            <AuthLink label="Entrar na minha conta" onPress={goToLogin} style={styles.errorAction} />
+          )}
+        </AuthErrorBox>
+
+        <AuthField
+          label="Celular com DDD"
+          icon="mobile-alt"
+          placeholder="(42) 99999-9999"
+          hint="São 11 números, contando o DDD."
+          style={styles.phoneInput}
+          keyboardType="phone-pad"
+          autoComplete="tel"
+          textContentType="telephoneNumber"
+          returnKeyType="done"
+          onSubmitEditing={handleSend}
+          value={phone}
+          onChangeText={(v) => {
+            setPhone(formatPhone(v));
+            if (errorMessage) clearError();
+          }}
+          editable={!loading}
+          maxLength={15}
+        />
+
+        <AuthButton label="Enviar código" busyLabel="Enviando…" onPress={handleSend} loading={loading} />
+
+        <View style={styles.footer}>
+          <Text style={styles.footerText}>Já tem conta?</Text>
+          <AuthLink label="Entrar" onPress={goToLogin} disabled={loading} />
         </View>
-
-        <View style={styles.form}>
-          <View style={styles.inputContainer}>
-            <Text style={styles.label}>Celular</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="(11) 99999-9999"
-              placeholderTextColor={colors.placeholder}
-              keyboardType="phone-pad"
-              value={phone}
-              onChangeText={(v) => setPhone(formatPhone(v))}
-              editable={!loading}
-              maxLength={15}
-            />
-          </View>
-
-          <TouchableOpacity
-            style={[styles.button, (!isValid || loading) && styles.buttonDisabled]}
-            onPress={handleSend}
-            disabled={!isValid || loading}
-          >
-            {loading ? (
-              <ActivityIndicator color={colors.textInverse} />
-            ) : (
-              <Text style={styles.buttonText}>Enviar código</Text>
-            )}
-          </TouchableOpacity>
-
-          <View style={styles.footer}>
-            <Text style={styles.footerText}>Já tem conta? </Text>
-            <TouchableOpacity onPress={() => router.push('/(auth)/login')}>
-              <Text style={styles.link}>Faça Login</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </ScrollView>
-    </KeyboardAvoidingView>
+      </AuthCard>
+    </AuthScreen>
   );
 }
 
-const createStyles = (colors: ReturnType<typeof useColors>) =>
+const createStyles = (colors: ReturnType<typeof useAuthPalette>['colors']) =>
   StyleSheet.create({
-    container: { flex: 1, backgroundColor: colors.background },
-    scrollContent: { flexGrow: 1, justifyContent: 'center', padding: 20 },
-    header: { alignItems: 'center', marginBottom: 40 },
-    icon: { fontSize: 56, marginBottom: 12 },
-    title: { fontSize: 28, fontWeight: 'bold', color: colors.text },
-    subtitle: {
-      fontSize: 15,
-      color: colors.textSecondary,
-      marginTop: 10,
-      textAlign: 'center',
-      lineHeight: 22,
-    },
-    form: {
-      backgroundColor: colors.card,
-      borderRadius: 12,
-      padding: 20,
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 2 },
-      shadowOpacity: 0.1,
-      shadowRadius: 4,
-      elevation: 3,
-    },
-    inputContainer: { marginBottom: 16 },
-    label: { fontSize: 14, fontWeight: '600', color: colors.text, marginBottom: 8 },
-    input: {
-      backgroundColor: colors.inputBackground,
-      borderWidth: 1,
-      borderColor: colors.border,
-      borderRadius: 8,
-      padding: 12,
-      fontSize: 18,
-      color: colors.text,
-      letterSpacing: 1,
-    },
-    button: {
-      backgroundColor: colors.primary,
-      borderRadius: 8,
-      padding: 16,
+    phoneInput: { fontSize: 18, letterSpacing: 1 },
+    errorAction: { alignSelf: 'flex-start', marginTop: 2, marginBottom: -8 },
+    footer: {
+      flexDirection: 'row',
       alignItems: 'center',
-      marginTop: 8,
+      justifyContent: 'center',
+      flexWrap: 'wrap',
+      gap: 6,
+      marginTop: 12,
     },
-    buttonDisabled: { backgroundColor: colors.disabled },
-    buttonText: { color: colors.textInverse, fontSize: 16, fontWeight: '600' },
-    footer: { flexDirection: 'row', justifyContent: 'center', marginTop: 20 },
-    footerText: { color: colors.textSecondary, fontSize: 14 },
-    link: { color: colors.primary, fontSize: 14, fontWeight: '600' },
+    footerText: { color: colors.textSecondary, fontSize: 15 },
   });

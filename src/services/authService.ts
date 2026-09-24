@@ -85,10 +85,10 @@ export const isTwoFactorChallenge = (result: LoginResult): result is TwoFactorCh
 /**
  * Dados para login
  */
-export interface LoginData {
-  email: string;
-  password: string;
-}
+/** Login por e-mail OU celular (o backend aceita um dos dois) */
+export type LoginData =
+  | { email: string; phone?: never; password: string }
+  | { phone: string; email?: never; password: string };
 
 /**
  * Dados para registro
@@ -99,6 +99,8 @@ export interface RegisterData {
   name: string;
   phone?: string;
   verifiedPhoneToken?: string;
+  /** Aceite dos Termos de uso e da Política de Privacidade (LGPD) no cadastro */
+  consentGiven?: boolean;
   role?: UserRole;
   dioceseId?: string;
   parishId?: string;
@@ -242,7 +244,7 @@ export const authService = {
 
       return response.data;
     } catch (error) {
-      throw new Error(getErrorMessage(error));
+      throw authFailure(error);
     }
   },
 
@@ -255,7 +257,7 @@ export const authService = {
       const response = await api.post<{ message: string }>('/auth/forgot-password', params);
       return response.data.message;
     } catch (error) {
-      throw new Error(getErrorMessage(error));
+      throw authFailure(error);
     }
   },
 
@@ -270,7 +272,7 @@ export const authService = {
       });
       return response.data.message;
     } catch (error) {
-      throw new Error(getErrorMessage(error));
+      throw authFailure(error);
     }
   },
 
@@ -358,7 +360,7 @@ export const authService = {
     try {
       await api.post('/auth/otp/send', { phone });
     } catch (error) {
-      throw new Error(getErrorMessage(error));
+      throw authFailure(error);
     }
   },
 
@@ -370,7 +372,7 @@ export const authService = {
       const response = await api.post<{ verifiedPhoneToken: string }>('/auth/otp/verify', { phone, code });
       return response.data.verifiedPhoneToken;
     } catch (error) {
-      throw new Error(getErrorMessage(error));
+      throw authFailure(error);
     }
   },
 
@@ -451,7 +453,7 @@ async function mockLogin(data: LoginData): Promise<AuthResponse> {
   // Simula delay de rede
   await new Promise((resolve) => setTimeout(resolve, 500));
 
-  const mockUser = mockUsers[data.email];
+  const mockUser = data.email ? mockUsers[data.email] : undefined;
 
   if (!mockUser || mockUser.password !== data.password) {
     throw new Error('Credenciais inválidas');

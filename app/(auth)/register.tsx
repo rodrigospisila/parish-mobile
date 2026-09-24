@@ -1,242 +1,272 @@
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
-import React, { useState } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  Alert,
-  ScrollView,
-  TextInput,
-  TouchableOpacity,
-  ActivityIndicator,
-  KeyboardAvoidingView,
-  Platform,
-} from 'react-native';
+import React, { useRef, useState } from 'react';
+import { Keyboard, Linking, StyleSheet, Text, TextInput, View } from 'react-native';
+import { FontAwesome5 } from '@expo/vector-icons';
 import { useAuth } from '../../src/context/AuthContext';
-import { useColors } from '../../src/context/ThemeContext';
+import {
+  AUTH_WEB_URL,
+  AuthButton,
+  AuthCard,
+  AuthCheckbox,
+  AuthErrorBox,
+  AuthField,
+  AuthLink,
+  AuthScreen,
+  authErrorMessage,
+  useAnnouncedError,
+  useAuthPalette,
+  type AuthColors,
+} from '../../src/components/auth';
 
 function maskPhone(digits: string): string {
   if (digits.length !== 11) return digits;
   return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7)}`;
 }
 
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/** Passo 3 do cadastro: nome, e-mail, senha e aceite dos termos (LGPD) */
 export default function RegisterScreen() {
   const { register } = useAuth();
-  const colors = useColors();
+  const { colors, isDark } = useAuthPalette();
   const router = useRouter();
   const { phone, verifiedPhoneToken } = useLocalSearchParams<{
     phone: string;
     verifiedPhoneToken: string;
   }>();
+  const nameRef = useRef<TextInput>(null);
+  const emailRef = useRef<TextInput>(null);
+  const passwordRef = useRef<TextInput>(null);
 
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [acceptedTerms, setAcceptedTerms] = useState(false);
+  const [termsMissing, setTermsMissing] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [errorMessage, showError, clearError] = useAnnouncedError();
+  // E-mail já cadastrado: oferece recuperar a senha em vez de criar outra conta
+  const [emailTaken, setEmailTaken] = useState(false);
+
+  const goToLogin = () => router.dismissTo('/(auth)/login');
+
+  const onEdit = <T,>(setter: (value: T) => void) => (value: T) => {
+    setter(value);
+    if (errorMessage) clearError();
+  };
 
   const handleRegister = async () => {
-    if (!name || !email || !password) {
-      Alert.alert('Erro', 'Por favor, preencha todos os campos.');
+    const cleanName = name.trim();
+    const cleanEmail = email.trim();
+    setEmailTaken(false);
+
+    if (!cleanName) {
+      showError('Digite o seu nome completo.');
+      nameRef.current?.focus();
+      return;
+    }
+    if (!cleanEmail) {
+      showError('Digite o seu e-mail.');
+      emailRef.current?.focus();
+      return;
+    }
+    if (!EMAIL_PATTERN.test(cleanEmail)) {
+      showError('Confira o e-mail: ele precisa ter @ e ponto, por exemplo maria@gmail.com.');
+      emailRef.current?.focus();
+      return;
+    }
+    if (password.length < 8) {
+      showError('A senha precisa ter pelo menos 8 caracteres.');
+      passwordRef.current?.focus();
+      return;
+    }
+    if (!acceptedTerms) {
+      setTermsMissing(true);
+      showError('Para criar a conta, marque que você leu e aceita os Termos de uso e a Política de Privacidade.');
+      Keyboard.dismiss();
       return;
     }
 
+    Keyboard.dismiss();
+    clearError();
     setLoading(true);
     try {
-      await register({ name, email, password, phone, verifiedPhoneToken });
-    } catch (error) {
-      Alert.alert(
-        'Erro no Registro',
-        'Não foi possível completar o cadastro. Verifique sua conexão e tente novamente.'
-      );
+      await register({
+        name: cleanName,
+        email: cleanEmail,
+        password,
+        phone,
+        verifiedPhoneToken,
+        // Aceite dos termos/política (LGPD): o servidor grava acceptedTermsAt e a versão
+        consentGiven: true,
+      });
+      // Navegação é feita automaticamente pelo AuthContext
+    } catch (error: any) {
+      // Mostra a mensagem real do servidor (ex.: "Email já cadastrado");
+      // a frase de conexão fica só para quando o servidor não respondeu
+      setEmailTaken(error?.status === 409);
+      showError(authErrorMessage(error, 'Não foi possível completar o cadastro. Tente novamente.'));
     } finally {
       setLoading(false);
     }
   };
 
-  const styles = createStyles(colors);
+  const styles = createStyles(colors, isDark);
 
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-    >
-      <ScrollView
-        contentContainerStyle={styles.scrollContent}
-        keyboardShouldPersistTaps="handled"
+    <AuthScreen subtitle="Crie sua conta" onBack={() => router.back()}>
+      <Stack.Screen options={{ title: 'Criar Conta', headerShown: false }} />
+
+      <AuthCard
+        eyebrow="Passo 3 de 3"
+        icon="user-plus"
+        title="Seus dados"
+        subtitle="Falta pouco! Preencha para terminar o cadastro."
       >
-        <Stack.Screen options={{ title: 'Criar Conta', headerShown: false }} />
+        {!!phone && (
+          <View style={styles.verifiedBadge}>
+            <FontAwesome5 name="check-circle" size={16} color={styles.verifiedText.color} solid />
+            <Text style={styles.verifiedText}>Celular confirmado: {maskPhone(phone)}</Text>
+          </View>
+        )}
 
-        <View style={styles.header}>
-          <Text style={styles.title}>Criar Conta</Text>
-          <Text style={styles.subtitle}>Preencha seus dados para finalizar</Text>
+        <AuthField
+          inputRef={nameRef}
+          label="Nome completo"
+          icon="user"
+          placeholder="Ex.: Maria da Silva"
+          autoCapitalize="words"
+          autoComplete="name"
+          textContentType="name"
+          returnKeyType="next"
+          submitBehavior="submit"
+          onSubmitEditing={() => emailRef.current?.focus()}
+          value={name}
+          onChangeText={onEdit(setName)}
+          editable={!loading}
+        />
+
+        <AuthField
+          inputRef={emailRef}
+          label="E-mail"
+          icon="envelope"
+          placeholder="seu@email.com"
+          hint="Você vai usar este e-mail para entrar no app."
+          keyboardType="email-address"
+          autoCapitalize="none"
+          autoCorrect={false}
+          autoComplete="email"
+          textContentType="username"
+          returnKeyType="next"
+          submitBehavior="submit"
+          onSubmitEditing={() => passwordRef.current?.focus()}
+          value={email}
+          onChangeText={onEdit(setEmail)}
+          editable={!loading}
+        />
+
+        <AuthField
+          inputRef={passwordRef}
+          label="Crie uma senha"
+          icon="lock"
+          placeholder="Mínimo 8 caracteres"
+          hint="Pelo menos 8 letras, números ou símbolos. Toque no olho para ver o que digitou."
+          secureToggle
+          autoCapitalize="none"
+          autoCorrect={false}
+          autoComplete="new-password"
+          textContentType="newPassword"
+          returnKeyType="done"
+          value={password}
+          onChangeText={onEdit(setPassword)}
+          editable={!loading}
+        />
+
+        {/* Links antes da caixa: primeiro ler, depois aceitar */}
+        <View style={styles.legalLinks}>
+          <AuthLink
+            label="Termos de uso"
+            onPress={() => Linking.openURL(`${AUTH_WEB_URL}/termos`)}
+            textStyle={styles.legalLinkText}
+          />
+          <Text style={styles.legalDot}>·</Text>
+          <AuthLink
+            label="Política de Privacidade"
+            onPress={() => Linking.openURL(`${AUTH_WEB_URL}/privacidade`)}
+            textStyle={styles.legalLinkText}
+          />
         </View>
+        <AuthCheckbox
+          checked={acceptedTerms}
+          onChange={(value) => {
+            setAcceptedTerms(value);
+            if (value) {
+              setTermsMissing(false);
+              if (errorMessage) clearError();
+            }
+          }}
+          invalid={termsMissing}
+          disabled={loading}
+          label="Li e aceito os Termos de uso e a Política de Privacidade"
+          style={styles.checkbox}
+        />
 
-        <View style={styles.form}>
-          {phone && (
-            <View style={styles.verifiedBadge}>
-              <Text style={styles.verifiedIcon}>✓</Text>
-              <Text style={styles.verifiedText}>Celular verificado: {maskPhone(phone)}</Text>
-            </View>
+        {/* Erro perto do botão: num formulário longo, a caixa no topo ficaria fora da tela */}
+        <AuthErrorBox message={errorMessage}>
+          {emailTaken && (
+            <AuthLink
+              label="Esqueci a senha deste e-mail"
+              onPress={() =>
+                router.push({ pathname: '/(auth)/forgot-password', params: { email: email.trim() } } as never)
+              }
+              style={styles.errorAction}
+            />
           )}
+        </AuthErrorBox>
+        <AuthButton label="Criar minha conta" busyLabel="Criando conta…" onPress={handleRegister} loading={loading} />
 
-          <View style={styles.inputContainer}>
-            <Text style={styles.label}>Nome Completo</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="Seu nome"
-              placeholderTextColor={colors.placeholder}
-              value={name}
-              onChangeText={setName}
-              editable={!loading}
-            />
-          </View>
-
-          <View style={styles.inputContainer}>
-            <Text style={styles.label}>E-mail</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="seu@email.com"
-              placeholderTextColor={colors.placeholder}
-              keyboardType="email-address"
-              autoCapitalize="none"
-              autoCorrect={false}
-              value={email}
-              onChangeText={setEmail}
-              editable={!loading}
-            />
-          </View>
-
-          <View style={styles.inputContainer}>
-            <Text style={styles.label}>Senha</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="Mínimo 8 caracteres"
-              placeholderTextColor={colors.placeholder}
-              secureTextEntry
-              value={password}
-              onChangeText={setPassword}
-              editable={!loading}
-            />
-          </View>
-
-          <TouchableOpacity
-            style={[styles.button, loading && styles.buttonDisabled]}
-            onPress={handleRegister}
-            disabled={loading}
-          >
-            {loading ? (
-              <ActivityIndicator color={colors.textInverse} />
-            ) : (
-              <Text style={styles.buttonText}>Criar Conta</Text>
-            )}
-          </TouchableOpacity>
-
-          <View style={styles.footer}>
-            <Text style={styles.footerText}>Já tem conta? </Text>
-            <TouchableOpacity onPress={() => router.push('/(auth)/login')}>
-              <Text style={styles.link}>Faça Login</Text>
-            </TouchableOpacity>
-          </View>
+        <View style={styles.footer}>
+          <Text style={styles.footerText}>Já tem conta?</Text>
+          <AuthLink label="Entrar" onPress={goToLogin} disabled={loading} />
         </View>
-      </ScrollView>
-    </KeyboardAvoidingView>
+      </AuthCard>
+    </AuthScreen>
   );
 }
 
-const createStyles = (colors: ReturnType<typeof useColors>) =>
+const createStyles = (colors: AuthColors, isDark: boolean) =>
   StyleSheet.create({
-    container: {
-      flex: 1,
-      backgroundColor: colors.background,
-    },
-    scrollContent: {
-      flexGrow: 1,
-      justifyContent: 'center',
-      padding: 20,
-    },
-    header: {
-      alignItems: 'center',
-      marginBottom: 40,
-    },
-    title: {
-      fontSize: 28,
-      fontWeight: 'bold',
-      color: colors.text,
-    },
-    subtitle: {
-      fontSize: 16,
-      color: colors.textSecondary,
-      marginTop: 8,
-    },
-    form: {
-      backgroundColor: colors.card,
-      borderRadius: 12,
-      padding: 20,
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 2 },
-      shadowOpacity: 0.1,
-      shadowRadius: 4,
-      elevation: 3,
-    },
     verifiedBadge: {
       flexDirection: 'row',
       alignItems: 'center',
-      backgroundColor: '#f0fdf4',
+      backgroundColor: isDark ? colors.success + '22' : '#f0fdf4',
       borderWidth: 1,
-      borderColor: '#86efac',
-      borderRadius: 8,
+      borderColor: isDark ? colors.success + '66' : '#86efac',
+      borderRadius: 12,
       paddingHorizontal: 12,
       paddingVertical: 10,
       marginBottom: 16,
       gap: 8,
     },
-    verifiedIcon: { fontSize: 16, color: '#16a34a', fontWeight: '700' },
-    verifiedText: { color: '#15803d', fontSize: 14, fontWeight: '500', flex: 1 },
-    inputContainer: {
-      marginBottom: 16,
-    },
-    label: {
-      fontSize: 14,
-      fontWeight: '600',
-      color: colors.text,
-      marginBottom: 8,
-    },
-    input: {
-      backgroundColor: colors.inputBackground,
-      borderWidth: 1,
-      borderColor: colors.border,
-      borderRadius: 8,
-      padding: 12,
-      fontSize: 16,
-      color: colors.text,
-    },
-    button: {
-      backgroundColor: colors.primary,
-      borderRadius: 8,
-      padding: 16,
+    verifiedText: { color: isDark ? '#7DDBA3' : '#15803d', fontSize: 15, fontWeight: '600', flex: 1 },
+    errorAction: { alignSelf: 'flex-start', marginTop: 2, marginBottom: -8 },
+    legalLinks: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
       alignItems: 'center',
-      marginTop: 8,
+      columnGap: 8,
+      marginTop: 2,
     },
-    buttonDisabled: {
-      backgroundColor: colors.disabled,
-    },
-    buttonText: {
-      color: colors.textInverse,
-      fontSize: 16,
-      fontWeight: '600',
-    },
+    legalLinkText: { textDecorationLine: 'underline' },
+    legalDot: { color: colors.textTertiary },
+    checkbox: { marginBottom: 14 },
     footer: {
       flexDirection: 'row',
+      alignItems: 'center',
       justifyContent: 'center',
-      marginTop: 20,
+      flexWrap: 'wrap',
+      gap: 6,
+      marginTop: 12,
     },
-    footerText: {
-      color: colors.textSecondary,
-      fontSize: 14,
-    },
-    link: {
-      color: colors.primary,
-      fontSize: 14,
-      fontWeight: '600',
-    },
+    footerText: { color: colors.textSecondary, fontSize: 15 },
   });

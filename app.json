@@ -69,6 +69,13 @@
         {
           "locationWhenInUsePermission": "O app usa sua localização para encontrar as missas mais próximas de você."
         }
+      ],
+      "expo-secure-store",
+      [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "O Parish usa o Face ID para você entrar sem digitar a senha."
+        }
       ]
     ],
     "experiments": {

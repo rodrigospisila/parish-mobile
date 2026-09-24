@@ -1,28 +1,25 @@
-import React, { useState } from 'react';
-import {
-  View,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  StyleSheet,
-  Alert,
-  ActivityIndicator,
-  KeyboardAvoidingView,
-  Platform,
-  ScrollView,
-} from 'react-native';
-import { Link, useLocalSearchParams, useRouter } from 'expo-router';
+import React, { useRef, useState } from 'react';
+import { Keyboard, StyleSheet, TextInput, View } from 'react-native';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { authService } from '../../src/services/authService';
-import { useColors } from '../../src/context/ThemeContext';
+import {
+  AuthButton,
+  AuthCard,
+  AuthErrorBox,
+  AuthField,
+  AuthLink,
+  AuthScreen,
+  authErrorMessage,
+  useAnnouncedError,
+} from '../../src/components/auth';
 
 /**
  * Recuperação de senha por autoatendimento (roadmap 1.4).
  * Etapa 1 solicita o código; etapa 2 redefine a senha com o código recebido.
  */
 export default function ForgotPasswordScreen() {
-  const colors = useColors();
   const router = useRouter();
-  const [step, setStep] = useState<'request' | 'reset'>('request');
+  const [step, setStep] = useState<'request' | 'reset' | 'done'>('request');
   // Vem preenchido quando a pessoa já digitou o e-mail na tela de login
   const params = useLocalSearchParams<{ email?: string }>();
   const [email, setEmail] = useState(typeof params.email === 'string' ? params.email : '');
@@ -30,206 +27,210 @@ export default function ForgotPasswordScreen() {
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [errorMessage, showError, clearError] = useAnnouncedError();
+  // Resposta do servidor ao pedir o código / ao salvar a nova senha
+  const [notice, setNotice] = useState('');
+  const passwordRef = useRef<TextInput>(null);
+  const confirmRef = useRef<TextInput>(null);
+
+  // Volta para o login que já está na pilha (sem empilhar um login duplicado)
+  const goToLogin = () => router.dismissTo('/(auth)/login');
+
+  const onEdit = (setter: (value: string) => void) => (value: string) => {
+    setter(value);
+    if (errorMessage) clearError();
+  };
 
   const handleRequest = async () => {
     if (!email.trim()) {
-      Alert.alert('Atenção', 'Informe seu e-mail.');
+      showError('Digite o e-mail da sua conta.');
       return;
     }
+    Keyboard.dismiss();
+    clearError();
     setIsLoading(true);
     try {
       const message = await authService.forgotPassword({ email: email.trim() });
-      Alert.alert('Solicitação enviada', message);
+      setNotice(message);
+      setToken('');
       setStep('reset');
     } catch (error: any) {
-      Alert.alert('Erro', error.message || 'Não foi possível processar a solicitação.');
+      showError(authErrorMessage(error, 'Não foi possível processar a solicitação. Tente novamente.'));
     } finally {
       setIsLoading(false);
     }
   };
 
   const handleReset = async () => {
-    if (!token.trim() || !newPassword) {
-      Alert.alert('Atenção', 'Informe o código e a nova senha.');
+    if (!token.trim()) {
+      showError('Cole ou digite o código que você recebeu.');
+      return;
+    }
+    if (!newPassword) {
+      showError('Digite a nova senha.');
+      passwordRef.current?.focus();
       return;
     }
     if (newPassword.length < 8) {
-      Alert.alert('Atenção', 'A nova senha deve ter no mínimo 8 caracteres.');
+      showError('A nova senha precisa ter pelo menos 8 caracteres.');
+      passwordRef.current?.focus();
       return;
     }
     if (newPassword !== confirmPassword) {
-      Alert.alert('Atenção', 'As senhas não coincidem.');
+      showError('As duas senhas não são iguais. Digite a mesma senha nos dois campos.');
+      confirmRef.current?.focus();
       return;
     }
+    Keyboard.dismiss();
+    clearError();
     setIsLoading(true);
     try {
       const message = await authService.resetPassword(token.trim(), newPassword);
-      Alert.alert('Pronto', message, [
-        { text: 'Ir para o login', onPress: () => router.replace('/(auth)/login') },
-      ]);
+      setNotice(message);
+      setStep('done');
     } catch (error: any) {
-      Alert.alert('Erro', error.message || 'Token inválido ou expirado.');
+      const raw: string = error?.message || '';
+      showError(
+        /token/i.test(raw)
+          ? 'O código está errado ou já venceu. Confira o código ou peça outro.'
+          : authErrorMessage(error, 'Não foi possível salvar a nova senha. Tente novamente.'),
+      );
     } finally {
       setIsLoading(false);
     }
   };
 
-  const styles = createStyles(colors);
+  const backToRequest = () => {
+    clearError();
+    setNotice('');
+    setStep('request');
+  };
+
+  const footer = (
+    <View style={styles.footer}>
+      <AuthLink label="Voltar para o login" onPress={goToLogin} disabled={isLoading} />
+    </View>
+  );
 
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+    <AuthScreen
+      subtitle="Vamos criar uma nova senha"
+      onBack={() => (step === 'reset' && !isLoading ? backToRequest() : goToLogin())}
     >
-      <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
-        <View style={styles.header}>
-          <Text style={styles.title}>Recuperar Senha</Text>
-          <Text style={styles.subtitle}>
-            {step === 'request'
-              ? 'Informe seu e-mail para receber o código'
-              : 'Informe o código recebido e a nova senha'}
-          </Text>
-        </View>
+      {step === 'request' && (
+        <AuthCard
+          icon="key"
+          title="Esqueceu a senha?"
+          subtitle="Digite o e-mail da sua conta. Vamos mandar um código para você criar uma senha nova."
+        >
+          <AuthErrorBox message={errorMessage} />
 
-        <View style={styles.form}>
-          {step === 'request' ? (
-            <>
-              <View style={styles.inputContainer}>
-                <Text style={styles.label}>E-mail</Text>
-                <TextInput
-                  style={styles.input}
-                  placeholder="seu@email.com"
-                  placeholderTextColor={colors.placeholder}
-                  keyboardType="email-address"
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  value={email}
-                  onChangeText={setEmail}
-                  editable={!isLoading}
-                />
-              </View>
-              <TouchableOpacity
-                style={[styles.button, isLoading && styles.buttonDisabled]}
-                onPress={handleRequest}
-                disabled={isLoading}
-              >
-                {isLoading ? (
-                  <ActivityIndicator color={colors.textInverse} />
-                ) : (
-                  <Text style={styles.buttonText}>Enviar código</Text>
-                )}
-              </TouchableOpacity>
-            </>
-          ) : (
-            <>
-              <View style={styles.inputContainer}>
-                <Text style={styles.label}>Código de redefinição</Text>
-                <TextInput
-                  style={styles.input}
-                  placeholder="cole o código recebido"
-                  placeholderTextColor={colors.placeholder}
-                  autoCapitalize="none"
-                  value={token}
-                  onChangeText={setToken}
-                  editable={!isLoading}
-                />
-              </View>
-              <View style={styles.inputContainer}>
-                <Text style={styles.label}>Nova senha</Text>
-                <TextInput
-                  style={styles.input}
-                  placeholder="mínimo 8 caracteres"
-                  placeholderTextColor={colors.placeholder}
-                  secureTextEntry
-                  value={newPassword}
-                  onChangeText={setNewPassword}
-                  editable={!isLoading}
-                />
-              </View>
-              <View style={styles.inputContainer}>
-                <Text style={styles.label}>Confirmar nova senha</Text>
-                <TextInput
-                  style={styles.input}
-                  placeholder="repita a nova senha"
-                  placeholderTextColor={colors.placeholder}
-                  secureTextEntry
-                  value={confirmPassword}
-                  onChangeText={setConfirmPassword}
-                  editable={!isLoading}
-                />
-              </View>
-              <TouchableOpacity
-                style={[styles.button, isLoading && styles.buttonDisabled]}
-                onPress={handleReset}
-                disabled={isLoading}
-              >
-                {isLoading ? (
-                  <ActivityIndicator color={colors.textInverse} />
-                ) : (
-                  <Text style={styles.buttonText}>Redefinir senha</Text>
-                )}
-              </TouchableOpacity>
-              <TouchableOpacity onPress={() => setStep('request')} disabled={isLoading}>
-                <Text style={[styles.link, { textAlign: 'center', marginTop: 12 }]}>
-                  Solicitar outro código
-                </Text>
-              </TouchableOpacity>
-            </>
-          )}
+          <AuthField
+            label="E-mail"
+            icon="envelope"
+            placeholder="seu@email.com"
+            keyboardType="email-address"
+            autoCapitalize="none"
+            autoCorrect={false}
+            autoComplete="email"
+            textContentType="username"
+            returnKeyType="send"
+            onSubmitEditing={handleRequest}
+            value={email}
+            onChangeText={onEdit(setEmail)}
+            editable={!isLoading}
+          />
 
-          <View style={styles.footer}>
-            <Link href="/(auth)/login" style={styles.link}>
-              Voltar ao login
-            </Link>
-          </View>
-        </View>
-      </ScrollView>
-    </KeyboardAvoidingView>
+          <AuthButton label="Enviar código" busyLabel="Enviando…" onPress={handleRequest} loading={isLoading} />
+          {footer}
+        </AuthCard>
+      )}
+
+      {step === 'reset' && (
+        <AuthCard
+          icon="lock"
+          title="Crie a nova senha"
+          subtitle="Digite o código que você recebeu e escolha uma senha nova."
+        >
+          <AuthErrorBox message={errorMessage} />
+          <AuthErrorBox message={errorMessage ? '' : notice} tone="info" />
+
+          <AuthField
+            label="Código recebido"
+            icon="hashtag"
+            placeholder="Cole ou digite o código"
+            hint="O código chega por SMS ou e-mail. Você pode copiar e colar aqui."
+            autoCapitalize="none"
+            autoCorrect={false}
+            autoComplete="off"
+            returnKeyType="next"
+            submitBehavior="submit"
+            onSubmitEditing={() => passwordRef.current?.focus()}
+            value={token}
+            onChangeText={onEdit(setToken)}
+            editable={!isLoading}
+          />
+          <AuthField
+            inputRef={passwordRef}
+            label="Nova senha"
+            icon="lock"
+            placeholder="Mínimo 8 caracteres"
+            hint="Pelo menos 8 letras, números ou símbolos."
+            secureToggle
+            autoCapitalize="none"
+            autoCorrect={false}
+            autoComplete="new-password"
+            textContentType="newPassword"
+            returnKeyType="next"
+            submitBehavior="submit"
+            onSubmitEditing={() => confirmRef.current?.focus()}
+            value={newPassword}
+            onChangeText={onEdit(setNewPassword)}
+            editable={!isLoading}
+          />
+          <AuthField
+            inputRef={confirmRef}
+            label="Repita a nova senha"
+            icon="lock"
+            placeholder="Digite a mesma senha"
+            secureToggle
+            autoCapitalize="none"
+            autoCorrect={false}
+            autoComplete="new-password"
+            textContentType="newPassword"
+            returnKeyType="done"
+            onSubmitEditing={handleReset}
+            value={confirmPassword}
+            onChangeText={onEdit(setConfirmPassword)}
+            editable={!isLoading}
+          />
+
+          <AuthButton label="Salvar nova senha" busyLabel="Salvando…" onPress={handleReset} loading={isLoading} />
+          <AuthLink
+            label="Não recebi — pedir outro código"
+            onPress={backToRequest}
+            disabled={isLoading}
+            accessibilityRole="button"
+            style={styles.centerLink}
+          />
+          {footer}
+        </AuthCard>
+      )}
+
+      {step === 'done' && (
+        <AuthCard
+          icon="check"
+          title="Senha alterada!"
+          subtitle={notice || 'Senha redefinida com sucesso. Faça login com a nova senha.'}
+        >
+          <AuthButton label="Ir para o login" onPress={goToLogin} />
+        </AuthCard>
+      )}
+    </AuthScreen>
   );
 }
 
-const createStyles = (colors: ReturnType<typeof useColors>) =>
-  StyleSheet.create({
-    container: { flex: 1, backgroundColor: colors.background },
-    scrollContent: { flexGrow: 1, justifyContent: 'center', padding: 20 },
-    header: { alignItems: 'center', marginBottom: 40 },
-    title: { fontSize: 28, fontWeight: 'bold', color: colors.text },
-    subtitle: {
-      fontSize: 15,
-      color: colors.textSecondary,
-      marginTop: 8,
-      textAlign: 'center',
-    },
-    form: {
-      backgroundColor: colors.card,
-      borderRadius: 12,
-      padding: 20,
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 2 },
-      shadowOpacity: 0.1,
-      shadowRadius: 4,
-      elevation: 3,
-    },
-    inputContainer: { marginBottom: 16 },
-    label: { fontSize: 14, fontWeight: '600', color: colors.text, marginBottom: 8 },
-    input: {
-      backgroundColor: colors.inputBackground,
-      borderWidth: 1,
-      borderColor: colors.border,
-      borderRadius: 8,
-      padding: 12,
-      fontSize: 16,
-      color: colors.text,
-    },
-    button: {
-      backgroundColor: colors.primary,
-      borderRadius: 8,
-      padding: 16,
-      alignItems: 'center',
-      marginTop: 8,
-    },
-    buttonDisabled: { backgroundColor: colors.disabled },
-    buttonText: { color: colors.textInverse, fontSize: 16, fontWeight: '600' },
-    footer: { flexDirection: 'row', justifyContent: 'center', marginTop: 20 },
-    link: { color: colors.primary, fontSize: 14, fontWeight: '600' },
-  });
+const styles = StyleSheet.create({
+  centerLink: { alignSelf: 'center', marginTop: 8 },
+  footer: { flexDirection: 'row', justifyContent: 'center', marginTop: 4 },
+});

@@ -6,51 +6,37 @@ import {
   TouchableOpacity,
   StyleSheet,
   Alert,
-  ActivityIndicator,
-  KeyboardAvoidingView,
-  Platform,
-  ScrollView,
-  Image,
-  StatusBar,
   Keyboard,
   Linking,
   BackHandler,
-  AccessibilityInfo,
-  useWindowDimensions,
-  type TextInputProps,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { LinearGradient } from 'expo-linear-gradient';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useAuth } from '../../src/context/AuthContext';
-import { useColors, useTheme } from '../../src/context/ThemeContext';
 import { useRouter } from 'expo-router';
 import { FontAwesome5 } from '@expo/vector-icons';
+import { useAuth } from '../../src/context/AuthContext';
+import type { LoginData } from '../../src/services/authService';
+import { biometricService, type BiometricSupport } from '../../src/services/biometricService';
+import {
+  AuthButton,
+  AuthCard,
+  AuthErrorBox,
+  AuthField,
+  AuthLink,
+  AuthScreen,
+  AUTH_WEB_URL,
+  NO_CONNECTION_MESSAGE,
+  useAnnouncedError,
+  useAuthPalette,
+  type AuthColors,
+  type AuthPalette,
+} from '../../src/components/auth';
 
 type LoginStep = 'credentials' | 'twoFactor';
-type Colors = ReturnType<typeof useColors>;
 
-const LOGO = require('../../assets/images/logo-mark.png');
-/** Degradê da marca (mesmo azul-marinho do ícone e da splash) */
-const HERO_GRADIENT = ['#0B1C2C', '#17324D', '#0B4A8A'] as const;
-const WEB_URL = 'https://parish-web-three.vercel.app';
-/** Último e-mail que entrou neste aparelho (só o e-mail, nunca a senha) */
-const LAST_EMAIL_KEY = '@parish:lastLoginEmail';
-/** Servidor pode demorar a acordar: depois disso o botão avisa que ainda está conectando */
-const SLOW_LOGIN_MS = 8000;
-
-/**
- * Cores desta tela com contraste conferido (WCAG AA): borda de campo ≥ 3:1,
- * texto e links ≥ 4,5:1 — nos dois temas.
- */
-const screenPalette = (colors: Colors, isDark: boolean) => ({
-  link: isDark ? colors.primaryLight : colors.primary,
-  error: isDark ? '#FF8A8F' : colors.error,
-  fieldBorder: isDark ? '#6B7480' : '#8A96A3',
-  fieldBackground: isDark ? '#1A1D22' : colors.inputBackground,
-  placeholder: isDark ? colors.placeholder : '#6B7785',
-});
-type Palette = ReturnType<typeof screenPalette>;
+/** Último login (e-mail ou celular) usado neste aparelho — nunca a senha */
+const LAST_LOGIN_KEY = '@parish:lastLogin';
+/** Chave antiga (só e-mail), lida uma vez para quem já tinha entrado */
+const LEGACY_LAST_EMAIL_KEY = '@parish:lastLoginEmail';
 
 /** Aviso curto de primeiro acesso neste aparelho (D4.7) */
 const showNewDeviceAlert = () => {
@@ -61,86 +47,48 @@ const showNewDeviceAlert = () => {
   );
 };
 
-/** Traduz a falha do login para uma frase que o fiel entende (o servidor fala em "credenciais", "throttler"…) */
+/**
+ * "E-mail ou celular": com @ é e-mail; senão, precisa ter DDD + número
+ * (10 ou 11 dígitos, ou 12–13 com o 55). O backend normaliza o celular.
+ */
+const toLoginData = (typed: string, password: string): LoginData | null => {
+  const value = typed.trim();
+  if (value.includes('@')) return { email: value, password };
+  const digits = value.replace(/\D/g, '');
+  if (digits.length >= 10 && digits.length <= 13) return { phone: value, password };
+  return null;
+};
+
+/** Traduz a falha do login para uma frase que o fiel entende */
 const loginErrorMessage = (error: any): string => {
   const status: number = error?.status ?? 0;
   const raw: string = error?.message || '';
   if (status === 429) return 'Muitas tentativas seguidas. Aguarde 1 minuto e tente de novo.';
-  if (status === 0) return 'Sem conexão com o servidor. Confira sua internet e tente de novo.';
+  if (status === 0) return NO_CONNECTION_MESSAGE;
   if (status >= 500) return 'O servidor está com um problema agora. Tente de novo em instantes.';
-  if (/inativ/i.test(raw)) return 'Esta conta está desativada. Procure a secretaria da sua paróquia.';
+  if (/inativ|desativad/i.test(raw)) return 'Esta conta está desativada. Procure a secretaria da sua paróquia.';
   if (status === 400 && /e-?mail/i.test(raw)) return 'Confira se o e-mail foi digitado certo.';
-  if (status === 400 || status === 401) return 'E-mail ou senha incorretos.';
+  if (status === 400 || status === 401) return 'E-mail, celular ou senha incorretos.';
   return raw || 'Não foi possível entrar. Tente novamente.';
 };
 
-type FieldProps = TextInputProps & {
-  label: string;
-  icon: string;
-  colors: Colors;
-  palette: Palette;
-  /** Ação à direita do campo (ex.: mostrar senha) */
-  right?: React.ReactNode;
-  inputRef?: React.Ref<TextInput>;
-};
-
-/** Campo com rótulo, ícone à esquerda e borda de foco */
-function Field({ label, icon, colors, palette, right, inputRef, style, onFocus, onBlur, ...input }: FieldProps) {
-  const [focused, setFocused] = useState(false);
-  const styles = fieldStyles(colors, palette);
-  return (
-    <View style={styles.container}>
-      {/* O leitor de tela já lê o rótulo pelo próprio campo */}
-      <Text style={styles.label} importantForAccessibility="no" accessibilityElementsHidden>
-        {label}
-      </Text>
-      <View style={[styles.box, focused && styles.boxFocused]}>
-        <FontAwesome5
-          name={icon}
-          size={15}
-          solid
-          color={focused ? palette.link : colors.textTertiary}
-          style={styles.icon}
-        />
-        <TextInput
-          ref={inputRef}
-          style={[styles.input, style]}
-          placeholderTextColor={palette.placeholder}
-          accessibilityLabel={label}
-          onFocus={(e) => {
-            setFocused(true);
-            onFocus?.(e);
-          }}
-          onBlur={(e) => {
-            setFocused(false);
-            onBlur?.(e);
-          }}
-          {...input}
-        />
-        {right}
-      </View>
-    </View>
-  );
-}
-
 export default function LoginScreen() {
   const { signIn, completeTwoFactorSignIn } = useAuth();
-  const colors = useColors();
-  const { isDark } = useTheme();
-  const palette = screenPalette(colors, isDark);
+  const { colors, palette } = useAuthPalette();
   const router = useRouter();
-  const insets = useSafeAreaInsets();
-  const { fontScale } = useWindowDimensions();
   const passwordRef = useRef<TextInput>(null);
 
-  const [email, setEmail] = useState('');
+  const [login, setLogin] = useState('');
   const [password, setPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const [isSlow, setIsSlow] = useState(false);
-  const [errorMessage, setErrorMessage] = useState('');
+  const [errorMessage, showError, clearError] = useAnnouncedError();
   const [failedAttempts, setFailedAttempts] = useState(0);
-  const [keyboardOpen, setKeyboardOpen] = useState(false);
+
+  // Entrar com Face ID / digital
+  const [bioSupport, setBioSupport] = useState<BiometricSupport | null>(null);
+  const [bioEnabled, setBioEnabled] = useState(false);
+  /** Credenciais do login com senha em andamento — para oferecer a biometria no fim (inclusive depois do 2FA) */
+  const pendingCredentials = useRef<{ login: string; password: string; viaBiometric: boolean } | null>(null);
 
   // Segunda etapa (2FA)
   const [step, setStep] = useState<LoginStep>('credentials');
@@ -148,30 +96,21 @@ export default function LoginScreen() {
   const [code, setCode] = useState('');
   const [useRecoveryCode, setUseRecoveryCode] = useState(false);
 
-  // Cabeçalho compacto com teclado aberto ou fonte grande do sistema, para o
-  // campo de senha e o botão não ficarem escondidos em telas pequenas
-  const compactHero = keyboardOpen || fontScale > 1.3;
-
   useEffect(() => {
-    AsyncStorage.getItem(LAST_EMAIL_KEY)
-      .then((saved) => {
-        if (saved) setEmail((current) => current || saved);
-      })
-      .catch(() => {});
+    (async () => {
+      try {
+        const saved =
+          (await AsyncStorage.getItem(LAST_LOGIN_KEY)) ?? (await AsyncStorage.getItem(LEGACY_LAST_EMAIL_KEY));
+        if (saved) setLogin((current) => current || saved);
+      } catch {
+        // sem armazenamento: só não pré-preenche
+      }
+    })();
+    biometricService.getSupport().then(setBioSupport);
+    biometricService.isEnabled().then(setBioEnabled);
   }, []);
 
-  useEffect(() => {
-    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
-    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
-    const show = Keyboard.addListener(showEvent, () => setKeyboardOpen(true));
-    const hide = Keyboard.addListener(hideEvent, () => setKeyboardOpen(false));
-    return () => {
-      show.remove();
-      hide.remove();
-    };
-  }, []);
-
-  // Botão "voltar" do Android na etapa do código volta para e-mail e senha
+  // Botão "voltar" do Android na etapa do código volta para o login
   useEffect(() => {
     if (step !== 'twoFactor') return;
     const sub = BackHandler.addEventListener('hardwareBackPress', () => {
@@ -182,37 +121,55 @@ export default function LoginScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step, isLoading]);
 
-  // Aviso de "ainda conectando" quando o servidor demora a responder
-  useEffect(() => {
-    if (!isLoading) {
-      setIsSlow(false);
+  const bioReady = !!bioSupport?.available && bioEnabled;
+
+  /**
+   * Depois de entrar com a senha: mantém as credenciais da biometria em dia
+   * (senha trocada, outra conta) ou convida a ativar, uma vez só.
+   */
+  const afterPasswordLogin = async () => {
+    const pending = pendingCredentials.current;
+    pendingCredentials.current = null;
+    if (!pending || pending.viaBiometric || !bioSupport?.available) return;
+
+    if (bioEnabled) {
+      const stored = await biometricService.readCredentials();
+      if (stored && stored.login.toLowerCase() === pending.login.toLowerCase()) {
+        if (stored.password !== pending.password) await biometricService.enable(pending.login, pending.password);
+        return;
+      }
+      // Outra conta neste aparelho: a biometria não pode abrir a conta anterior
+      await biometricService.disable();
+    } else if (await biometricService.wasDeclined()) {
       return;
     }
-    const timer = setTimeout(() => setIsSlow(true), SLOW_LOGIN_MS);
-    return () => clearTimeout(timer);
-  }, [isLoading]);
 
-  const showError = (message: string) => {
-    setErrorMessage(message);
-    // VoiceOver/TalkBack não leem sozinhos uma caixa que acabou de aparecer
-    if (message) AccessibilityInfo.announceForAccessibility(message);
+    const label = bioSupport.label;
+    Alert.alert(
+      `Entrar com ${label}?`,
+      `Da próxima vez, entre usando ${label}, sem digitar a senha. A senha fica guardada apenas neste aparelho.`,
+      [
+        { text: 'Agora não', style: 'cancel', onPress: () => biometricService.setDeclined() },
+        { text: 'Ativar', onPress: () => biometricService.enable(pending.login, pending.password) },
+      ],
+    );
   };
 
-  const handleLogin = async () => {
-    const cleanEmail = email.trim();
-    if (!cleanEmail || !password.trim()) {
-      showError(!cleanEmail ? 'Digite o seu e-mail.' : 'Digite a sua senha.');
-      if (cleanEmail) passwordRef.current?.focus();
+  const doLogin = async (typedLogin: string, typedPassword: string, viaBiometric: boolean) => {
+    const data = toLoginData(typedLogin, typedPassword);
+    if (!data) {
+      showError('Digite o e-mail ou o celular com DDD.');
       return;
     }
 
     Keyboard.dismiss();
-    setErrorMessage('');
+    clearError();
     setIsLoading(true);
     try {
-      const result = await signIn({ email: cleanEmail, password });
+      const result = await signIn(data);
       setFailedAttempts(0);
-      AsyncStorage.setItem(LAST_EMAIL_KEY, cleanEmail).catch(() => {});
+      AsyncStorage.setItem(LAST_LOGIN_KEY, typedLogin.trim()).catch(() => {});
+      pendingCredentials.current = { login: typedLogin.trim(), password: typedPassword, viaBiometric };
 
       if (result.requiresTwoFactor) {
         // Conta com segundo fator: pede o código antes de abrir a sessão
@@ -224,10 +181,20 @@ export default function LoginScreen() {
       }
 
       // Navegação é feita automaticamente pelo AuthContext
-      if (result.newDevice) {
-        showNewDeviceAlert();
-      }
+      if (result.newDevice) showNewDeviceAlert();
+      afterPasswordLogin();
     } catch (error: any) {
+      if (viaBiometric && (error?.status === 401 || error?.status === 403)) {
+        // Senha guardada não vale mais (trocou a senha, conta desativada…)
+        await biometricService.disable();
+        setBioEnabled(false);
+        showError(
+          error?.status === 403
+            ? loginErrorMessage(error)
+            : `Sua senha mudou desde que você ativou a entrada com ${bioSupport?.label ?? 'biometria'}. Entre com a senha para ativar de novo.`,
+        );
+        return;
+      }
       setFailedAttempts((n) => n + 1);
       showError(loginErrorMessage(error));
     } finally {
@@ -235,12 +202,40 @@ export default function LoginScreen() {
     }
   };
 
+  const handleLogin = () => {
+    if (!login.trim()) {
+      showError('Digite o seu e-mail ou celular.');
+      return;
+    }
+    if (!password.trim()) {
+      showError('Digite a sua senha.');
+      passwordRef.current?.focus();
+      return;
+    }
+    doLogin(login, password, false);
+  };
+
+  const handleBiometricLogin = async () => {
+    if (!bioSupport?.available) return;
+    clearError();
+    const credentials = await biometricService.unlock(bioSupport.label);
+    if (!credentials) {
+      // Cancelou, falhou ou as credenciais sumiram (unlock já desativa nesse caso)
+      setBioEnabled(await biometricService.isEnabled());
+      return;
+    }
+    setLogin(credentials.login);
+    doLogin(credentials.login, credentials.password, true);
+  };
+
   const backToCredentials = (message = '') => {
     setStep('credentials');
     setChallengeToken(null);
     setCode('');
     setUseRecoveryCode(false);
-    showError(message);
+    pendingCredentials.current = null;
+    if (message) showError(message);
+    else clearError();
   };
 
   const handleTwoFactor = async () => {
@@ -254,28 +249,27 @@ export default function LoginScreen() {
       return;
     }
 
-    setErrorMessage('');
+    clearError();
     setIsLoading(true);
     try {
       const result = await completeTwoFactorSignIn(challengeToken, cleanCode);
       // Sessão aberta — navegação é feita automaticamente pelo AuthContext
-      if (!result.requiresTwoFactor && result.newDevice) {
-        showNewDeviceAlert();
-      }
+      if (!result.requiresTwoFactor && result.newDevice) showNewDeviceAlert();
+      afterPasswordLogin();
     } catch (error: any) {
       const message: string = error?.message || 'Código inválido. Tente novamente.';
       // Desafio vale 5 minutos e só uma vez — expirado, usado ou inválido,
-      // não adianta insistir no código: volta para e-mail e senha
+      // não adianta insistir no código: volta para o login
       if (/expirad/i.test(message)) {
         backToCredentials('O tempo para digitar o código acabou. Entre de novo.');
       } else if (/desafio/i.test(message)) {
-        backToCredentials('Por segurança, entre de novo com e-mail e senha.');
+        backToCredentials('Por segurança, entre de novo com e-mail ou celular e senha.');
       } else if (/muitas tentativas/i.test(message)) {
         showError(message);
       } else if (error?.status === 429) {
         showError('Muitas tentativas seguidas. Aguarde 1 minuto e tente de novo.');
       } else if (error?.status === 0) {
-        showError('Sem conexão com o servidor. Confira sua internet e tente de novo.');
+        showError(NO_CONNECTION_MESSAGE);
       } else {
         showError('Código incorreto. Confira no app autenticador e tente de novo.');
         setCode('');
@@ -286,71 +280,28 @@ export default function LoginScreen() {
   };
 
   const openForgotPassword = () => {
-    const typed = email.trim();
-    router.push({ pathname: '/(auth)/forgot-password', params: typed ? { email: typed } : {} } as never);
+    const typed = login.trim();
+    router.push({
+      pathname: '/(auth)/forgot-password',
+      params: typed.includes('@') ? { email: typed } : {},
+    } as never);
   };
 
   const styles = createStyles(colors, palette);
 
-  const errorBox = errorMessage ? (
-    <View style={styles.errorBox}>
-      <FontAwesome5 name="exclamation-circle" size={14} color={palette.error} solid />
-      <Text style={styles.errorText}>{errorMessage}</Text>
-    </View>
-  ) : null;
-
-  const primaryButton = (label: string, busyLabel: string, onPress: () => void) => (
-    <TouchableOpacity
-      style={[styles.button, isLoading && styles.buttonBusy]}
-      onPress={onPress}
-      disabled={isLoading}
-      activeOpacity={0.85}
-      accessibilityRole="button"
-      accessibilityLabel={isLoading ? busyLabel : label}
-      accessibilityState={{ disabled: isLoading, busy: isLoading }}
-    >
-      {isLoading ? (
-        <View style={styles.buttonBusyRow}>
-          <ActivityIndicator color={colors.textInverse} />
-          <Text style={styles.buttonText}>{isSlow ? 'Ainda conectando…' : busyLabel}</Text>
-        </View>
-      ) : (
-        <Text style={styles.buttonText}>{label}</Text>
-      )}
-    </TouchableOpacity>
-  );
-
-  const textLink = (label: string, onPress: () => void, style?: object) => (
-    <TouchableOpacity
-      onPress={onPress}
-      disabled={isLoading}
-      accessibilityRole="link"
-      hitSlop={{ top: 4, bottom: 4, left: 8, right: 8 }}
-      style={[styles.linkTouch, style]}
-    >
-      <Text style={styles.link}>{label}</Text>
-    </TouchableOpacity>
-  );
-
   const renderTwoFactorStep = () => (
-    <View style={styles.card}>
-      <View style={styles.stepIcon}>
-        <FontAwesome5 name="shield-alt" size={18} color={palette.link} solid />
-      </View>
-      <Text style={styles.cardTitle} accessibilityRole="header">
-        Verificação em duas etapas
-      </Text>
-      <Text style={styles.cardSubtitle}>
-        {useRecoveryCode
+    <AuthCard
+      icon="shield-alt"
+      title="Verificação em duas etapas"
+      subtitle={
+        useRecoveryCode
           ? 'Digite um dos códigos de recuperação que você guardou ao ativar a verificação.'
-          : 'Abra o app autenticador e digite o código de 6 dígitos da sua conta Parish.'}
-      </Text>
+          : 'Abra o app autenticador e digite o código de 6 dígitos da sua conta Parish.'
+      }
+    >
+      <AuthErrorBox message={errorMessage} />
 
-      {errorBox}
-
-      <Field
-        colors={colors}
-        palette={palette}
+      <AuthField
         label={useRecoveryCode ? 'Código de recuperação' : 'Código do autenticador'}
         icon="key"
         style={styles.codeInput}
@@ -364,7 +315,7 @@ export default function LoginScreen() {
         value={code}
         onChangeText={(value) => {
           setCode(value);
-          if (errorMessage) setErrorMessage('');
+          if (errorMessage) clearError();
         }}
         onSubmitEditing={handleTwoFactor}
         returnKeyType="done"
@@ -372,68 +323,53 @@ export default function LoginScreen() {
         autoFocus
       />
 
-      {primaryButton('Confirmar', 'Confirmando…', handleTwoFactor)}
+      <AuthButton label="Confirmar" busyLabel="Confirmando…" loading={isLoading} onPress={handleTwoFactor} />
+      <AuthButton label="Voltar" variant="secondary" disabled={isLoading} onPress={() => backToCredentials()} />
 
-      <TouchableOpacity
-        style={styles.secondaryButton}
-        onPress={() => backToCredentials()}
-        disabled={isLoading}
+      <AuthLink
+        label={useRecoveryCode ? 'Usar código do autenticador' : 'Usar código de recuperação'}
         accessibilityRole="button"
-      >
-        <Text style={styles.secondaryButtonText}>Voltar</Text>
-      </TouchableOpacity>
-
-      {textLink(
-        useRecoveryCode ? 'Usar código do autenticador' : 'Usar código de recuperação',
-        () => {
+        disabled={isLoading}
+        style={styles.centerLink}
+        onPress={() => {
           setUseRecoveryCode((value) => !value);
           setCode('');
-          setErrorMessage('');
-        },
-        styles.centerLink,
-      )}
-    </View>
+          clearError();
+        }}
+      />
+    </AuthCard>
   );
 
   const renderCredentialsStep = () => (
-    <View style={styles.card}>
-      <Text style={styles.cardTitle} accessibilityRole="header">
-        Entre na sua conta
-      </Text>
-      <Text style={styles.cardSubtitle}>Use o e-mail e a senha que você cadastrou.</Text>
+    <AuthCard title="Entre na sua conta" subtitle="Use o e-mail ou o celular e a senha que você cadastrou.">
+      <AuthErrorBox message={errorMessage} />
 
-      {errorBox}
-
-      <Field
-        colors={colors}
-        palette={palette}
-        label="E-mail"
-        icon="envelope"
-        placeholder="seu@email.com"
+      <AuthField
+        label="E-mail ou celular"
+        icon="user"
+        placeholder="seu@email.com ou celular"
         keyboardType="email-address"
         autoCapitalize="none"
         autoCorrect={false}
-        autoComplete="email"
+        autoComplete="username"
         textContentType="username"
         returnKeyType="next"
         submitBehavior="submit"
         onSubmitEditing={() => passwordRef.current?.focus()}
-        value={email}
+        value={login}
         onChangeText={(value) => {
-          setEmail(value);
-          if (errorMessage) setErrorMessage('');
+          setLogin(value);
+          if (errorMessage) clearError();
         }}
         editable={!isLoading}
       />
 
-      <Field
-        colors={colors}
-        palette={palette}
+      <AuthField
         inputRef={passwordRef}
         label="Senha"
         icon="lock"
         placeholder="Sua senha"
-        secureTextEntry={!showPassword}
+        secureToggle
         autoCapitalize="none"
         autoCorrect={false}
         autoComplete="current-password"
@@ -443,24 +379,9 @@ export default function LoginScreen() {
         value={password}
         onChangeText={(value) => {
           setPassword(value);
-          if (errorMessage) setErrorMessage('');
+          if (errorMessage) clearError();
         }}
         editable={!isLoading}
-        right={
-          <TouchableOpacity
-            onPress={() => setShowPassword((value) => !value)}
-            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-            style={styles.eyeButton}
-            accessibilityRole="button"
-            accessibilityLabel={showPassword ? 'Ocultar senha' : 'Mostrar senha'}
-          >
-            <FontAwesome5
-              name={showPassword ? 'eye-slash' : 'eye'}
-              size={17}
-              color={colors.textSecondary}
-            />
-          </TouchableOpacity>
-        }
       />
 
       {/* Depois de dois erros, a recuperação de senha ganha destaque */}
@@ -475,14 +396,24 @@ export default function LoginScreen() {
           <Text style={styles.forgotHighlightText}>Esqueceu a senha? Crie uma nova</Text>
         </TouchableOpacity>
       ) : (
-        textLink('Esqueci minha senha', openForgotPassword, styles.forgotRow)
+        <AuthLink label="Esqueci minha senha" onPress={openForgotPassword} disabled={isLoading} style={styles.forgotRow} />
       )}
 
-      {primaryButton('Entrar', 'Entrando…', handleLogin)}
+      <AuthButton label="Entrar" busyLabel="Entrando…" loading={isLoading} onPress={handleLogin} />
+
+      {bioReady && (
+        <AuthButton
+          label={`Entrar com ${bioSupport!.label}`}
+          variant="secondary"
+          icon={bioSupport!.icon}
+          disabled={isLoading}
+          onPress={handleBiometricLogin}
+        />
+      )}
 
       <View style={styles.footer}>
         <Text style={styles.footerText}>Ainda não tem conta?</Text>
-        {textLink('Criar conta', () => router.push('/(auth)/phone-verify' as never))}
+        <AuthLink label="Criar conta" disabled={isLoading} onPress={() => router.push('/(auth)/phone-verify' as never)} />
       </View>
 
       {__DEV__ && (
@@ -492,230 +423,48 @@ export default function LoginScreen() {
           <Text style={styles.testText}>Sem comunidade: user@test.com / 12345678</Text>
         </View>
       )}
-    </View>
+    </AuthCard>
   );
 
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-    >
-      <StatusBar barStyle="light-content" />
-      <ScrollView
-        contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + 24 }]}
-        keyboardShouldPersistTaps="handled"
-        bounces={false}
-      >
-        <LinearGradient
-          colors={HERO_GRADIENT}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={[
-            styles.hero,
-            compactHero && styles.heroCompact,
-            { paddingTop: insets.top + (compactHero ? 16 : 32) },
-          ]}
+    <AuthScreen subtitle={step === 'twoFactor' ? 'Só mais um passo' : 'Sua comunidade, mais perto de você'}>
+      {step === 'twoFactor' ? renderTwoFactorStep() : renderCredentialsStep()}
+
+      {/* Mapa das igrejas: aberto a quem ainda não tem conta */}
+      {step === 'credentials' && (
+        <TouchableOpacity
+          style={styles.nearbyButton}
+          activeOpacity={0.85}
+          onPress={() => router.push('/nearby-masses' as never)}
+          accessibilityRole="button"
         >
-          <Image
-            source={LOGO}
-            style={compactHero ? styles.logoCompact : styles.logo}
-            accessibilityIgnoresInvertColors
-            accessible={false}
-          />
-          <Text style={[styles.brand, compactHero && styles.brandCompact]} maxFontSizeMultiplier={1.3}>
-            Parish
-          </Text>
-          {!compactHero && (
-            <Text style={styles.tagline} maxFontSizeMultiplier={1.5}>
-              {step === 'twoFactor' ? 'Só mais um passo' : 'Sua comunidade, mais perto de você'}
-            </Text>
-          )}
-        </LinearGradient>
-
-        <View style={styles.body}>
-          {step === 'twoFactor' ? renderTwoFactorStep() : renderCredentialsStep()}
-
-          {/* Mapa das igrejas: aberto a quem ainda não tem conta */}
-          {step === 'credentials' && (
-            <TouchableOpacity
-              style={styles.nearbyButton}
-              activeOpacity={0.85}
-              onPress={() => router.push('/nearby-masses' as never)}
-              accessibilityRole="button"
-            >
-              <View style={styles.nearbyIcon}>
-                <FontAwesome5 name="church" size={16} color={palette.link} />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.nearbyTitle}>Encontrar missas perto</Text>
-                <Text style={styles.nearbySub}>Veja igrejas e horários no mapa, sem precisar entrar</Text>
-              </View>
-              <FontAwesome5 name="chevron-right" size={13} color={colors.textTertiary} />
-            </TouchableOpacity>
-          )}
-
-          <View style={styles.legal}>
-            {textLink('Privacidade', () => Linking.openURL(`${WEB_URL}/privacidade`), styles.legalLink)}
-            <Text style={styles.legalDot}>·</Text>
-            {textLink('Termos de uso', () => Linking.openURL(`${WEB_URL}/termos`), styles.legalLink)}
+          <View style={styles.nearbyIcon}>
+            <FontAwesome5 name="church" size={16} color={palette.link} />
           </View>
-        </View>
-      </ScrollView>
-    </KeyboardAvoidingView>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.nearbyTitle}>Encontrar missas perto</Text>
+            <Text style={styles.nearbySub}>Veja igrejas e horários no mapa, sem precisar entrar</Text>
+          </View>
+          <FontAwesome5 name="chevron-right" size={13} color={colors.textTertiary} />
+        </TouchableOpacity>
+      )}
+
+      <View style={styles.legal}>
+        <AuthLink label="Privacidade" onPress={() => Linking.openURL(`${AUTH_WEB_URL}/privacidade`)} style={styles.legalLink} />
+        <Text style={styles.legalDot}>·</Text>
+        <AuthLink label="Termos de uso" onPress={() => Linking.openURL(`${AUTH_WEB_URL}/termos`)} style={styles.legalLink} />
+      </View>
+    </AuthScreen>
   );
 }
 
-const fieldStyles = (colors: Colors, palette: Palette) =>
+const createStyles = (colors: AuthColors, palette: AuthPalette) =>
   StyleSheet.create({
-    container: {
-      marginBottom: 14,
-    },
-    label: {
-      fontSize: 15,
-      fontWeight: '600',
-      color: colors.text,
-      marginBottom: 6,
-    },
-    box: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      minHeight: 52,
-      backgroundColor: palette.fieldBackground,
-      borderWidth: 1.5,
-      borderColor: palette.fieldBorder,
-      borderRadius: 12,
-      paddingHorizontal: 14,
-    },
-    boxFocused: {
-      borderColor: palette.link,
-      borderWidth: 2,
-      backgroundColor: colors.card,
-    },
-    icon: {
-      width: 20,
-      marginRight: 10,
-      textAlign: 'center',
-    },
-    input: {
-      flex: 1,
-      paddingVertical: 12,
-      fontSize: 16,
-      color: colors.text,
-    },
-  });
-
-const createStyles = (colors: Colors, palette: Palette) =>
-  StyleSheet.create({
-    container: {
-      flex: 1,
-      backgroundColor: colors.background,
-    },
-    scrollContent: {
-      flexGrow: 1,
-    },
-    hero: {
-      alignItems: 'center',
-      paddingHorizontal: 24,
-      paddingBottom: 64,
-      borderBottomLeftRadius: 28,
-      borderBottomRightRadius: 28,
-    },
-    heroCompact: {
-      paddingBottom: 52,
-    },
-    logo: {
-      width: 92,
-      height: 92,
-    },
-    logoCompact: {
-      width: 52,
-      height: 52,
-    },
-    brand: {
-      fontSize: 32,
-      fontWeight: '800',
-      color: '#FFFFFF',
-      letterSpacing: 0.5,
-      marginTop: 10,
-    },
-    brandCompact: {
-      fontSize: 22,
-      marginTop: 4,
-    },
-    tagline: {
-      fontSize: 15,
-      color: 'rgba(255,255,255,0.8)',
-      marginTop: 4,
-      textAlign: 'center',
-    },
-    body: {
-      paddingHorizontal: 20,
-      marginTop: -40,
-      width: '100%',
-      maxWidth: 480,
-      alignSelf: 'center',
-    },
-    card: {
-      backgroundColor: colors.card,
-      borderRadius: 20,
-      padding: 22,
-      shadowColor: '#0B1C2C',
-      shadowOffset: { width: 0, height: 8 },
-      shadowOpacity: 0.12,
-      shadowRadius: 18,
-      elevation: 6,
-    },
-    stepIcon: {
-      width: 40,
-      height: 40,
-      borderRadius: 20,
-      alignItems: 'center',
-      justifyContent: 'center',
-      backgroundColor: colors.highlightLight,
-      marginBottom: 12,
-    },
-    cardTitle: {
-      fontSize: 21,
-      fontWeight: '700',
-      color: colors.text,
-    },
-    cardSubtitle: {
-      fontSize: 15,
-      color: colors.textSecondary,
-      lineHeight: 21,
-      marginTop: 4,
-      marginBottom: 18,
-    },
-    errorBox: {
-      flexDirection: 'row',
-      alignItems: 'flex-start',
-      gap: 8,
-      padding: 12,
-      borderRadius: 10,
-      marginBottom: 14,
-      backgroundColor: palette.error + '14',
-      borderWidth: 1,
-      borderColor: palette.error + '55',
-    },
-    errorText: {
-      flex: 1,
-      fontSize: 15,
-      lineHeight: 20,
-      color: palette.error,
-    },
     codeInput: {
       fontSize: 22,
       letterSpacing: 4,
       textAlign: 'center',
       fontWeight: '700',
-    },
-    eyeButton: {
-      paddingLeft: 12,
-      paddingVertical: 10,
-    },
-    linkTouch: {
-      minHeight: 44,
-      justifyContent: 'center',
     },
     forgotRow: {
       alignSelf: 'flex-end',
@@ -737,41 +486,6 @@ const createStyles = (colors: Colors, palette: Palette) =>
       fontSize: 15,
       fontWeight: '700',
     },
-    button: {
-      backgroundColor: colors.primary,
-      borderRadius: 12,
-      minHeight: 52,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    // Carregando: mantém a cor da marca (spinner branco sobre cinza some)
-    buttonBusy: {
-      opacity: 0.85,
-    },
-    buttonBusyRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 10,
-    },
-    buttonText: {
-      color: colors.textInverse,
-      fontSize: 16,
-      fontWeight: '700',
-    },
-    secondaryButton: {
-      borderRadius: 12,
-      minHeight: 48,
-      alignItems: 'center',
-      justifyContent: 'center',
-      marginTop: 10,
-      borderWidth: 1.5,
-      borderColor: palette.fieldBorder,
-    },
-    secondaryButtonText: {
-      color: colors.text,
-      fontSize: 15,
-      fontWeight: '600',
-    },
     centerLink: {
       alignSelf: 'center',
       marginTop: 8,
@@ -787,11 +501,6 @@ const createStyles = (colors: Colors, palette: Palette) =>
     footerText: {
       color: colors.textSecondary,
       fontSize: 15,
-    },
-    link: {
-      color: palette.link,
-      fontSize: 15,
-      fontWeight: '600',
     },
     nearbyButton: {
       flexDirection: 'row',

@@ -2,6 +2,7 @@ import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 import * as Device from 'expo-device';
+import { secureDelete, secureGet, secureSet } from '../utils/secureStorage';
 
 // ============================================
 // CONFIGURAÇÃO
@@ -16,7 +17,8 @@ import * as Device from 'expo-device';
 export const USE_MOCK = __DEV__ && process.env.EXPO_PUBLIC_USE_MOCK === 'true';
 const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3003/api/v1';
 
-// Chaves do AsyncStorage
+// Chaves do AsyncStorage (os tokens migraram para o SecureStore; as chaves
+// antigas ficam aqui para a migração e para o web)
 export const STORAGE_KEYS = {
   ACCESS_TOKEN: '@parish:access_token',
   REFRESH_TOKEN: '@parish:refresh_token',
@@ -117,11 +119,24 @@ const api = axios.create({
 // ============================================
 
 /**
- * Obtém o access token do AsyncStorage
+ * Tokens ficam no armazenamento protegido do aparelho (Keychain/Keystore) —
+ * antes ficavam no AsyncStorage em texto puro; a primeira leitura migra.
+ * O access token é lido a cada requisição: fica também em memória.
+ */
+const SECURE_KEYS = {
+  ACCESS_TOKEN: 'parish.access_token',
+  REFRESH_TOKEN: 'parish.refresh_token',
+};
+let accessTokenCache: string | null | undefined;
+
+/**
+ * Obtém o access token
  */
 export const getAccessToken = async (): Promise<string | null> => {
+  if (accessTokenCache !== undefined) return accessTokenCache;
   try {
-    return await AsyncStorage.getItem(STORAGE_KEYS.ACCESS_TOKEN);
+    accessTokenCache = await secureGet(SECURE_KEYS.ACCESS_TOKEN, STORAGE_KEYS.ACCESS_TOKEN);
+    return accessTokenCache;
   } catch (error) {
     console.error('Erro ao obter access token:', error);
     return null;
@@ -129,11 +144,11 @@ export const getAccessToken = async (): Promise<string | null> => {
 };
 
 /**
- * Obtém o refresh token do AsyncStorage
+ * Obtém o refresh token
  */
 export const getRefreshToken = async (): Promise<string | null> => {
   try {
-    return await AsyncStorage.getItem(STORAGE_KEYS.REFRESH_TOKEN);
+    return await secureGet(SECURE_KEYS.REFRESH_TOKEN, STORAGE_KEYS.REFRESH_TOKEN);
   } catch (error) {
     console.error('Erro ao obter refresh token:', error);
     return null;
@@ -141,29 +156,27 @@ export const getRefreshToken = async (): Promise<string | null> => {
 };
 
 /**
- * Salva os tokens no AsyncStorage
+ * Salva os tokens
  */
 export const saveTokens = async (accessToken: string, refreshToken: string): Promise<void> => {
+  accessTokenCache = accessToken;
   try {
-    await AsyncStorage.multiSet([
-      [STORAGE_KEYS.ACCESS_TOKEN, accessToken],
-      [STORAGE_KEYS.REFRESH_TOKEN, refreshToken],
-    ]);
+    await secureSet(SECURE_KEYS.ACCESS_TOKEN, accessToken, STORAGE_KEYS.ACCESS_TOKEN);
+    await secureSet(SECURE_KEYS.REFRESH_TOKEN, refreshToken, STORAGE_KEYS.REFRESH_TOKEN);
   } catch (error) {
     console.error('Erro ao salvar tokens:', error);
   }
 };
 
 /**
- * Remove os tokens do AsyncStorage
+ * Remove os tokens e o usuário salvo
  */
 export const clearTokens = async (): Promise<void> => {
+  accessTokenCache = null;
   try {
-    await AsyncStorage.multiRemove([
-      STORAGE_KEYS.ACCESS_TOKEN,
-      STORAGE_KEYS.REFRESH_TOKEN,
-      STORAGE_KEYS.USER,
-    ]);
+    await secureDelete(SECURE_KEYS.ACCESS_TOKEN, STORAGE_KEYS.ACCESS_TOKEN);
+    await secureDelete(SECURE_KEYS.REFRESH_TOKEN, STORAGE_KEYS.REFRESH_TOKEN);
+    await AsyncStorage.removeItem(STORAGE_KEYS.USER);
   } catch (error) {
     console.error('Erro ao limpar tokens:', error);
   }

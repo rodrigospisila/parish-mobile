@@ -1,18 +1,20 @@
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useRef, useState, useEffect, useCallback } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  TextInput,
-  TouchableOpacity,
-  ActivityIndicator,
-  KeyboardAvoidingView,
-  Platform,
-  Alert,
-} from 'react-native';
-import { useColors } from '../../src/context/ThemeContext';
+import { ActivityIndicator, Keyboard, StyleSheet, Text, TextInput, View } from 'react-native';
+import { FontAwesome5 } from '@expo/vector-icons';
 import authService from '../../src/services/authService';
+import {
+  AuthButton,
+  AuthCard,
+  AuthErrorBox,
+  AuthLink,
+  AuthScreen,
+  authErrorMessage,
+  useAnnouncedError,
+  useAuthPalette,
+  type AuthColors,
+  type AuthPalette,
+} from '../../src/components/auth';
 
 const CODE_LENGTH = 6;
 const RESEND_COOLDOWN = 60;
@@ -22,8 +24,18 @@ function maskPhone(digits: string): string {
   return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7)}`;
 }
 
+/** Traduz a falha da conferência do código para uma frase simples */
+const verifyErrorMessage = (error: any): string => {
+  const raw: string = error?.message || '';
+  if (/muitas tentativas/i.test(raw)) return 'Muitas tentativas erradas. Peça um novo código abaixo.';
+  if (/expirad/i.test(raw)) return 'Este código venceu. Peça um novo código abaixo.';
+  if (/incorret|inv[aá]lid/i.test(raw)) return 'Código incorreto. Confira a mensagem (SMS) e digite de novo.';
+  return authErrorMessage(error, 'Não foi possível conferir o código. Tente novamente.');
+};
+
+/** Passo 2 do cadastro: código de 6 números recebido por SMS */
 export default function OtpVerifyScreen() {
-  const colors = useColors();
+  const { colors, palette } = useAuthPalette();
   const router = useRouter();
   const { phone } = useLocalSearchParams<{ phone: string }>();
 
@@ -31,7 +43,13 @@ export default function OtpVerifyScreen() {
   const [loading, setLoading] = useState(false);
   const [resendLoading, setResendLoading] = useState(false);
   const [cooldown, setCooldown] = useState(RESEND_COOLDOWN);
+  const [focusedIndex, setFocusedIndex] = useState<number | null>(null);
+  const [errorMessage, showError, clearError] = useAnnouncedError();
+  const [notice, setNotice] = useState('');
   const inputRefs = useRef<(TextInput | null)[]>([]);
+  // Código já enviado automaticamente — evita reenviar o mesmo código se a
+  // tela voltar a ficar ativa (ex.: voltando do cadastro)
+  const autoSubmittedCode = useRef('');
 
   // Countdown timer
   useEffect(() => {
@@ -41,6 +59,7 @@ export default function OtpVerifyScreen() {
   }, [cooldown]);
 
   const handleDigitChange = (index: number, value: string) => {
+    if (errorMessage) clearError();
     // Accept paste of full code
     if (value.length > 1) {
       const pasted = value.replace(/\D/g, '').slice(0, CODE_LENGTH);
@@ -74,7 +93,15 @@ export default function OtpVerifyScreen() {
   const isComplete = code.length === CODE_LENGTH && digits.every((d) => d !== '');
 
   const handleVerify = useCallback(async () => {
-    if (!isComplete || !phone) return;
+    if (!phone) return;
+    if (!isComplete) {
+      showError('Digite os 6 números do código que chegou por SMS.');
+      return;
+    }
+    autoSubmittedCode.current = code;
+    Keyboard.dismiss();
+    clearError();
+    setNotice('');
     setLoading(true);
     try {
       const verifiedPhoneToken = await authService.verifyOtp(phone, code);
@@ -83,159 +110,174 @@ export default function OtpVerifyScreen() {
         params: { phone, verifiedPhoneToken },
       });
     } catch (error: any) {
-      Alert.alert('Código inválido', error?.message ?? 'Verifique o código e tente novamente');
+      showError(verifyErrorMessage(error));
       setDigits(Array(CODE_LENGTH).fill(''));
+      autoSubmittedCode.current = '';
       inputRefs.current[0]?.focus();
     } finally {
       setLoading(false);
     }
-  }, [isComplete, phone, code, router]);
+  }, [isComplete, phone, code, router, showError, clearError]);
 
   // Auto-verify when all digits filled
   useEffect(() => {
-    if (isComplete) handleVerify();
-  }, [isComplete, handleVerify]);
+    if (isComplete && !loading && autoSubmittedCode.current !== code) handleVerify();
+  }, [isComplete, loading, code, handleVerify]);
 
   const handleResend = async () => {
     if (!phone || cooldown > 0) return;
+    clearError();
+    setNotice('');
     setResendLoading(true);
     try {
       await authService.sendOtp(phone);
       setCooldown(RESEND_COOLDOWN);
       setDigits(Array(CODE_LENGTH).fill(''));
+      autoSubmittedCode.current = '';
+      setNotice(`Enviamos um novo código para ${maskPhone(phone)}.`);
       inputRefs.current[0]?.focus();
     } catch (error: any) {
-      Alert.alert('Erro', error?.message ?? 'Não foi possível reenviar o código');
+      showError(authErrorMessage(error, 'Não foi possível reenviar o código. Tente novamente.'));
     } finally {
       setResendLoading(false);
     }
   };
 
-  const styles = createStyles(colors);
+  const styles = createStyles(colors, palette);
 
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-    >
+    <AuthScreen subtitle="Crie sua conta" onBack={() => router.back()}>
       <Stack.Screen options={{ title: 'Código de Verificação', headerShown: false }} />
 
-      <View style={styles.inner}>
-        <View style={styles.header}>
-          <Text style={styles.icon}>💬</Text>
-          <Text style={styles.title}>Digite o código</Text>
-          <Text style={styles.subtitle}>
-            Enviamos um código SMS para{'\n'}
-            <Text style={styles.phoneHighlight}>{maskPhone(phone ?? '')}</Text>
-          </Text>
+      <AuthCard
+        eyebrow="Passo 2 de 3"
+        icon="sms"
+        title="Digite o código"
+        subtitle="Mandamos um código de 6 números por mensagem de texto (SMS) para o celular:"
+      >
+        {/* Linha própria (e não Text aninhado): mais fácil de ler e sem o erro de Text aninhado no web */}
+        <View style={styles.phoneRow}>
+          <FontAwesome5 name="mobile-alt" size={15} color={palette.link} solid />
+          <Text style={styles.phoneHighlight}>{maskPhone(phone ?? '')}</Text>
         </View>
+
+        <AuthErrorBox message={errorMessage} />
+        <AuthErrorBox message={errorMessage ? '' : notice} tone="info" />
 
         <View style={styles.boxes}>
           {digits.map((d, i) => (
             <TextInput
               key={i}
-              ref={(ref) => { inputRefs.current[i] = ref; }}
-              style={[styles.box, d ? styles.boxFilled : null, loading && styles.boxDisabled]}
+              ref={(ref) => {
+                inputRefs.current[i] = ref;
+              }}
+              style={[
+                styles.box,
+                d ? styles.boxFilled : null,
+                focusedIndex === i && styles.boxFocused,
+                loading && styles.boxDisabled,
+              ]}
               value={d}
               onChangeText={(v) => handleDigitChange(i, v)}
               onKeyPress={({ nativeEvent }) => handleKeyPress(i, nativeEvent.key)}
+              onFocus={() => setFocusedIndex(i)}
+              onBlur={() => setFocusedIndex((current) => (current === i ? null : current))}
               keyboardType="number-pad"
+              // O preenchimento automático do SMS entra no primeiro quadrado e é distribuído
+              autoComplete={i === 0 ? 'one-time-code' : 'off'}
+              textContentType={i === 0 ? 'oneTimeCode' : 'none'}
               maxLength={CODE_LENGTH}
               selectTextOnFocus
               editable={!loading}
               autoFocus={i === 0}
+              accessibilityLabel={`Número ${i + 1} de ${CODE_LENGTH} do código`}
             />
           ))}
         </View>
 
-        {loading && (
-          <View style={styles.verifyingRow}>
-            <ActivityIndicator color={colors.primary} />
-            <Text style={styles.verifyingText}>Verificando...</Text>
-          </View>
-        )}
+        <AuthButton label="Confirmar código" busyLabel="Verificando…" onPress={handleVerify} loading={loading} />
 
         <View style={styles.resendRow}>
           {cooldown > 0 ? (
             <Text style={styles.cooldownText}>
-              Reenviar código em <Text style={styles.cooldownCount}>{cooldown}s</Text>
+              {`Não chegou? Você pode pedir outro código em ${cooldown} s.`}
             </Text>
           ) : resendLoading ? (
-            <ActivityIndicator color={colors.primary} />
+            <View style={styles.resendBusy}>
+              <ActivityIndicator color={palette.link} />
+              <Text style={styles.cooldownText}>Enviando outro código…</Text>
+            </View>
           ) : (
-            <TouchableOpacity onPress={handleResend}>
-              <Text style={styles.resendLink}>Reenviar código</Text>
-            </TouchableOpacity>
+            <AuthLink
+              label="Não chegou? Enviar o código de novo"
+              onPress={handleResend}
+              disabled={loading}
+              accessibilityRole="button"
+            />
           )}
         </View>
 
-        <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
-          <Text style={styles.backText}>← Corrigir número</Text>
-        </TouchableOpacity>
-      </View>
-    </KeyboardAvoidingView>
+        <AuthButton
+          variant="secondary"
+          icon="pen"
+          label="Corrigir o número"
+          onPress={() => router.back()}
+          disabled={loading}
+        />
+      </AuthCard>
+    </AuthScreen>
   );
 }
 
-const createStyles = (colors: ReturnType<typeof useColors>) =>
+const createStyles = (colors: AuthColors, palette: AuthPalette) =>
   StyleSheet.create({
-    container: { flex: 1, backgroundColor: colors.background },
-    inner: {
-      flex: 1,
-      justifyContent: 'center',
+    phoneRow: {
+      flexDirection: 'row',
       alignItems: 'center',
-      padding: 24,
+      gap: 8,
+      marginTop: -6,
+      marginBottom: 18,
     },
-    header: { alignItems: 'center', marginBottom: 40 },
-    icon: { fontSize: 56, marginBottom: 12 },
-    title: { fontSize: 26, fontWeight: 'bold', color: colors.text },
-    subtitle: {
-      fontSize: 15,
-      color: colors.textSecondary,
-      marginTop: 10,
-      textAlign: 'center',
-      lineHeight: 22,
-    },
-    phoneHighlight: { fontWeight: '700', color: colors.text },
+    phoneHighlight: { fontSize: 18, fontWeight: '700', letterSpacing: 0.5, color: colors.text },
     boxes: {
       flexDirection: 'row',
-      gap: 10,
-      marginBottom: 32,
+      justifyContent: 'center',
+      gap: 8,
+      marginBottom: 18,
     },
     box: {
-      width: 46,
-      height: 56,
-      borderWidth: 2,
-      borderColor: colors.border,
-      borderRadius: 10,
+      flex: 1,
+      // minWidth 0: sem isso o campo não encolhe no web e os 6 quadrados vazam do cartão
+      minWidth: 0,
+      maxWidth: 50,
+      height: 58,
+      borderWidth: 1.5,
+      borderColor: palette.fieldBorder,
+      borderRadius: 12,
       fontSize: 24,
       fontWeight: '700',
       color: colors.text,
       textAlign: 'center',
-      backgroundColor: colors.inputBackground,
+      backgroundColor: palette.fieldBackground,
     },
     boxFilled: {
-      borderColor: colors.primary,
+      borderColor: palette.link,
+      backgroundColor: colors.card,
+    },
+    boxFocused: {
+      borderColor: palette.link,
+      borderWidth: 2,
       backgroundColor: colors.card,
     },
     boxDisabled: {
       opacity: 0.6,
     },
-    verifyingRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 8,
-      marginBottom: 20,
-    },
-    verifyingText: { color: colors.textSecondary, fontSize: 14 },
     resendRow: {
-      marginBottom: 32,
-      minHeight: 24,
+      marginTop: 8,
+      minHeight: 44,
       alignItems: 'center',
+      justifyContent: 'center',
     },
-    cooldownText: { color: colors.textSecondary, fontSize: 14 },
-    cooldownCount: { fontWeight: '700', color: colors.text },
-    resendLink: { color: colors.primary, fontSize: 15, fontWeight: '600' },
-    backButton: { marginTop: 8 },
-    backText: { color: colors.textSecondary, fontSize: 14 },
+    resendBusy: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+    cooldownText: { color: colors.textSecondary, fontSize: 15, lineHeight: 21, textAlign: 'center' },
   });

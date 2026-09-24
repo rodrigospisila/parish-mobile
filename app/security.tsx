@@ -13,6 +13,7 @@ import {
   RefreshControl,
   KeyboardAvoidingView,
   Platform,
+  Switch,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Stack, useRouter } from 'expo-router';
@@ -27,6 +28,8 @@ import {
   KnownDevice,
 } from '../src/services/securityService';
 import { formatDateBR, formatDateTimeBR } from '../src/utils/dateUtils';
+import { biometricService, BiometricSupport } from '../src/services/biometricService';
+import { authService } from '../src/services/authService';
 
 /**
  * Segurança da conta (Dízimo D4.7): verificação em duas etapas (TOTP) e
@@ -35,7 +38,7 @@ import { formatDateBR, formatDateTimeBR } from '../src/utils/dateUtils';
 export default function SecurityScreen() {
   const router = useRouter();
   const colors = useColors();
-  const { refreshUser, signOut } = useAuth();
+  const { refreshUser, signOut, user } = useAuth();
   const styles = createStyles(colors);
 
   // ---------- estado principal ----------
@@ -91,6 +94,55 @@ export default function SecurityScreen() {
   useEffect(() => {
     load().finally(() => setLoading(false));
   }, [load]);
+
+  // ---------- entrar com biometria ----------
+  const [bioSupport, setBioSupport] = useState<BiometricSupport | null>(null);
+  const [bioEnabled, setBioEnabled] = useState(false);
+  const [bioModalVisible, setBioModalVisible] = useState(false);
+  const [bioPassword, setBioPassword] = useState('');
+  const [bioSaving, setBioSaving] = useState(false);
+  const [bioError, setBioError] = useState('');
+
+  useEffect(() => {
+    biometricService.getSupport().then(setBioSupport);
+    biometricService.isEnabled().then(setBioEnabled);
+  }, []);
+
+  const toggleBiometric = async (value: boolean) => {
+    if (!value) {
+      await biometricService.disable();
+      setBioEnabled(false);
+      return;
+    }
+    setBioPassword('');
+    setBioError('');
+    setBioModalVisible(true);
+  };
+
+  /** Confere a senha no servidor antes de guardar (senha errada guardada = biometria que nunca funciona) */
+  const confirmBiometric = async () => {
+    if (!user?.email || !bioPassword) {
+      setBioError('Digite a sua senha.');
+      return;
+    }
+    setBioSaving(true);
+    setBioError('');
+    try {
+      await authService.login({ email: user.email, password: bioPassword });
+      await biometricService.enable(user.email, bioPassword);
+      setBioEnabled(true);
+      setBioModalVisible(false);
+    } catch (error: any) {
+      setBioError(
+        error?.status === 401 || error?.status === 400
+          ? 'Senha incorreta.'
+          : error?.message || 'Não foi possível conferir a senha agora.',
+      );
+    } finally {
+      setBioSaving(false);
+      setBioPassword('');
+    }
+  };
 
   const handleRefresh = async () => {
     setRefreshing(true);
@@ -359,6 +411,97 @@ export default function SecurityScreen() {
         )}
       </View>
     </View>
+  );
+
+  const renderBiometricSection = () =>
+    bioSupport?.available ? (
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Entrar sem digitar a senha</Text>
+        <View style={styles.card}>
+          <View style={styles.statusRow}>
+            <View style={[styles.statusIcon, { backgroundColor: bioEnabled ? colors.success : colors.border }]}>
+              <FontAwesome5
+                name={bioSupport.icon}
+                size={18}
+                color={bioEnabled ? '#fff' : colors.textSecondary}
+              />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.statusTitle}>Entrar com {bioSupport.label}</Text>
+              <Text style={styles.statusDescription}>
+                A senha fica guardada só neste aparelho, protegida pelo sistema.
+              </Text>
+            </View>
+            <Switch
+              value={bioEnabled}
+              onValueChange={toggleBiometric}
+              accessibilityLabel={`Entrar com ${bioSupport.label}`}
+            />
+          </View>
+        </View>
+      </View>
+    ) : null;
+
+  const renderBiometricModal = () => (
+    <Modal
+      visible={bioModalVisible}
+      animationType="slide"
+      transparent
+      onRequestClose={() => !bioSaving && setBioModalVisible(false)}
+    >
+      <KeyboardAvoidingView
+        style={styles.modalOverlay}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
+        <View style={styles.sheet}>
+          <View style={styles.sheetHeader}>
+            <Text style={styles.sheetTitle}>Entrar com {bioSupport?.label ?? 'biometria'}</Text>
+            <TouchableOpacity onPress={() => setBioModalVisible(false)} hitSlop={10} disabled={bioSaving}>
+              <Ionicons name="close" size={24} color={colors.textSecondary} />
+            </TouchableOpacity>
+          </View>
+          <ScrollView
+            contentContainerStyle={styles.sheetBody}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+          >
+            <Text style={styles.stepText}>Para ativar, confirme a sua senha.</Text>
+            <Text style={styles.label}>Senha</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="Sua senha"
+              placeholderTextColor={colors.placeholder}
+              secureTextEntry
+              autoCapitalize="none"
+              autoCorrect={false}
+              textContentType="password"
+              value={bioPassword}
+              onChangeText={(value) => {
+                setBioPassword(value);
+                if (bioError) setBioError('');
+              }}
+              onSubmitEditing={confirmBiometric}
+              returnKeyType="done"
+              editable={!bioSaving}
+              autoFocus
+            />
+            {!!bioError && <Text style={[styles.errorText, { marginTop: 10 }]}>{bioError}</Text>}
+            <TouchableOpacity
+              style={[styles.primaryButton, bioSaving && styles.buttonDisabled]}
+              onPress={confirmBiometric}
+              disabled={bioSaving}
+              activeOpacity={0.8}
+            >
+              {bioSaving ? (
+                <ActivityIndicator color={colors.textInverse} />
+              ) : (
+                <Text style={styles.primaryButtonText}>Ativar</Text>
+              )}
+            </TouchableOpacity>
+          </ScrollView>
+        </View>
+      </KeyboardAvoidingView>
+    </Modal>
   );
 
   const renderDevicesSection = () => (
@@ -683,6 +826,7 @@ export default function SecurityScreen() {
           }
         >
           {renderTwoFactorSection()}
+          {renderBiometricSection()}
           {renderDevicesSection()}
           <View style={{ height: 32 }} />
         </ScrollView>
@@ -691,6 +835,7 @@ export default function SecurityScreen() {
       {renderSetupModal()}
       {renderBackupCodesModal()}
       {renderDisableModal()}
+      {renderBiometricModal()}
     </SafeAreaView>
   );
 }
