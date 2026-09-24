@@ -25,17 +25,19 @@ import type { ThemeColors } from '../src/constants/Colors';
 import {
   FALLBACK_MAP_CONFIG,
   GeocodeResult,
-  MAX_AREA_SPAN_DEG,
+  MapAreaResult,
+  MapClustersResult,
   MapCommunity,
   MapConfig,
-  MapResult,
-  getChurchesInArea,
+  MapPinsResult,
+  MapRequestCanceled,
+  PINS_MIN_ZOOM,
+  getMapArea,
   getMapConfig,
-  getNearbyChurches,
   searchPlace,
 } from '../src/services/publicMapService';
 import { clearCache, readCache, writeCache } from '../src/utils/offlineCache';
-import ChurchMap, { ChurchMapHandle, MapMoveEvent, MapPoint } from '../src/components/map/ChurchMap';
+import ChurchMap, { ChurchMapHandle, MapClusterPoint, MapMoveEvent, MapPoint } from '../src/components/map/ChurchMap';
 import CommunityCard from '../src/components/map/CommunityCard';
 import ChurchListPanel, { ListItem } from '../src/components/map/ChurchListPanel';
 import MapFilters, { DayFilter } from '../src/components/map/MapFilters';
@@ -46,37 +48,46 @@ import { openDirectionsTo } from '../src/components/map/directions';
  * Mapa das igrejas ("Missas por perto").
  *
  * Aberto a quem não tem login. O mapa é um WebView com Leaflet embutido cujo
- * HTML nunca muda; dados, tema, favoritos e seleção vão por comandos. Regra de
- * ouro: depois que a pessoa mexeu no mapa, nada reenquadra sozinho — novas
- * buscas só pelo botão "Buscar nesta área", pela busca do topo ou por
- * "minha localização".
+ * HTML nunca muda; dados, tema, favoritos e seleção vão por comandos.
+ *
+ * Navegação livre: ao fim de cada movimento/zoom a área visível é buscada
+ * sozinha (com espera curta e cancelando a busca anterior). De longe (zoom < 11,
+ * ou pinos demais) o backend responde agrupado e o mapa mostra bolhas com a
+ * contagem por região — do Brasil inteiro ao bairro; de perto, os pinos e a lista.
+ * Regra de ouro: depois que a pessoa mexeu no mapa, nada reenquadra sozinho.
  */
 
 type BBox = [number, number, number, number];
-type Query = { kind: 'nearby'; lat: number; lng: number } | { kind: 'area'; bbox: BBox };
 interface CachedMap {
-  result: MapResult;
-  query: Query;
+  result: MapAreaResult;
 }
 interface Filters {
   types: string[];
   approx: boolean;
 }
+/** O que já foi carregado (ou está a caminho): evita buscar de novo o mesmo recorte. */
+interface Loaded {
+  bbox: BBox;
+  zoom: number;
+  key: string;
+  mode: 'pins' | 'clusters' | null; // null = a caminho
+}
 
 const DAYS = 7;
-const NEARBY_RADIUS_KM = 10;
 const AREA_LIMIT = 300;
-const USER_ZOOM = 14;
+const USER_ZOOM = 13;
 const SEARCH_ZOOM = 14;
 const FOCUS_ZOOM = 16;
 const PANEL_COLLAPSED = 74;
+/** Espera depois do fim do movimento antes de buscar (pinçar costuma gerar vários). */
+const MOVE_DEBOUNCE_MS = 400;
+/** Folga em volta da área visível: arrastar um pouco não dispara outra busca. */
+const PREFETCH_PAD = 0.15;
 
-const CACHE_KEY = 'church-map:last';
+const CACHE_KEY = 'church-map:last-area';
+const OLD_CACHE_KEY = 'church-map:last';
 const CONFIG_CACHE_KEY = 'church-map:config';
 const FAV_KEY = '@parish:nearby:favorites';
-const LAST_VIEW_KEY = '@parish:map:lastView';
-
-const isTooWide = (b: BBox) => b[2] - b[0] > MAX_AREA_SPAN_DEG || b[3] - b[1] > MAX_AREA_SPAN_DEG;
 
 /** `inner` cabe em `outer` (com uma folga pequena)? */
 const contains = (outer: BBox, inner: BBox) => {
@@ -84,12 +95,28 @@ const contains = (outer: BBox, inner: BBox) => {
   return inner[0] >= outer[0] - tol && inner[1] >= outer[1] - tol && inner[2] <= outer[2] + tol && inner[3] <= outer[3] + tol;
 };
 
-/** Retângulo que envolve um raio em km ao redor de um ponto. */
-const bboxAround = (lat: number, lng: number, km: number): BBox => {
-  const dLat = km / 111.32;
-  const dLng = km / (111.32 * Math.max(0.2, Math.cos((lat * Math.PI) / 180)));
-  return [lng - dLng, lat - dLat, lng + dLng, lat + dLat];
+/** Retângulo aumentado por uma fração de cada lado (dentro do globo). */
+const padBbox = (b: BBox, f: number): BBox => {
+  const dx = (b[2] - b[0]) * f;
+  const dy = (b[3] - b[1]) * f;
+  return [Math.max(-180, b[0] - dx), Math.max(-90, b[1] - dy), Math.min(180, b[2] + dx), Math.min(90, b[3] + dy)];
 };
+
+const inBbox = (b: BBox, lat: number, lng: number) => lat >= b[1] && lat <= b[3] && lng >= b[0] && lng <= b[2];
+
+const filtersKey = (f: Filters) => `${[...f.types].sort().join(',')}|${f.approx ? 1 : 0}`;
+
+/**
+ * A área visível já está coberta pelo que foi carregado? Pinos cobrem qualquer
+ * aproximação dentro do recorte; bolhas só valem no mesmo zoom (a grade muda com ele).
+ */
+const covers = (l: Loaded | null, bbox: BBox, zoom: number, key: string) => {
+  if (!l || l.key !== key || !contains(l.bbox, bbox)) return false;
+  if (l.mode === 'pins') return zoom >= PINS_MIN_ZOOM && zoom >= l.zoom;
+  return zoom === l.zoom;
+};
+
+const fmtInt = (n: number) => n.toLocaleString('pt-BR');
 
 /** Busca sem acento/caixa. */
 const norm = (s: string) =>
@@ -109,7 +136,7 @@ export default function NearbyMassesScreen() {
   const searchInputRef = useRef<TextInput>(null);
 
   const [config, setConfig] = useState<MapConfig | null>(null);
-  const [result, setResult] = useState<MapResult | null>(null);
+  const [area, setArea] = useState<MapAreaResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [offlineAt, setOfflineAt] = useState<number | null>(null);
@@ -120,7 +147,6 @@ export default function NearbyMassesScreen() {
   const [selected, setSelected] = useState<MapCommunity | null>(null);
   const [userPos, setUserPos] = useState<{ lat: number; lng: number } | null>(null);
   const [view, setView] = useState<MapMoveEvent | null>(null);
-  const [showSearchHere, setShowSearchHere] = useState(false);
   const [panelOpen, setPanelOpen] = useState(false);
   const [locating, setLocating] = useState(false);
   const [searchText, setSearchText] = useState('');
@@ -130,25 +156,39 @@ export default function NearbyMassesScreen() {
   const [searchError, setSearchError] = useState<string | null>(null);
   const [topH, setTopH] = useState(0);
   const [cardH, setCardH] = useState(0);
-  const [brazilStart, setBrazilStart] = useState(false);
 
-  const lastQuery = useRef<Query | null>(null);
-  const coverage = useRef<BBox | null>(null);
+  const loaded = useRef<Loaded | null>(null);
+  const inflight = useRef<Loaded | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+  const moveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reqId = useRef(0);
   const initDone = useRef(false);
   const userMoved = useRef(false);
-  const resultRef = useRef<MapResult | null>(null);
+  const areaRef = useRef<MapAreaResult | null>(null);
+  const viewRef = useRef<MapMoveEvent | null>(null);
   const filtersRef = useRef<Filters>({ types, approx });
-  const lastViewTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const lastAreaPress = useRef(0);
+  const pendingSelect = useRef<string | null>(null);
 
   filtersRef.current = { types, approx };
-  resultRef.current = result;
+  areaRef.current = area;
+  const result: MapPinsResult | null = area?.mode === 'pins' ? area : null;
+  const clusterData: MapClustersResult | null = area?.mode === 'clusters' ? area : null;
+
+  // Sai da tela: nada de busca pendente
+  useEffect(
+    () => () => {
+      if (moveTimer.current) clearTimeout(moveTimer.current);
+      abortRef.current?.abort();
+    },
+    [],
+  );
 
   // ---------- Mapa-base (config pública, com cache e fallback OSM) ----------
   useEffect(() => {
     let alive = true;
     clearCache('nearby-masses:last'); // cache do mapa antigo (formato /masses/nearby)
+    clearCache(OLD_CACHE_KEY); // cache do mapa de "Buscar nesta área"
+    AsyncStorage.removeItem('@parish:map:lastView').catch(() => undefined); // a abertura não restaura mais a última área
     (async () => {
       const cached = await readCache<MapConfig>(CONFIG_CACHE_KEY);
       if (alive && cached?.data?.tileUrl) setConfig(cached.data);
@@ -194,62 +234,70 @@ export default function NearbyMassesScreen() {
     });
   }, []);
 
-  // ---------- Buscas ----------
-  const runQuery = useCallback(async (q: Query, f: Filters) => {
+  // ---------- Busca da área visível ----------
+  const loadArea = useCallback(async (v: { bbox: BBox; zoom: number }, f: Filters, force = false) => {
+    const zoom = Math.min(20, Math.max(0, Math.round(v.zoom)));
+    const key = filtersKey(f);
+    if (!force && (covers(loaded.current, v.bbox, zoom, key) || covers(inflight.current, v.bbox, zoom, key))) return;
+
+    abortRef.current?.abort();
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
     const id = ++reqId.current;
-    lastQuery.current = q;
+    const bbox = padBbox(v.bbox, PREFETCH_PAD);
+    inflight.current = { bbox, zoom, key, mode: null };
     setLoading(true);
     setError(null);
-    setShowSearchHere(false);
     try {
-      const data =
-        q.kind === 'nearby'
-          ? await getNearbyChurches({
-              lat: q.lat,
-              lng: q.lng,
-              radiusKm: NEARBY_RADIUS_KM,
-              days: DAYS,
-              types: f.types,
-              approx: f.approx,
-            })
-          : await getChurchesInArea({ bbox: q.bbox, days: DAYS, types: f.types, approx: f.approx, limit: AREA_LIMIT });
+      const data = await getMapArea(
+        { bbox, zoom, days: DAYS, types: f.types, approx: f.approx, limit: AREA_LIMIT },
+        ctrl.signal,
+      );
       if (id !== reqId.current) return;
-      setResult(data);
+      setArea(data);
       setOfflineAt(null);
-      coverage.current =
-        q.kind === 'area'
-          ? q.bbox
-          : Array.isArray(data.bbox) && data.bbox.length === 4
-            ? (data.bbox as BBox)
-            : bboxAround(q.lat, q.lng, data.radiusKm || NEARBY_RADIUS_KM);
-      writeCache<CachedMap>(CACHE_KEY, { result: data, query: q });
+      loaded.current = { bbox, zoom, key, mode: data.mode };
+      writeCache<CachedMap>(CACHE_KEY, { result: data });
     } catch (e: any) {
-      if (id !== reqId.current) return;
-      if (!resultRef.current) {
+      if (e instanceof MapRequestCanceled || id !== reqId.current) return;
+      loaded.current = null;
+      if (!areaRef.current) {
         // Sem rede e nada na tela: mostra a última busca guardada
         const cached = await readCache<CachedMap>(CACHE_KEY);
         if (id !== reqId.current) return;
-        if (cached?.data?.result) {
-          setResult(cached.data.result);
+        if (cached?.data?.result?.mode) {
+          setArea(cached.data.result);
           setOfflineAt(cached.cachedAt);
           return;
         }
       }
       setError(e?.message || 'Não foi possível buscar as igrejas.');
     } finally {
-      if (id === reqId.current) setLoading(false);
+      if (id === reqId.current) {
+        inflight.current = null;
+        setLoading(false);
+      }
     }
   }, []);
 
-  // Filtros de servidor mudaram: refaz a MESMA busca (o mapa não se move)
+  /** Busca de novo a área visível agora (filtros mudaram, ou "tentar de novo"). */
+  const reloadView = useCallback(
+    (f: Filters) => {
+      const v = viewRef.current;
+      if (v) loadArea(v, f, true);
+    },
+    [loadArea],
+  );
+
+  // Filtros de servidor mudaram: refaz a busca da área atual (o mapa não se move)
   const firstFilterRun = useRef(true);
   useEffect(() => {
     if (firstFilterRun.current) {
       firstFilterRun.current = false;
       return;
     }
-    if (lastQuery.current) runQuery(lastQuery.current, { types, approx });
-  }, [types, approx, runQuery]);
+    reloadView({ types, approx });
+  }, [types, approx, reloadView]);
 
   // ---------- Localização ----------
   const locate = useCallback(
@@ -280,7 +328,6 @@ export default function NearbyMassesScreen() {
         // Na abertura, se a pessoa já começou a mexer no mapa, não puxa de volta
         if (initial && userMoved.current) return true;
         mapRef.current?.flyTo(lat, lng, USER_ZOOM, 'gps');
-        runQuery({ kind: 'nearby', lat, lng }, filtersRef.current);
         return true;
       } catch {
         if (!initial) Alert.alert('Localização', 'Não foi possível obter sua localização agora.');
@@ -289,65 +336,35 @@ export default function NearbyMassesScreen() {
         setLocating(false);
       }
     },
-    [runQuery],
+    [],
   );
 
-  // Abertura: GPS; sem GPS, última área vista; senão, o Brasil com a busca aberta
+  // Abertura: o mapa nasce no Brasil inteiro (zoom 4) e já mostra as bolhas; com GPS, voa até a cidade da pessoa
   const onMapReady = useCallback(async () => {
     if (initDone.current) return;
     initDone.current = true;
-    const ok = await locate(true);
-    if (ok || userMoved.current) return;
-    try {
-      const raw = await AsyncStorage.getItem(LAST_VIEW_KEY);
-      const last = raw ? JSON.parse(raw) : null;
-      if (last && Number.isFinite(last.lat) && Number.isFinite(last.lng) && Number.isFinite(last.zoom)) {
-        mapRef.current?.setView(last.lat, last.lng, last.zoom, 'restore');
-        return;
-      }
-    } catch {
-      // segue para o Brasil
-    }
-    // Nem GPS nem área anterior: Brasil inteiro, com a busca aberta
-    setBrazilStart(true);
-    setTimeout(() => searchInputRef.current?.focus(), 300);
+    mapRef.current?.requestView('init');
+    await locate(true);
   }, [locate]);
 
   // ---------- Eventos do mapa ----------
   const onMoveEnd = useCallback(
     (ev: MapMoveEvent) => {
       setView(ev);
-      if (ev.user) userMoved.current = true;
-
-      if (lastViewTimer.current) clearTimeout(lastViewTimer.current);
-      lastViewTimer.current = setTimeout(() => {
-        AsyncStorage.setItem(
-          LAST_VIEW_KEY,
-          JSON.stringify({ lat: ev.center.lat, lng: ev.center.lng, zoom: ev.zoom }),
-        ).catch(() => undefined);
-      }, 800);
-
-      const wide = isTooWide(ev.bbox);
-      if (ev.tag === 'search' || ev.tag === 'restore') {
-        if (!wide) runQuery({ kind: 'area', bbox: ev.bbox }, filtersRef.current);
-        return;
+      viewRef.current = ev;
+      if (ev.user) {
+        userMoved.current = true;
+        pendingSelect.current = null; // a pessoa foi para outro lugar
       }
-      if (!ev.user) return;
-      if (wide) {
-        setShowSearchHere(false);
-        return;
-      }
-      if (!coverage.current || !contains(coverage.current, ev.bbox)) setShowSearchHere(true);
+      // Busca sozinha quando o mapa para (o pinçar gera vários moveend seguidos)
+      if (moveTimer.current) clearTimeout(moveTimer.current);
+      moveTimer.current = setTimeout(() => {
+        moveTimer.current = null;
+        loadArea(ev, filtersRef.current);
+      }, MOVE_DEBOUNCE_MS);
     },
-    [runQuery],
+    [loadArea],
   );
-
-  const searchThisArea = useCallback(() => {
-    const nowMs = Date.now();
-    if (!view || isTooWide(view.bbox) || nowMs - lastAreaPress.current < 800) return;
-    lastAreaPress.current = nowMs;
-    runQuery({ kind: 'area', bbox: view.bbox }, filtersRef.current);
-  }, [view, runQuery]);
 
   // ---------- Dados derivados ----------
   const visibleCommunities = useMemo(() => {
@@ -369,7 +386,9 @@ export default function NearbyMassesScreen() {
   }, [result, day]);
 
   const listItems: ListItem[] = useMemo(() => {
-    const items = visibleCommunities.map((c) => ({
+    const vb = view?.bbox;
+    const onScreen = vb ? visibleCommunities.filter((c) => inBbox(vb, c.latitude, c.longitude)) : visibleCommunities;
+    const items = onScreen.map((c) => ({
       community: c,
       distanceKm: distanceFor(c, userPos),
       favorite: favorites.includes(c.id),
@@ -380,7 +399,7 @@ export default function NearbyMassesScreen() {
       if (a.distanceKm != null || b.distanceKm != null) return a.distanceKm != null ? -1 : 1;
       return a.community.name.localeCompare(b.community.name, 'pt-BR');
     });
-  }, [visibleCommunities, userPos, favorites]);
+  }, [visibleCommunities, view, userPos, favorites]);
 
   // Pinos: só id, posição e flags — nada de texto vai para o WebView
   useEffect(() => {
@@ -394,6 +413,25 @@ export default function NearbyMassesScreen() {
     }));
     mapRef.current?.setData(points);
   }, [visibleCommunities]);
+
+  // Bolhas do modo agrupado: só números (e o id da igreja sozinha)
+  useEffect(() => {
+    const list: MapClusterPoint[] = (clusterData?.clusters ?? []).map((g) => ({
+      lat: g.lat,
+      lng: g.lng,
+      count: g.count,
+      bbox: g.bbox,
+      ...(g.count === 1 && g.id ? { id: g.id } : {}),
+    }));
+    mapRef.current?.setClusters(list);
+  }, [clusterData]);
+
+  // Igrejas na tela no modo agrupado (as bolhas da folga ficam de fora)
+  const clusterTotal = useMemo(() => {
+    if (!clusterData) return 0;
+    const vb = view?.bbox;
+    return clusterData.clusters.reduce((sum, g) => (!vb || inBbox(vb, g.lat, g.lng) ? sum + g.count : sum), 0);
+  }, [clusterData, view]);
 
   useEffect(() => {
     mapRef.current?.setFavorites(favorites);
@@ -437,6 +475,20 @@ export default function NearbyMassesScreen() {
     },
     [visibleCommunities, selectCommunity],
   );
+
+  const onClusterPin = useCallback((id: string) => {
+    pendingSelect.current = id;
+  }, []);
+
+  useEffect(() => {
+    const id = pendingSelect.current;
+    if (!id || !result) return;
+    const c = result.communities.find((x) => x.id === id);
+    if (c) {
+      pendingSelect.current = null;
+      selectCommunity(c, false);
+    }
+  }, [result, selectCommunity]);
 
   const onMapPress = useCallback(() => {
     setSelected(null);
@@ -509,37 +561,42 @@ export default function NearbyMassesScreen() {
   const showDropdown = searchFocused && (localMatches.length > 0 || places !== null || searching);
 
   // ---------- Textos de estado ----------
-  const tooWide = view ? isTooWide(view.bbox) : brazilStart;
   const count = listItems.length;
-  const panelTitle = loading
-    ? 'Buscando igrejas…'
-    : !result
-      ? tooWide
-        ? 'Aproxime o mapa para ver as igrejas'
-        : 'Igrejas por perto'
-      : `${count} ${count === 1 ? 'igreja' : 'igrejas'}${lastQuery.current?.kind === 'nearby' ? ' por perto' : ' nesta área'}`;
+  const igrejas = (n: number) => `${fmtInt(n)} ${n === 1 ? 'igreja' : 'igrejas'}`;
+  const panelTitle = !area
+    ? loading
+      ? 'Buscando igrejas…'
+      : 'Igrejas'
+    : clusterData
+      ? `${igrejas(clusterTotal)} nesta área`
+      : `${igrejas(count)} nesta área`;
   const panelSubtitle = offlineAt
     ? `Sem conexão — busca salva de ${format(new Date(offlineAt), 'dd/MM HH:mm')}`
-    : result?.truncated
-      ? 'Mostrando parte das igrejas — aproxime o mapa para ver todas'
-      : result
-        ? 'Toque numa igreja para ver os horários'
-        : null;
-  const emptyText = error
+    : clusterData
+      ? 'Aproxime o mapa para ver a lista'
+      : result?.truncated
+        ? 'Mostrando parte das igrejas — aproxime o mapa para ver todas'
+        : result
+          ? 'Toque numa igreja para ver os horários'
+          : null;
+  const emptyText = error && !area
     ? error
-    : !result
-      ? 'Use a busca ou aproxime o mapa e toque em "Buscar nesta área".'
-      : day !== 'all' && (result.communities.length || 0) > 0
-        ? `Nenhuma celebração ${day === 'today' ? 'hoje' : 'no domingo'} nas igrejas desta área.`
-        : approx
-          ? 'Nenhuma igreja encontrada nesta área.'
-          : 'Nenhuma igreja com localização conferida nesta área. Ative "Mostrar localização aproximada" para ver mais.';
+    : clusterData
+      ? `Aproxime o mapa para ver a lista (${igrejas(clusterTotal)} nesta área).`
+      : !result
+        ? 'Carregando o mapa…'
+        : day !== 'all' && (result.communities.length || 0) > 0
+          ? `Nenhuma celebração ${day === 'today' ? 'hoje' : 'no domingo'} nas igrejas desta área.`
+          : approx
+            ? 'Nenhuma igreja encontrada nesta área.'
+            : 'Nenhuma igreja com localização conferida nesta área. Ative "Mostrar localização aproximada" para ver mais.';
 
-  const pill = (() => {
-    if (loading) return { icon: null, text: 'Buscando igrejas…', onPress: undefined as undefined | (() => void) };
-    if (tooWide) return { icon: 'search-plus', text: 'Aproxime o mapa para ver as igrejas', onPress: undefined };
-    if (showSearchHere) return { icon: 'redo-alt', text: 'Buscar nesta área', onPress: searchThisArea };
-    if (error && result) return { icon: 'exclamation-circle', text: 'Falha na busca — tentar de novo', onPress: searchThisArea };
+  // Indicador discreto: carregando, ou falha com "tentar de novo"
+  const pill: { icon: string | null; text: string; onPress?: () => void } | null = (() => {
+    if (loading) return { icon: null, text: 'Carregando…' };
+    if (error) {
+      return { icon: 'exclamation-circle', text: 'Falha na busca — tentar de novo', onPress: () => reloadView(filtersRef.current) };
+    }
     return null;
   })();
 
@@ -555,6 +612,7 @@ export default function NearbyMassesScreen() {
         onReady={onMapReady}
         onMoveEnd={onMoveEnd}
         onSelect={onMapSelect}
+        onClusterPin={onClusterPin}
         onMapPress={onMapPress}
         onTileError={onTileError}
       />
@@ -620,11 +678,11 @@ export default function NearbyMassesScreen() {
         />
       </View>
 
-      {/* Aviso flutuante: buscar nesta área / aproximar / carregando */}
+      {/* Indicador flutuante: carregando / falha */}
       {pill && !showDropdown && (
         <View style={[styles.pillWrap, { top: topH + 4 }]} pointerEvents="box-none">
           <TouchableOpacity
-            style={[styles.pill, pill.onPress ? styles.pillAction : null]}
+            style={[styles.pill, pill.onPress ? styles.pillAction : styles.pillQuiet]}
             onPress={pill.onPress}
             disabled={!pill.onPress}
             activeOpacity={0.85}
@@ -768,6 +826,7 @@ function createStyles(colors: ThemeColors) {
       ...shadow,
     },
     pillAction: { backgroundColor: colors.primary },
+    pillQuiet: { paddingVertical: 6, paddingHorizontal: 12, opacity: 0.92 },
     pillText: { fontSize: 13, fontWeight: '800', color: colors.text },
     dropdown: {
       position: 'absolute',

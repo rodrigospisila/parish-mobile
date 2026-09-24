@@ -23,6 +23,16 @@ export interface MapPoint {
   soon: boolean;
 }
 
+/** Bolha do modo agrupado — só números (e o id quando é uma igreja sozinha). */
+export interface MapClusterPoint {
+  lat: number;
+  lng: number;
+  count: number;
+  /** [minLng, minLat, maxLng, maxLat] */
+  bbox: [number, number, number, number];
+  id?: string;
+}
+
 export interface MapMoveEvent {
   /** [minLng, minLat, maxLng, maxLat] */
   bbox: [number, number, number, number];
@@ -36,6 +46,9 @@ export interface MapMoveEvent {
 
 export interface ChurchMapHandle {
   setData(points: MapPoint[]): void;
+  setClusters(clusters: MapClusterPoint[]): void;
+  /** Pede ao mapa o enquadramento atual (chega como onMoveEnd com a etiqueta). */
+  requestView(tag?: string): void;
   setFavorites(ids: string[]): void;
   select(id: string | null): void;
   focus(id: string, opts?: { zoom?: number; offsetY?: number; tag?: string }): void;
@@ -52,6 +65,8 @@ interface Props {
   onReady?: () => void;
   onMoveEnd?: (ev: MapMoveEvent) => void;
   onSelect?: (id: string) => void;
+  /** Toque no pino de uma igreja sozinha no modo agrupado (o mapa já aproxima). */
+  onClusterPin?: (id: string) => void;
   onMapPress?: () => void;
   onTileError?: () => void;
 }
@@ -86,7 +101,7 @@ export function sanitizeAttribution(html: string): string {
 }
 
 const ChurchMap = forwardRef<ChurchMapHandle, Props>(function ChurchMap(
-  { config, dark, colors, onReady, onMoveEnd, onSelect, onMapPress, onTileError },
+  { config, dark, colors, onReady, onMoveEnd, onSelect, onClusterPin, onMapPress, onTileError },
   ref,
 ) {
   const webRef = useRef<WebView>(null);
@@ -97,12 +112,13 @@ const ChurchMap = forwardRef<ChurchMapHandle, Props>(function ChurchMap(
   // matou o processo de renderização em segundo plano).
   const state = useRef<{
     data: MapPoint[];
+    clusters: MapClusterPoint[];
     favorites: string[];
     selected: string | null;
     user: [number, number, number | null] | null;
     insets: [number, number];
     view: { lat: number; lng: number; zoom: number } | null;
-  }>({ data: [], favorites: [], selected: null, user: null, insets: [0, 0], view: null });
+  }>({ data: [], clusters: [], favorites: [], selected: null, user: null, insets: [0, 0], view: null });
 
   const send = useCallback((fn: string, ...args: unknown[]) => {
     const code = `try{window.parishMap&&window.parishMap.${fn}(${args.map(jsArg).join(',')})}catch(e){};true;`;
@@ -144,6 +160,13 @@ const ChurchMap = forwardRef<ChurchMapHandle, Props>(function ChurchMap(
       setData(points) {
         state.current.data = points;
         send('setData', points);
+      },
+      setClusters(clusters) {
+        state.current.clusters = clusters;
+        send('setClusters', clusters);
+      },
+      requestView(tag) {
+        send('requestView', tag || null);
       },
       setFavorites(ids) {
         state.current.favorites = ids;
@@ -206,6 +229,7 @@ const ChurchMap = forwardRef<ChurchMapHandle, Props>(function ChurchMap(
           ...(s.view ? [['setView', s.view.lat, s.view.lng, s.view.zoom, null]] : []),
           ['setFavorites', s.favorites],
           ['setData', s.data],
+          ['setClusters', s.clusters],
           ['select', s.selected],
           ...(s.user ? [['setUser', ...s.user]] : []),
         ] as unknown[][];
@@ -241,6 +265,10 @@ const ChurchMap = forwardRef<ChurchMapHandle, Props>(function ChurchMap(
         onSelect?.(msg.id);
         return;
       }
+      if (msg.type === 'clusterpin' && typeof msg.id === 'string') {
+        onClusterPin?.(msg.id);
+        return;
+      }
       if (msg.type === 'mapclick') {
         onMapPress?.();
         return;
@@ -253,7 +281,7 @@ const ChurchMap = forwardRef<ChurchMapHandle, Props>(function ChurchMap(
         console.warn('[mapa] erro no WebView:', msg.message);
       }
     },
-    [onMapPress, onMoveEnd, onReady, onSelect, onTileError, themePayload, tilesPayload],
+    [onClusterPin, onMapPress, onMoveEnd, onReady, onSelect, onTileError, themePayload, tilesPayload],
   );
 
   // Links (ex.: atribuição do mapa-base) abrem fora do app; o WebView só

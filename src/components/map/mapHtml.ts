@@ -4,12 +4,12 @@ import { LEAFLET_CSS, LEAFLET_JS, MARKERCLUSTER_CSS, MARKERCLUSTER_JS } from './
  * Documento HTML do mapa das igrejas — montado UMA única vez (constante do
  * módulo). Não depende de dados, tema nem posição: tudo isso chega depois por
  * `injectJavaScript` chamando `window.parishMap.*`, e o mapa responde por
- * `postMessage` com eventos `ready`, `moveend`, `select`, `mapclick` e
- * `tileerror`. Assim favoritar, filtrar ou trocar o tema nunca recarrega o
+ * `postMessage` com eventos `ready`, `moveend`, `select`, `clusterpin`,
+ * `mapclick` e `tileerror`. Assim favoritar, filtrar ou trocar o tema nunca recarrega o
  * WebView nem devolve o mapa ao GPS.
  *
  * Segurança: nenhum texto vindo do servidor (nome de igreja etc.) entra no
- * HTML — o mapa só recebe id, coordenadas e flags. Cores são validadas antes
+ * HTML — o mapa só recebe id, coordenadas, contagens e flags. Cores são validadas antes
  * de entrar no SVG e a atribuição do mapa-base é saneada no lado nativo.
  */
 
@@ -33,6 +33,8 @@ html,body,#map{height:100%;width:100%;margin:0;padding:0;background:var(--bg);-w
 .cl-wrap{background:none;border:0}
 .cl{width:100%;height:100%;border-radius:50%;background:var(--primary);opacity:.95;display:flex;align-items:center;justify-content:center;box-shadow:0 0 0 4px rgba(255,255,255,.75),0 2px 6px rgba(0,0,0,.3)}
 .cl span{color:#fff;font-weight:800;font-size:13px}
+.bub{width:100%;height:100%;border-radius:50%;background:var(--primary);opacity:.92;display:flex;align-items:center;justify-content:center;box-shadow:0 0 0 5px rgba(255,255,255,.6),0 2px 8px rgba(0,0,0,.3)}
+.bub span{color:#fff;font-weight:800;white-space:nowrap;letter-spacing:-.2px}
 .me{background:none;border:0}
 `;
 
@@ -60,6 +62,8 @@ const BRIDGE_JS = `
     showCoverageOnHover: false, chunkedLoading: true, iconCreateFunction: clusterIcon
   });
   map.addLayer(cluster);
+  // Bolhas do modo agrupado (contagem por região, vinda do servidor)
+  var bubbles = L.layerGroup().addTo(map);
 
   var markers = {}, items = {}, favs = {}, selected = null;
   var userDot = null, userHalo = null;
@@ -93,6 +97,61 @@ const BRIDGE_JS = `
     m.setZIndexOffset(id === selected ? 1000 : (favs[id] ? 500 : 0));
   }
   function onMarkerClick(){ post({ type: 'select', id: this._pid }); }
+
+  // ---------- Bolhas do modo agrupado ----------
+  function fmtCount(n){
+    if (n >= 10000) return Math.round(n / 1000) + ' mil';
+    if (n >= 1000) return String(Math.round(n / 100) / 10).replace('.', ',') + ' mil';
+    return String(n);
+  }
+  function bubbleIcon(n){
+    // Tamanho cresce com o log da contagem: 2 → 31 px, 100 → 46, 10 mil → 64 (a célula da grade tem ~100 px)
+    var s = Math.round(Math.min(64, 28 + 9 * Math.log(n) / Math.LN10));
+    var txt = fmtCount(n);
+    var fs = txt.length > 5 ? 11 : (txt.length > 3 ? 12 : 13);
+    return L.divIcon({ html: '<div class="bub"><span style="font-size:' + fs + 'px">' + txt + '</span></div>', className: 'cl-wrap', iconSize: [s, s] });
+  }
+  function zoomInto(lat, lng, bb){
+    var z = map.getZoom(), target, center;
+    if (bb && (bb[2] - bb[0] > 1e-6 || bb[3] - bb[1] > 1e-6)) {
+      var bounds = L.latLngBounds([bb[1], bb[0]], [bb[3], bb[2]]);
+      target = map.getBoundsZoom(bounds, false, L.point(80, 80));
+      center = bounds.getCenter();
+    } else {
+      target = z + 3; // todos no mesmo ponto
+      center = L.latLng(lat, lng);
+    }
+    // Sempre aproxima ao menos um nível, sem passar do nível de rua
+    target = Math.min(Math.max(target, z + 1), 17);
+    programmatic('cluster');
+    map.flyTo(center, target, { duration: 0.7 });
+  }
+  function setClusters(list){
+    bubbles.clearLayers();
+    if (!Array.isArray(list)) return;
+    list.forEach(function(g){
+      if (!g) return;
+      var lat = Number(g.lat), lng = Number(g.lng), n = Math.floor(Number(g.count));
+      if (!isFinite(lat) || !isFinite(lng) || !(n >= 1)) return;
+      var bb = (Array.isArray(g.bbox) && g.bbox.length === 4) ? g.bbox.map(Number) : null;
+      if (bb && !bb.every(isFinite)) bb = null;
+      var m;
+      if (n === 1 && typeof g.id === 'string') {
+        // Igreja sozinha na região: pino simples; o toque aproxima e o app a seleciona quando carregar
+        var id = g.id;
+        m = L.marker([lat, lng], { icon: iconFor({ id: id, approx: false, soon: false }), keyboard: false });
+        m.on('click', function(){
+          post({ type: 'clusterpin', id: id });
+          programmatic('cluster');
+          map.flyTo([lat, lng], Math.max(map.getZoom() + 2, 15), { duration: 0.7 });
+        });
+      } else {
+        m = L.marker([lat, lng], { icon: bubbleIcon(n), keyboard: false, zIndexOffset: n });
+        m.on('click', function(){ zoomInto(lat, lng, bb); });
+      }
+      bubbles.addLayer(m);
+    });
+  }
 
   // ---------- Enquadramento ----------
   function boundsMsg(tag){
@@ -189,6 +248,9 @@ const BRIDGE_JS = `
       if (remove.length) cluster.removeLayers(remove);
       if (add.length) cluster.addLayers(add);
     },
+    setClusters: setClusters,
+    /** Manda o enquadramento atual como um moveend (abertura: o setView inicial não gera evento). */
+    requestView: function(tag){ post(boundsMsg(tag)); },
     setFavorites: function(ids){
       var next = {};
       (Array.isArray(ids) ? ids : []).forEach(function(id){ if (typeof id === 'string') next[id] = true; });

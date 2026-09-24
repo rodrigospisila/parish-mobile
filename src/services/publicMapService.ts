@@ -1,3 +1,4 @@
+import axios from 'axios';
 import api, { getErrorMessage } from '../config/api';
 
 // ============================================
@@ -56,6 +57,35 @@ export interface MapResult {
   truncated: boolean;
   communities: MapCommunity[];
 }
+
+/** Grupo de igrejas numa célula da grade (mapa afastado). */
+export interface MapCluster {
+  lat: number;
+  lng: number;
+  count: number;
+  /** [minLng, minLat, maxLng, maxLat] dos pinos do grupo */
+  bbox: [number, number, number, number];
+  /** Só nos grupos de uma igreja */
+  id?: string;
+  name?: string;
+}
+
+/** `/public/map/area` em modo pinos: o resultado de sempre + modo e zoom. */
+export type MapPinsResult = MapResult & { mode: 'pins'; zoom: number | null };
+
+/** `/public/map/area` em modo agrupado (zoom < 11 ou pinos demais): só contagens, sem horários. */
+export interface MapClustersResult {
+  mode: 'clusters';
+  bbox: number[];
+  zoom: number;
+  total: number;
+  clusters: MapCluster[];
+}
+
+export type MapAreaResult = MapPinsResult | MapClustersResult;
+
+/** Zoom a partir do qual o backend devolve os pinos um a um (abaixo, agrupa). */
+export const PINS_MIN_ZOOM = 11;
 
 export interface CommunitySchedule {
   id: string;
@@ -182,23 +212,42 @@ export const getNearbyChurches = async (
   }
 };
 
-/** Maior lado aceito pelo backend em /public/map/area (graus). */
-export const MAX_AREA_SPAN_DEG = 4;
+/** A requisição foi cancelada (AbortController) — não é erro para mostrar. */
+export class MapRequestCanceled extends Error {
+  constructor() {
+    super('cancelada');
+  }
+}
 
-/** Igrejas dentro do retângulo visível do mapa ("Buscar nesta área"). */
-export const getChurchesInArea = async (
-  params: { bbox: [number, number, number, number]; limit?: number } & MapQueryFilters,
-): Promise<MapResult> => {
+/**
+ * Igrejas no retângulo visível do mapa, de qualquer tamanho (o backend recorta ao Brasil).
+ * Com `zoom` < 11, ou pinos demais, a resposta vem agrupada (`mode: 'clusters'`).
+ * `signal` cancela a busca anterior quando o mapa se move de novo.
+ */
+export const getMapArea = async (
+  params: { bbox: [number, number, number, number]; zoom: number; limit?: number } & MapQueryFilters,
+  signal?: AbortSignal,
+): Promise<MapAreaResult> => {
   try {
-    const { data } = await api.get<MapResult>('/public/map/area', {
+    const { data } = await api.get<MapAreaResult | MapResult>('/public/map/area', {
       params: {
         bbox: params.bbox.map((n) => n.toFixed(5)).join(','),
+        zoom: Math.min(20, Math.max(0, Math.round(params.zoom))),
         ...(params.limit != null ? { limit: params.limit } : {}),
         ...filterParams(params),
       },
+      signal,
     });
-    return data;
+    // Backend anterior ao agrupamento: sem `mode`, é sempre pinos
+    if (!data || (data as MapAreaResult).mode !== 'clusters') {
+      return { ...(data as MapResult), mode: 'pins', zoom: (data as MapPinsResult)?.zoom ?? null };
+    }
+    const c = data as MapClustersResult;
+    return { ...c, clusters: Array.isArray(c.clusters) ? c.clusters : [], total: Number(c.total) || 0 };
   } catch (error) {
+    if (axios.isCancel(error) || (error as any)?.name === 'CanceledError' || signal?.aborted) {
+      throw new MapRequestCanceled();
+    }
     throw new Error(getErrorMessage(error));
   }
 };
