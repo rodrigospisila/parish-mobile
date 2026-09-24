@@ -100,6 +100,9 @@ export interface Event {
   // Agenda fixa (Missa/Confissão/Adoração/Terço) — ocorrência virtual, não editável
   isFixed?: boolean;
   fixedType?: 'MASS' | 'CONFESSION' | 'ADORATION' | 'ROSARY';
+  /** Ocorrência fixa suspensa nesta data ("não haverá") */
+  cancelled?: boolean;
+  cancelReason?: string | null;
 }
 
 /**
@@ -268,6 +271,8 @@ export const getFixedOccurrences = async (
       communityId: occ.community?.id ?? communityId,
       isFixed: true,
       fixedType: occ.type,
+      cancelled: occ.cancelled === true,
+      cancelReason: occ.cancelReason ?? null,
     }));
   } catch (error) {
     console.error('Erro ao carregar agenda fixa:', error);

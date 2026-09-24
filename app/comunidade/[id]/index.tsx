@@ -21,7 +21,8 @@ import type { ThemeColors } from '../../../src/constants/Colors';
 import { CommunitySchedule, PublicCommunity, getPublicCommunity } from '../../../src/services/publicMapService';
 import { cachedFetch } from '../../../src/utils/offlineCache';
 import { descreverRecorrencia, ehMensal } from '../../../src/utils/recorrencia';
-import { formatMassTime, isSoon, typeLabel } from '../../../src/components/map/format';
+import { formatMassTime, isCancelled, isSoon, typeLabel } from '../../../src/components/map/format';
+import { chaveDaquiA, diaMes, juntarLista, motivoCurto, suspensoesDe } from '../../../src/utils/suspensoes';
 import { openDirectionsTo } from '../../../src/components/map/directions';
 
 /** Ordem de exibição: domingo primeiro, como nos murais de paróquia. */
@@ -63,6 +64,43 @@ function groupSchedules(schedules: CommunitySchedule[]) {
   return { days, monthly };
 }
 
+interface AvisoSuspensao {
+  key: string;
+  ordem: string;
+  texto: string;
+}
+
+/** Suspensões de hoje e amanhã, para o aviso no topo dos horários. */
+function avisosProximos(schedules: CommunitySchedule[], now: Date = new Date()): AvisoSuspensao[] {
+  const hoje = chaveDaquiA(0, now);
+  const amanha = chaveDaquiA(1, now);
+  const out: AvisoSuspensao[] = [];
+  for (const s of schedules) {
+    for (const c of suspensoesDe(s)) {
+      if (c.date !== hoje && c.date !== amanha) continue;
+      const quando = c.date === hoje ? 'Hoje' : 'Amanhã';
+      const motivo = motivoCurto(c.reason);
+      out.push({
+        key: `${s.id}-${c.date}`,
+        ordem: `${c.date}T${s.time}`,
+        texto: `${quando} não haverá ${typeLabel(s.type)} às ${s.time}${motivo ? ` — ${motivo}` : ''}`,
+      });
+    }
+  }
+  return out.sort((a, b) => a.ordem.localeCompare(b.ordem));
+}
+
+/** "Suspenso em 02/10 e 09/10" — datas depois de amanhã (hoje/amanhã já estão no aviso). */
+function linhaSuspensas(s: CommunitySchedule, now: Date = new Date()): string | null {
+  const amanha = chaveDaquiA(1, now);
+  const datas = suspensoesDe(s)
+    .filter((c) => c.date > amanha)
+    .map((c) => diaMes(c.date));
+  if (datas.length === 0) return null;
+  const lista = datas.length > 4 ? `${datas.slice(0, 4).join(', ')} e mais ${datas.length - 4}` : juntarLista(datas);
+  return `Suspenso em ${lista}`;
+}
+
 export default function CommunityPublicScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const colors = useColors();
@@ -100,6 +138,7 @@ export default function CommunityPublicScreen() {
   };
 
   const grouped = useMemo(() => (data ? groupSchedules(data.schedules || []) : null), [data]);
+  const avisos = useMemo(() => (data ? avisosProximos(data.schedules || []) : []), [data]);
 
   const phone = data?.phone || data?.parish?.phone || null;
   const website = data?.website || data?.parish?.website || null;
@@ -241,18 +280,38 @@ export default function CommunityPublicScreen() {
           {(data.nextMasses?.length ?? 0) > 0 && (
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>Próximas celebrações</Text>
-              {data.nextMasses.slice(0, 5).map((m) => {
-                const soon = isSoon(m);
+              {data.nextMasses.slice(0, 6).map((m) => {
+                const off = isCancelled(m);
+                const soon = !off && isSoon(m);
+                const motivo = motivoCurto(m.cancelReason);
                 return (
-                  <View key={m.id} style={styles.nextRow}>
-                    <View style={[styles.dot, { backgroundColor: soon ? colors.success : colors.border }]} />
-                    <Text style={[styles.nextText, soon && { color: colors.success, fontWeight: '800' }]}>
-                      {formatMassTime(m.start)}
-                    </Text>
-                    <Text style={styles.nextType}>
-                      {typeLabel(m.type)}
-                      {m.source === 'event' ? ' · especial' : ''}
-                    </Text>
+                  <View key={m.id} style={styles.nextItem}>
+                    <View style={styles.nextRow}>
+                      <View style={[styles.dot, { backgroundColor: soon ? colors.success : colors.border }]} />
+                      <Text
+                        style={[
+                          styles.nextText,
+                          soon && { color: colors.success, fontWeight: '800' },
+                          off && styles.offText,
+                        ]}
+                      >
+                        {formatMassTime(m.start)}
+                      </Text>
+                      <Text style={[styles.nextType, off && styles.offText]}>
+                        {typeLabel(m.type)}
+                        {m.source === 'event' ? ' · especial' : ''}
+                      </Text>
+                      {off && (
+                        <View style={styles.offBadge}>
+                          <Text style={styles.offBadgeText}>Não haverá</Text>
+                        </View>
+                      )}
+                    </View>
+                    {off && !!motivo && (
+                      <Text style={styles.offReason} numberOfLines={1}>
+                        {motivo}
+                      </Text>
+                    )}
                   </View>
                 );
               })}
@@ -262,6 +321,18 @@ export default function CommunityPublicScreen() {
           {/* HORÁRIOS DA SEMANA */}
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Horários</Text>
+            {avisos.length > 0 && (
+              <View style={styles.alertBox} accessibilityRole="alert">
+                <FontAwesome5 name="exclamation-circle" size={16} color={colors.error} style={{ marginTop: 2 }} />
+                <View style={{ flex: 1, gap: 4 }}>
+                  {avisos.map((a) => (
+                    <Text key={a.key} style={styles.alertText}>
+                      {a.texto}
+                    </Text>
+                  ))}
+                </View>
+              </View>
+            )}
             {grouped && grouped.days.length === 0 && grouped.monthly.length === 0 ? (
               <Text style={styles.muted}>Nenhum horário cadastrado ainda.</Text>
             ) : (
@@ -281,6 +352,15 @@ export default function CommunityPublicScreen() {
                                 {s.time} — {s.notes}
                               </Text>
                             ))}
+                          {t.items.map((s) => {
+                            const linha = linhaSuspensas(s);
+                            return linha ? (
+                              <Text key={`susp-${s.id}`} style={styles.suspLine}>
+                                {t.items.length > 1 ? `${s.time} — ` : ''}
+                                {linha}
+                              </Text>
+                            ) : null;
+                          })}
                         </View>
                       </View>
                     ))}
@@ -297,6 +377,7 @@ export default function CommunityPublicScreen() {
                             {descreverRecorrencia(s)}, {s.time}
                           </Text>
                           {!!s.notes && <Text style={styles.note}>{s.notes}</Text>}
+                          {!!linhaSuspensas(s) && <Text style={styles.suspLine}>{linhaSuspensas(s)}</Text>}
                         </View>
                       </View>
                     ))}
@@ -432,7 +513,30 @@ function createStyles(colors: ThemeColors) {
     },
     sectionTitle: { fontSize: 15, fontWeight: '800', color: colors.text, marginBottom: 10 },
     muted: { fontSize: 13.5, color: colors.textTertiary, fontStyle: 'italic' },
-    nextRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 4 },
+    nextItem: { paddingVertical: 4 },
+    nextRow: { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
+    offText: { color: colors.textTertiary, textDecorationLine: 'line-through', fontWeight: '600' },
+    offBadge: {
+      backgroundColor: colors.error + '1F',
+      paddingHorizontal: 7,
+      paddingVertical: 2,
+      borderRadius: 6,
+    },
+    offBadgeText: { fontSize: 11.5, fontWeight: '800', color: colors.error },
+    offReason: { fontSize: 13, color: colors.textSecondary, marginLeft: 16, marginTop: 2 },
+    alertBox: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      gap: 10,
+      padding: 12,
+      borderRadius: 12,
+      backgroundColor: colors.error + '14',
+      borderWidth: 1,
+      borderColor: colors.error + '55',
+      marginBottom: 10,
+    },
+    alertText: { fontSize: 15, fontWeight: '700', color: colors.text, lineHeight: 21 },
+    suspLine: { fontSize: 12.5, color: colors.error, marginTop: 2, fontWeight: '600' },
     dot: { width: 8, height: 8, borderRadius: 4 },
     nextText: { fontSize: 14, fontWeight: '600', color: colors.text },
     nextType: { fontSize: 12.5, color: colors.textSecondary },

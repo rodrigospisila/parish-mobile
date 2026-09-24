@@ -1,5 +1,6 @@
 import axios from 'axios';
 import api, { getErrorMessage } from '../config/api';
+import type { ScheduleCancellationDay } from '../types';
 
 // ============================================
 // Mapa público das igrejas (sem login)
@@ -40,6 +41,10 @@ export interface PublicMass {
   start: string;
   end: string | null;
   source: 'fixed' | 'event';
+  /** Horário fixo suspenso nesta data ("não haverá"). Servidor antigo não manda: tratar como false. */
+  cancelled?: boolean;
+  /** Motivo curto da suspensão, para mostrar ao fiel. */
+  cancelReason?: string | null;
 }
 
 export interface MapCommunity {
@@ -107,6 +112,8 @@ export interface CommunitySchedule {
   weeksOfMonth: number[] | null;
   dayOfMonth: number | null;
   notes: string | null;
+  /** Datas suspensas de hoje até +60 dias (ausente em servidor antigo). */
+  upcomingCancellations?: ScheduleCancellationDay[];
 }
 
 export interface PublicCommunity {

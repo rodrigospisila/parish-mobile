@@ -47,7 +47,7 @@ import ChurchMap, {
 import CommunityCard from '../src/components/map/CommunityCard';
 import ChurchListPanel, { ListItem } from '../src/components/map/ChurchListPanel';
 import MapFilters, { DayFilter } from '../src/components/map/MapFilters';
-import { cityLine, distanceFor, hasSoonMass } from '../src/components/map/format';
+import { cityLine, distanceFor, hasSoonMass, isCancelled } from '../src/components/map/format';
 import { openDirectionsTo } from '../src/components/map/directions';
 
 /**
@@ -414,7 +414,8 @@ export default function NearbyMassesScreen() {
       });
       return { ...c, nextMasses: masses };
     });
-    return day === 'all' ? list : list.filter((c) => c.nextMasses.length > 0);
+    // "Hoje"/"Domingo": só fica a igreja que tem algum horário que vai mesmo acontecer
+    return day === 'all' ? list : list.filter((c) => c.nextMasses.some((m) => !isCancelled(m)));
   }, [result, day]);
 
   const listItems: ListItem[] = useMemo(() => {

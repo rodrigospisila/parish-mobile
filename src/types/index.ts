@@ -405,8 +405,27 @@ export interface MassSchedule {
   specialDate?: string;
   communityId: string;
   community?: Community;
+  /**
+   * Datas (hoje até +60 dias) em que o horário NÃO acontece, com o motivo.
+   * Servidor antigo não manda — tratar ausência como lista vazia.
+   */
+  upcomingCancellations?: ScheduleCancellationDay[];
   createdAt: string;
   updatedAt: string;
+}
+
+/** Um dia em que o horário fixo foi suspenso ("não haverá"). */
+export interface ScheduleCancellationDay {
+  /** YYYY-MM-DD (dia da ocorrência no relógio da comunidade) */
+  date: string;
+  reason: string | null;
+}
+
+/** Suspensão registrada (visão do gestor). */
+export interface ScheduleCancellation extends ScheduleCancellationDay {
+  id: string;
+  createdAt: string;
+  createdBy: { id: string; name: string } | null;
 }
 
 // ============================================

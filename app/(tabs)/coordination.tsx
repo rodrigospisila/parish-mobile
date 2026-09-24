@@ -25,6 +25,8 @@ import {
 } from '../../src/services/coordinatorService';
 import { formatToBrazilianDate } from '../../src/utils/dateUtils';
 import { isFinancialRole } from '../../src/services/titheService';
+import { canManageScheduleCancellations } from '../../src/services/massScheduleService';
+import { FontAwesome5 } from '@expo/vector-icons';
 
 type AssignmentFilter = 'all' | 'PENDING' | 'CONFIRMED' | 'DECLINED' | 'CHECKED_IN';
 type DateRange = 'next7' | 'next30' | 'next90' | 'all';
@@ -82,6 +84,8 @@ export default function CoordinationScreen() {
   const styles = createStyles(colors);
   // Tesouraria/coordenação de comunidade: atalho para o modo agente do Dízimo
   const isFinancial = isFinancialRole(user?.role);
+  // Padre/secretaria/coordenação da comunidade: avisar que um horário fixo não vai acontecer
+  const canSuspendSchedules = canManageScheduleCancellations(user?.role);
 
   const getDateRangeParams = useCallback(() => {
     // Calendário: carrega o mês exibido inteiro
@@ -343,6 +347,26 @@ export default function CoordinationScreen() {
           <Text style={styles.title}>Coordenação de escalas</Text>
           <Text style={styles.subtitle}>Pendências, confirmações e presenças da sua pastoral.</Text>
         </View>
+
+        {/* Horários da semana: marcar "não haverá" num horário fixo */}
+        {canSuspendSchedules && (
+          <TouchableOpacity
+            style={styles.weekCard}
+            activeOpacity={0.85}
+            onPress={() => router.push('/horarios-da-semana' as never)}
+            accessibilityRole="button"
+            accessibilityLabel="Horários da semana. Avise quando um horário não vai acontecer"
+          >
+            <View style={styles.weekIcon}>
+              <FontAwesome5 name="calendar-times" size={18} color={colors.primary} />
+            </View>
+            <View style={{ flex: 1, gap: 2 }}>
+              <Text style={styles.weekTitle}>Horários da semana</Text>
+              <Text style={styles.weekHint}>Avise quando um horário não vai acontecer</Text>
+            </View>
+            <FontAwesome5 name="chevron-right" size={14} color={colors.textTertiary} />
+          </TouchableOpacity>
+        )}
 
         {/* Modo agente do Dízimo (papéis financeiros) */}
         {isFinancial && (
@@ -889,6 +913,30 @@ const createStyles = (colors: ReturnType<typeof useColors>) =>
       padding: 14,
     },
     agentTitle: { fontSize: 14, fontWeight: '800', color: colors.primary },
+    weekCard: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+      marginHorizontal: 18,
+      marginBottom: 12,
+      minHeight: 64,
+      paddingHorizontal: 14,
+      paddingVertical: 12,
+      backgroundColor: colors.card,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    weekIcon: {
+      width: 40,
+      height: 40,
+      borderRadius: 20,
+      backgroundColor: colors.highlightLight,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    weekTitle: { fontSize: 16, fontWeight: '800', color: colors.text },
+    weekHint: { fontSize: 14, color: colors.textSecondary, lineHeight: 19 },
     agentHint: { fontSize: 12, color: colors.textSecondary, lineHeight: 17 },
     agentChevron: { fontSize: 22, color: colors.textTertiary, fontWeight: '600' },
     scrollView: { flex: 1 },

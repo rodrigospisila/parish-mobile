@@ -12,7 +12,7 @@ import {
 import { FontAwesome5 } from '@expo/vector-icons';
 import type { ThemeColors } from '../../constants/Colors';
 import type { MapCommunity } from '../../services/publicMapService';
-import { cityLine, formatDistance, formatMassTime, isSoon, typeLabel } from './format';
+import { cityLine, firstActiveMass, formatDistance, formatMassTime, isCancelled, isSoon, typeLabel } from './format';
 
 export interface ListItem {
   community: MapCommunity;
@@ -76,8 +76,10 @@ export default function ChurchListPanel({
 
   const renderItem = ({ item }: { item: ListItem }) => {
     const c = item.community;
-    const next = c.nextMasses[0];
+    // Próximo horário que vai mesmo acontecer; uma suspensão antes dele vira aviso
+    const next = firstActiveMass(c.nextMasses);
     const soon = next ? isSoon(next, now) : false;
+    const skipped = c.nextMasses.find((m) => isCancelled(m) && (!next || m.start < next.start));
     const dist = formatDistance(item.distanceKm);
     return (
       <TouchableOpacity style={styles.row} activeOpacity={0.8} onPress={() => onPressItem(c)}>
@@ -112,6 +114,15 @@ export default function ChurchListPanel({
             )}
             {c.approximate && <Text style={styles.approxTag}>aproximada</Text>}
           </View>
+          {!!skipped && (
+            <View style={styles.rowMass}>
+              <Text style={styles.offTag}>Não haverá</Text>
+              <Text style={styles.rowOffText} numberOfLines={1}>
+                {formatMassTime(skipped.start, now)}
+                {skipped.type !== 'MASS' ? ` · ${typeLabel(skipped.type)}` : ''}
+              </Text>
+            </View>
+          )}
         </View>
         <TouchableOpacity
           onPress={() => onToggleFavorite(c.id)}
@@ -205,6 +216,22 @@ function createStyles(colors: ThemeColors) {
     rowSub: { fontSize: 12.5, color: colors.textSecondary, marginTop: 1 },
     rowMass: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 3 },
     rowMassText: { fontSize: 13, color: colors.text, fontWeight: '600', flexShrink: 1 },
+    rowOffText: {
+      fontSize: 12.5,
+      color: colors.textTertiary,
+      textDecorationLine: 'line-through',
+      flexShrink: 1,
+    },
+    offTag: {
+      fontSize: 10.5,
+      fontWeight: '800',
+      color: colors.error,
+      backgroundColor: colors.error + '1F',
+      paddingHorizontal: 6,
+      paddingVertical: 1,
+      borderRadius: 6,
+      overflow: 'hidden',
+    },
     rowNoMass: { fontSize: 12.5, color: colors.textTertiary, fontStyle: 'italic' },
     approxTag: {
       fontSize: 10.5,

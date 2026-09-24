@@ -20,7 +20,6 @@ import { useAuth } from '../../src/context/AuthContext';
 import {
   descreverRecorrencia,
   ehMensal,
-  proximaOcorrencia,
   rotuloCurto,
 } from '../../src/utils/recorrencia';
 import { getCoordinatorOverview, CoordinatorOverview } from '../../src/services/pastoralService';
@@ -40,6 +39,16 @@ import {
   removeFavoriteMassSchedule,
 } from '../../src/services/massScheduleService';
 import { MassSchedule } from '../../src/types';
+import {
+  chaveDaquiA,
+  chaveDoDia,
+  diaMes,
+  juntarLista,
+  motivoCurto,
+  proximaOcorrenciaValida,
+  suspensaoNoDia,
+  suspensoesDe,
+} from '../../src/utils/suspensoes';
 import { formatDateBR, formatDateTimeBR } from '../../src/utils/dateUtils';
 import {
   ClergyMessage,
@@ -95,7 +104,11 @@ function splitIntoVerses(text?: string): { num?: string; text: string }[] {
 
 
 
-/** Ocorrência mais próxima entre os horários fixos (semanais + especiais). */
+/**
+ * Ocorrência mais próxima entre os horários fixos (semanais + especiais).
+ * Pula as datas suspensas ("não haverá") — mandar o fiel para uma missa que
+ * não vai acontecer é pior do que mostrar a seguinte.
+ */
 function nextFixedOccurrence(
   schedules: MassSchedule[],
   from: Date,
@@ -108,17 +121,36 @@ function nextFixedOccurrence(
       date = new Date(s.specialDate);
       date.setHours(hh, mm, 0, 0);
       if (date.getTime() < from.getTime()) continue; // especial no passado
+      if (suspensaoNoDia(s, chaveDoDia(date))) continue; // especial suspensa
     } else {
       // Respeita a recorrência: "1º e 3º sábado" não é "todo sábado", e a
       // missa de data fixa nem tem dia da semana. Null = sem ocorrência à
       // vista, e aí o horário simplesmente não concorre.
-      const proxima = proximaOcorrencia(s, s.time, from);
+      const proxima = proximaOcorrenciaValida(s, s.time, from);
       if (!proxima) continue;
       date = proxima;
     }
     if (!best || date.getTime() < best.date.getTime()) best = { date, schedule: s };
   }
   return best;
+}
+
+/**
+ * Missas de hoje que foram suspensas e o fiel precisa saber: as favoritas
+ * (o dia todo) e qualquer outra que ainda não passou do horário.
+ */
+function suspensasDeHoje(
+  schedules: MassSchedule[],
+  favoritos: Set<string>,
+  now: Date,
+): { schedule: MassSchedule; reason: string | null }[] {
+  const hoje = chaveDoDia(now);
+  const agora = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+  return schedules
+    .map((s) => ({ s, c: suspensaoNoDia(s, hoje) }))
+    .filter(({ s, c }) => !!c && (favoritos.has(s.id) || (s.time || '') >= agora))
+    .sort((a, b) => (a.s.time || '').localeCompare(b.s.time || ''))
+    .map(({ s, c }) => ({ schedule: s, reason: c?.reason ?? null }));
 }
 
 export default function HomeScreen() {
@@ -391,6 +423,30 @@ export default function HomeScreen() {
     return candidates[0];
   })();
 
+  // Missa fixa de hoje suspensa ("não haverá"): aviso bem visível na Próxima celebração
+  const todaySuspended = suspensasDeHoje(massSchedules, favoriteMassScheduleSet, new Date());
+
+  const renderSuspendedToday = () => {
+    if (todaySuspended.length === 0) return null;
+    return (
+      <View style={styles.suspendedBox} accessibilityRole="alert">
+        <FontAwesome5 name="exclamation-circle" size={17} color={colors.error} style={{ marginTop: 2 }} />
+        <View style={{ flex: 1, gap: 4 }}>
+          {todaySuspended.map(({ schedule, reason }) => {
+            const motivo = motivoCurto(reason);
+            return (
+              <Text key={schedule.id} style={styles.suspendedText}>
+                Hoje não haverá a Missa das {schedule.time}
+                {schedule.notes ? ` (${schedule.notes})` : ''}
+                {motivo ? ` — ${motivo}` : ''}
+              </Text>
+            );
+          })}
+        </View>
+      </View>
+    );
+  };
+
   const renderNextMass = () => {
     if ((isLoading || isLoadingMassSchedules) && !nextCelebration) {
       return <ActivityIndicator size="small" color={colors.primary} />;
@@ -400,7 +456,12 @@ export default function HomeScreen() {
       if (upcomingEventsError) {
         return <Text style={styles.errorText}>Não foi possível carregar os eventos. Verifique sua conexão.</Text>;
       }
-      return <Text style={styles.infoText}>Nenhuma missa programada para sua comunidade.</Text>;
+      return (
+        <>
+          {renderSuspendedToday()}
+          <Text style={styles.infoText}>Nenhuma missa programada para sua comunidade.</Text>
+        </>
+      );
     }
 
     const { start, title, location, isFixed } = nextCelebration;
@@ -410,6 +471,8 @@ export default function HomeScreen() {
     const relative = diffDays === 0 ? 'Hoje' : diffDays === 1 ? 'Amanhã' : `Em ${diffDays} dias`;
 
     return (
+      <>
+      {renderSuspendedToday()}
       <TouchableOpacity
         style={styles.nextMassCard}
         activeOpacity={0.85}
@@ -434,7 +497,27 @@ export default function HomeScreen() {
         </View>
         <FontAwesome5 name="chevron-right" size={14} color={colors.textTertiary} />
       </TouchableOpacity>
+      </>
     );
+  };
+
+  /** Linha de suspensão de um horário: "Hoje não haverá…" / "Suspensa em 02/10 e 09/10". */
+  const suspensionLine = (schedule: MassSchedule): { text: string; strong: boolean } | null => {
+    const lista = suspensoesDe(schedule);
+    if (lista.length === 0) return null;
+    const hoje = chaveDaquiA(0);
+    const amanha = chaveDaquiA(1);
+    const perto = lista.find((c) => c.date === hoje) || lista.find((c) => c.date === amanha);
+    if (perto) {
+      const motivo = motivoCurto(perto.reason);
+      return {
+        text: `${perto.date === hoje ? 'Hoje' : 'Amanhã'} não haverá${motivo ? ` — ${motivo}` : ''}`,
+        strong: true,
+      };
+    }
+    const datas = lista.map((c) => diaMes(c.date));
+    const texto = datas.length > 4 ? `${datas.slice(0, 4).join(', ')} e mais ${datas.length - 4}` : juntarLista(datas);
+    return { text: `Suspensa em ${texto}`, strong: false };
   };
 
   const renderMassSchedules = () => {
@@ -473,6 +556,19 @@ export default function HomeScreen() {
                     Especial: {formatDateBR(schedule.specialDate)}
                   </Text>
                 ) : null}
+                {(() => {
+                  const linha = suspensionLine(schedule);
+                  if (!linha) return null;
+                  return linha.strong ? (
+                    <View style={styles.massSuspendedBadge}>
+                      <Text style={styles.massSuspendedBadgeText} numberOfLines={2}>
+                        {linha.text}
+                      </Text>
+                    </View>
+                  ) : (
+                    <Text style={styles.massSuspendedLine}>{linha.text}</Text>
+                  );
+                })()}
               </View>
               <Pressable
                 style={styles.massScheduleFavoriteButton}
@@ -1695,6 +1791,28 @@ const createStyles = (colors: ReturnType<typeof useColors>) =>
     massItemInfo: { flex: 1 },
     massItemTitle: { fontSize: 14.5, fontWeight: '600', color: colors.text },
     massItemDay: { fontSize: 12.5, color: colors.textTertiary, marginTop: 2 },
+    massSuspendedLine: { fontSize: 12.5, color: colors.error, marginTop: 3, fontWeight: '600' },
+    massSuspendedBadge: {
+      alignSelf: 'flex-start',
+      marginTop: 5,
+      paddingHorizontal: 8,
+      paddingVertical: 3,
+      borderRadius: 6,
+      backgroundColor: colors.error + '1F',
+    },
+    massSuspendedBadgeText: { fontSize: 12.5, fontWeight: '800', color: colors.error },
+    suspendedBox: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      gap: 10,
+      padding: 12,
+      marginBottom: 10,
+      borderRadius: 12,
+      backgroundColor: colors.error + '14',
+      borderWidth: 1,
+      borderColor: colors.error + '55',
+    },
+    suspendedText: { fontSize: 15, fontWeight: '700', color: colors.text, lineHeight: 21 },
     massScheduleItem: {
       flexDirection: 'row',
       alignItems: 'center',

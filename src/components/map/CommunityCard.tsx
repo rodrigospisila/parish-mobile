@@ -3,7 +3,7 @@ import { LayoutChangeEvent, StyleSheet, Text, TouchableOpacity, View } from 'rea
 import { FontAwesome5 } from '@expo/vector-icons';
 import type { ThemeColors } from '../../constants/Colors';
 import type { MapCommunity } from '../../services/publicMapService';
-import { cityLine, formatDistance, formatMassTime, isSoon, typeLabel } from './format';
+import { cityLine, formatDistance, formatMassTime, isCancelled, isSoon, typeLabel } from './format';
 
 interface Props {
   community: MapCommunity;
@@ -33,7 +33,17 @@ export default function CommunityCard({
 }: Props) {
   const styles = useMemo(() => createStyles(colors), [colors]);
   const now = new Date();
-  const masses = c.nextMasses.slice(0, 3);
+  // Até 3 que vão acontecer; as suspensas no meio aparecem riscadas (máx. 4 linhas)
+  const masses = useMemo(() => {
+    const out: MapCommunity['nextMasses'] = [];
+    let active = 0;
+    for (const m of c.nextMasses) {
+      if (active >= 3 || out.length >= 4) break;
+      out.push(m);
+      if (!isCancelled(m)) active += 1;
+    }
+    return out;
+  }, [c.nextMasses]);
   const dist = formatDistance(distanceKm);
   const sub = [c.parish?.name, cityLine(c)].filter(Boolean).join(' · ');
 
@@ -91,15 +101,35 @@ export default function CommunityCard({
       <View style={styles.masses}>
         {masses.length > 0 ? (
           masses.map((m) => {
-            const soon = isSoon(m, now);
+            const off = isCancelled(m);
+            const soon = !off && isSoon(m, now);
+            const reason = (m.cancelReason || '').trim();
             return (
-              <View key={m.id} style={styles.massRow}>
-                <View style={[styles.dot, { backgroundColor: soon ? colors.success : colors.border }]} />
-                <Text style={[styles.massText, soon && { color: colors.success, fontWeight: '800' }]}>
-                  {formatMassTime(m.start, now)}
-                </Text>
-                {m.type !== 'MASS' && <Text style={styles.tag}>{typeLabel(m.type)}</Text>}
-                {m.source === 'event' && <Text style={styles.tag}>especial</Text>}
+              <View key={m.id}>
+                <View style={styles.massRow}>
+                  <View style={[styles.dot, { backgroundColor: soon ? colors.success : colors.border }]} />
+                  <Text
+                    style={[
+                      styles.massText,
+                      soon && { color: colors.success, fontWeight: '800' },
+                      off && styles.massTextOff,
+                    ]}
+                  >
+                    {formatMassTime(m.start, now)}
+                  </Text>
+                  {m.type !== 'MASS' && <Text style={[styles.tag, off && { opacity: 0.55 }]}>{typeLabel(m.type)}</Text>}
+                  {m.source === 'event' && <Text style={styles.tag}>especial</Text>}
+                  {off && (
+                    <View style={styles.offBadge}>
+                      <Text style={styles.offBadgeText}>Não haverá</Text>
+                    </View>
+                  )}
+                </View>
+                {off && !!reason && (
+                  <Text style={styles.offReason} numberOfLines={1}>
+                    {reason}
+                  </Text>
+                )}
               </View>
             );
           })
@@ -177,6 +207,15 @@ function createStyles(colors: ThemeColors) {
     massRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
     dot: { width: 8, height: 8, borderRadius: 4 },
     massText: { fontSize: 14, color: colors.text, fontWeight: '600' },
+    massTextOff: { color: colors.textTertiary, textDecorationLine: 'line-through', fontWeight: '600' },
+    offBadge: {
+      backgroundColor: colors.error + '1F',
+      paddingHorizontal: 7,
+      paddingVertical: 2,
+      borderRadius: 6,
+    },
+    offBadgeText: { fontSize: 11, fontWeight: '800', color: colors.error },
+    offReason: { fontSize: 12.5, color: colors.textSecondary, marginLeft: 16, marginTop: 1 },
     tag: {
       fontSize: 11,
       fontWeight: '700',

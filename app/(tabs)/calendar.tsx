@@ -570,7 +570,7 @@ export default function CalendarScreen() {
         <View style={styles.eventDetails}>
           <View style={styles.eventTitleRow}>
             {event.isFixed && <Ionicons name="repeat" size={13} color={color} style={{ marginRight: 4 }} />}
-            <Text style={styles.eventTitle}>{event.title}</Text>
+            <Text style={[styles.eventTitle, event.cancelled && styles.eventTitleOff]}>{event.title}</Text>
           </View>
           {meta.isMultiDay && (
             <View style={styles.rangeChip}>
@@ -582,9 +582,15 @@ export default function CalendarScreen() {
               </Text>
             </View>
           )}
-          <Text style={styles.eventLocation}>
-            {event.isFixed ? 'Agenda fixa' : event.location || 'A definir'}
-          </Text>
+          {event.cancelled ? (
+            <Text style={[styles.eventLocation, styles.eventOffText]} numberOfLines={2}>
+              Não haverá{event.cancelReason ? ` — ${event.cancelReason}` : ''}
+            </Text>
+          ) : (
+            <Text style={styles.eventLocation}>
+              {event.isFixed ? 'Agenda fixa' : event.location || 'A definir'}
+            </Text>
+          )}
         </View>
         {!event.isFixed && (
           <Pressable
@@ -1105,6 +1111,11 @@ export default function CalendarScreen() {
                     </View>
 
                     <Text style={styles.modalTitle}>{selectedEvent.title}</Text>
+                    {selectedEvent.cancelled && (
+                      <Text style={[styles.eventOffText, { fontSize: 15, marginBottom: 10 }]}>
+                        Não haverá nesta data{selectedEvent.cancelReason ? ` — ${selectedEvent.cancelReason}` : ''}
+                      </Text>
+                    )}
 
                     <View style={styles.modalInfoRow}>
                       <Text style={styles.modalLabel}>📅 Data e Hora:</Text>
@@ -1492,6 +1503,8 @@ const createStyles = (colors: ReturnType<typeof useColors>) =>
       fontWeight: '600',
       color: colors.highlight,
     },
+    eventTitleOff: { textDecorationLine: 'line-through', color: colors.textTertiary },
+    eventOffText: { color: colors.error, fontWeight: '700' },
     eventLocation: {
       fontSize: 14,
       color: colors.textSecondary,

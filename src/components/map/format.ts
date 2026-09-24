@@ -43,16 +43,24 @@ export function formatMassTime(start: string, now: Date = new Date()): string {
   return `${weekday.charAt(0).toUpperCase()}${weekday.slice(1)} ${format(d, 'dd/MM')}, ${hour}`;
 }
 
-/** Celebração começa nas próximas ~3 h (ou começou há até 15 min). */
+/** Ocorrência suspensa ("não haverá") — campo ausente em servidor antigo. */
+export const isCancelled = (m: { cancelled?: boolean | null }) => m.cancelled === true;
+
+/** Próxima ocorrência que vai mesmo acontecer (pula as suspensas). */
+export const firstActiveMass = (list: PublicMass[]): PublicMass | undefined => list.find((m) => !isCancelled(m));
+
+/** Celebração começa nas próximas ~3 h (ou começou há até 15 min). Suspensa nunca conta. */
 export function isSoon(m: PublicMass, now: Date = new Date()): boolean {
+  if (isCancelled(m)) return false;
   const d = parseLocal(m.start);
   if (!d) return false;
   const diff = d.getTime() - now.getTime();
   return diff >= -15 * 60 * 1000 && diff <= SOON_WINDOW_MS;
 }
 
+/** Ponto verde no pino: alguma celebração em breve que NÃO foi suspensa. */
 export const hasSoonMass = (c: { nextMasses: PublicMass[] }, now: Date = new Date()) =>
-  c.nextMasses.some((m) => isSoon(m, now));
+  c.nextMasses.some((m) => !isCancelled(m) && isSoon(m, now));
 
 /** Distância em km entre dois pontos (haversine). */
 export function haversineKm(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
