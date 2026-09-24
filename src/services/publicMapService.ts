@@ -247,38 +247,16 @@ export const sendSuggestion = async (
 // ---------- Busca de lugar (cidade, bairro, igreja) ----------
 
 /**
- * Converte um texto em coordenadas.
- *
- * Com sessão: usa o proxy do backend (`GET /geocoding/search`, que exige login
- * e tem cache). Sem sessão: consulta o Nominatim direto do aparelho — só em
- * busca explícita (nunca autocompletar), limitado ao Brasil e identificando o
- * app, como pede a política de uso do OSM. Se o backend ganhar um geocoding
- * público, basta trocar este ramo.
+ * Converte um texto em coordenadas pela rota pública do backend (`GET /public/map/geocode`: proxy com cache e
+ * limite por IP) — com ou sem sessão. O aparelho nunca consulta o Nominatim direto.
  */
-export const searchPlace = async (query: string, authenticated: boolean): Promise<GeocodeResult[]> => {
+export const searchPlace = async (query: string, _authenticated?: boolean): Promise<GeocodeResult[]> => {
   const q = query.trim();
   if (q.length < 3) return [];
-  if (authenticated) {
-    try {
-      const { data } = await api.get<GeocodeResult[]>('/geocoding/search', { params: { q } });
-      return data || [];
-    } catch (error) {
-      throw new Error(getErrorMessage(error));
-    }
-  }
   try {
-    const url =
-      'https://nominatim.openstreetmap.org/search?format=jsonv2&countrycodes=br&limit=5&accept-language=pt-BR&q=' +
-      encodeURIComponent(q);
-    const res = await fetch(url, {
-      headers: { 'User-Agent': 'ParishApp/1.0 (app Parish; mapa de igrejas)', Accept: 'application/json' },
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const rows = (await res.json()) as { lat: string; lon: string; display_name: string }[];
-    return (rows || [])
-      .map((r) => ({ latitude: parseFloat(r.lat), longitude: parseFloat(r.lon), label: r.display_name }))
-      .filter((r) => Number.isFinite(r.latitude) && Number.isFinite(r.longitude));
-  } catch {
-    throw new Error('Não foi possível buscar o local. Verifique sua internet.');
+    const { data } = await api.get<GeocodeResult[]>('/public/map/geocode', { params: { q } });
+    return data || [];
+  } catch (error) {
+    throw new Error(getErrorMessage(error));
   }
 };
