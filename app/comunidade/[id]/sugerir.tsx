@@ -17,7 +17,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { FontAwesome5 } from '@expo/vector-icons';
 import * as Location from 'expo-location';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useColors } from '../../../src/context/ThemeContext';
+import { useTheme } from '../../../src/context/ThemeContext';
 import { useAuth } from '../../../src/context/AuthContext';
 import type { ThemeColors } from '../../../src/constants/Colors';
 import {
@@ -30,11 +30,14 @@ import {
 } from '../../../src/services/publicMapService';
 import { readCache } from '../../../src/utils/offlineCache';
 import { setPostLoginRoute } from '../../../src/utils/postLoginRoute';
+import PinPickerModal, { PickedPoint } from '../../../src/components/map/PinPickerModal';
 
 /**
  * Sugerir correção numa comunidade (pino, horários ou outras informações).
  * A sugestão NÃO altera nada: vai para a fila de conferência da equipe.
  * Sem login, o texto fica salvo como rascunho enquanto a pessoa entra.
+ * Localização: GPS (na igreja) ou marcando no mapa (longe dela) — o servidor
+ * sempre exige a coordenada.
  */
 
 const KIND_OPTIONS: { key: SuggestionKind; icon: string; title: string; sub: string }[] = [
@@ -69,21 +72,28 @@ interface Draft {
   scheduleType: CelebrationType;
   message: string;
   gps: GpsFix | null;
+  mapPick?: PickedPoint | null;
 }
 
 export default function SuggestCorrectionScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const communityId = String(id || '');
-  const colors = useColors();
+  const { colors, isDark } = useTheme();
   const { isAuthenticated } = useAuth();
   const router = useRouter();
   const styles = useMemo(() => createStyles(colors), [colors]);
 
-  const [community, setCommunity] = useState<Pick<PublicCommunity, 'id' | 'name'> | null>(null);
+  const [community, setCommunity] = useState<Pick<
+    PublicCommunity,
+    'id' | 'name' | 'latitude' | 'longitude' | 'approximate'
+  > | null>(null);
   const [kind, setKind] = useState<SuggestionKind | null>(null);
   const [scheduleType, setScheduleType] = useState<CelebrationType>('MASS');
   const [message, setMessage] = useState('');
   const [gps, setGps] = useState<GpsFix | null>(null);
+  /** Lugar marcado arrastando o mapa (quem não está na igreja) — exclusivo com o GPS */
+  const [mapPick, setMapPick] = useState<PickedPoint | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [locating, setLocating] = useState(false);
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
@@ -95,10 +105,17 @@ export default function SuggestCorrectionScreen() {
     let alive = true;
     (async () => {
       const cached = await readCache<PublicCommunity>(`community-public:${communityId}`);
-      if (alive && cached?.data) setCommunity({ id: cached.data.id, name: cached.data.name });
+      const pick = (c: PublicCommunity) => ({
+        id: c.id,
+        name: c.name,
+        latitude: c.latitude,
+        longitude: c.longitude,
+        approximate: c.approximate,
+      });
+      if (alive && cached?.data) setCommunity(pick(cached.data));
       try {
         const fresh = await getPublicCommunity(communityId);
-        if (alive) setCommunity({ id: fresh.id, name: fresh.name });
+        if (alive) setCommunity(pick(fresh));
       } catch {
         // o nome é só contexto; a tela funciona sem ele
       }
@@ -120,6 +137,9 @@ export default function SuggestCorrectionScreen() {
           if (d.scheduleType && SCHEDULE_TYPES.some((t) => t.key === d.scheduleType)) setScheduleType(d.scheduleType);
           if (typeof d.message === 'string') setMessage(d.message.slice(0, MAX_MESSAGE));
           if (d.gps && Number.isFinite(d.gps.latitude) && Number.isFinite(d.gps.longitude)) setGps(d.gps);
+          else if (d.mapPick && Number.isFinite(d.mapPick.latitude) && Number.isFinite(d.mapPick.longitude)) {
+            setMapPick(d.mapPick);
+          }
         }
       } catch {
         // rascunho corrompido: ignora
@@ -132,11 +152,11 @@ export default function SuggestCorrectionScreen() {
   useEffect(() => {
     if (!draftLoaded.current || !communityId || sent) return;
     const t = setTimeout(() => {
-      const d: Draft = { kind, scheduleType, message, gps };
+      const d: Draft = { kind, scheduleType, message, gps, mapPick };
       AsyncStorage.setItem(draftKey(communityId), JSON.stringify(d)).catch(() => undefined);
     }, 400);
     return () => clearTimeout(t);
-  }, [kind, scheduleType, message, gps, communityId, sent]);
+  }, [kind, scheduleType, message, gps, mapPick, communityId, sent]);
 
   const goBack = () => {
     if (router.canGoBack()) router.back();
@@ -160,6 +180,7 @@ export default function SuggestCorrectionScreen() {
       }
       // Precisão alta: a ideia é marcar a porta da igreja, não o bairro
       const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Highest });
+      setMapPick(null);
       setGps({
         latitude: pos.coords.latitude,
         longitude: pos.coords.longitude,
@@ -173,12 +194,29 @@ export default function SuggestCorrectionScreen() {
   };
 
   const trimmed = message.trim();
+  const position = gps ?? mapPick;
+  // Localização sempre com coordenada (o servidor exige); o texto é opcional
   const canSend =
-    !!kind && !sending && (trimmed.length >= 5 || (kind === 'LOCATION' && gps != null && trimmed.length === 0));
+    !!kind &&
+    !sending &&
+    (kind === 'LOCATION' ? position != null && (trimmed.length === 0 || trimmed.length >= 5) : trimmed.length >= 5);
+
+  // Onde o seletor abre: o que já foi marcado, o GPS, ou o pino atual da igreja
+  const pickerInitial = mapPick
+    ? { lat: mapPick.latitude, lng: mapPick.longitude, zoom: 18 }
+    : gps
+      ? { lat: gps.latitude, lng: gps.longitude, zoom: 18 }
+      : community?.latitude != null && community?.longitude != null
+        ? { lat: community.latitude, lng: community.longitude, zoom: community.approximate ? 15 : 18 }
+        : null;
+  const currentPin =
+    community?.latitude != null && community?.longitude != null
+      ? { lat: community.latitude, lng: community.longitude, approx: community.approximate }
+      : null;
 
   const goLogin = async () => {
     try {
-      await AsyncStorage.setItem(draftKey(communityId), JSON.stringify({ kind, scheduleType, message, gps }));
+      await AsyncStorage.setItem(draftKey(communityId), JSON.stringify({ kind, scheduleType, message, gps, mapPick }));
     } catch {
       // segue mesmo assim
     }
@@ -194,7 +232,10 @@ export default function SuggestCorrectionScreen() {
     }
     const payload: SuggestionPayload = {
       kind,
-      message: (trimmed || 'Posição marcada pelo GPS, na igreja.').slice(0, MAX_MESSAGE),
+      message: (trimmed || (gps ? 'Posição marcada pelo GPS, na igreja.' : 'Posição marcada no mapa.')).slice(
+        0,
+        MAX_MESSAGE,
+      ),
     };
     if (kind === 'SCHEDULE') payload.scheduleType = scheduleType;
     if (kind === 'LOCATION' && gps) {
@@ -202,6 +243,10 @@ export default function SuggestCorrectionScreen() {
       payload.longitude = gps.longitude;
       if (gps.accuracyM != null) payload.accuracyM = gps.accuracyM;
       payload.atChurch = true;
+    } else if (kind === 'LOCATION' && mapPick) {
+      payload.latitude = mapPick.latitude;
+      payload.longitude = mapPick.longitude;
+      payload.atChurch = false;
     }
     setSending(true);
     try {
@@ -328,12 +373,34 @@ export default function SuggestCorrectionScreen() {
                     <FontAwesome5 name="times" size={14} color={colors.textTertiary} />
                   </TouchableOpacity>
                 </View>
+              ) : mapPick ? (
+                <View style={styles.gpsInfo}>
+                  <FontAwesome5 name="map-marked-alt" size={12} color={colors.success} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.gpsText}>Lugar marcado no mapa</Text>
+                    <Text style={styles.gpsCoords}>
+                      {mapPick.latitude.toFixed(6)}, {mapPick.longitude.toFixed(6)}
+                    </Text>
+                  </View>
+                  <TouchableOpacity onPress={() => setMapPick(null)} hitSlop={8} accessibilityLabel="Descartar lugar marcado">
+                    <FontAwesome5 name="times" size={14} color={colors.textTertiary} />
+                  </TouchableOpacity>
+                </View>
               ) : (
                 <Text style={styles.hint}>
-                  Só use o GPS se você estiver na igreja (de preferência na porta). Se não estiver, descreva o
-                  lugar abaixo.
+                  Está na igreja? Use o GPS, de preferência na porta. Longe dela? Marque o lugar no mapa.
                 </Text>
               )}
+
+              <TouchableOpacity
+                style={styles.mapBtn}
+                onPress={() => setPickerOpen(true)}
+                activeOpacity={0.85}
+                accessibilityRole="button"
+              >
+                <FontAwesome5 name="map-marked-alt" size={15} color={colors.primary} />
+                <Text style={styles.mapBtnText}>{mapPick ? 'Ajustar no mapa' : 'Marcar no mapa'}</Text>
+              </TouchableOpacity>
             </View>
           )}
 
@@ -361,7 +428,7 @@ export default function SuggestCorrectionScreen() {
             <View style={styles.block}>
               <Text style={styles.label}>
                 {kind === 'SCHEDULE' ? 'O que está errado e qual é o certo?' : 'Detalhes'}
-                {kind === 'LOCATION' && gps ? ' (opcional)' : ''}
+                {kind === 'LOCATION' ? ' (opcional)' : ''}
               </Text>
               <TextInput
                 style={styles.input}
@@ -403,11 +470,29 @@ export default function SuggestCorrectionScreen() {
           </TouchableOpacity>
           {!!kind && !canSend && !sending && (
             <Text style={styles.hintCenter}>
-              {kind === 'LOCATION' ? 'Capture a posição ou escreva ao menos 5 letras.' : 'Escreva ao menos 5 letras.'}
+              {kind === 'LOCATION'
+                ? position
+                  ? 'Escreva ao menos 5 letras, ou deixe os detalhes em branco.'
+                  : 'Use o GPS na igreja ou marque o lugar no mapa.'
+                : 'Escreva ao menos 5 letras.'}
             </Text>
           )}
         </ScrollView>
       </KeyboardAvoidingView>
+
+      <PinPickerModal
+        visible={pickerOpen}
+        colors={colors}
+        dark={isDark}
+        initial={pickerInitial}
+        current={currentPin}
+        onClose={() => setPickerOpen(false)}
+        onConfirm={(p) => {
+          setGps(null);
+          setMapPick(p);
+          setPickerOpen(false);
+        }}
+      />
     </SafeAreaView>
   );
 }
@@ -485,6 +570,19 @@ function createStyles(colors: ThemeColors) {
       borderWidth: 1,
       borderColor: colors.border,
     },
+    mapBtn: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 10,
+      minHeight: 48,
+      marginTop: 10,
+      borderRadius: 12,
+      borderWidth: 1.5,
+      borderColor: colors.primary,
+      backgroundColor: colors.card,
+    },
+    mapBtnText: { color: colors.primary, fontWeight: '800', fontSize: 14.5 },
     gpsText: { fontSize: 13.5, fontWeight: '700', color: colors.text },
     gpsCoords: { fontSize: 12, color: colors.textTertiary, marginTop: 2 },
     gpsWarn: { fontSize: 12.5, color: colors.warning, marginTop: 6, fontWeight: '600' },

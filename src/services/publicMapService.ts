@@ -20,6 +20,16 @@ export interface MapConfig {
   attribution: string;
   maxZoom: number;
   subdomains: string | string[];
+  /** Imagem de satélite (botão de camadas); ausente/nulo = sem modo satélite */
+  satellite?: SatelliteConfig | null;
+}
+
+export interface SatelliteConfig {
+  tileUrl: string;
+  /** Ruas e nomes por cima da imagem (nulo = só a imagem) */
+  labelsUrl: string | null;
+  attribution: string;
+  maxZoom: number;
 }
 
 export interface PublicMass {
@@ -165,6 +175,12 @@ export const FALLBACK_MAP_CONFIG: MapConfig = {
   attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
   maxZoom: 19,
   subdomains: 'abc',
+  satellite: {
+    tileUrl: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+    labelsUrl: 'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}',
+    attribution: 'Imagens &copy; Esri, Maxar, Earthstar Geographics',
+    maxZoom: 19,
+  },
 };
 
 export const getMapConfig = async (): Promise<MapConfig> => {

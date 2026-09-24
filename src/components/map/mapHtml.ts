@@ -47,6 +47,7 @@ const BRIDGE_JS = `
   var HEX = /^#[0-9a-fA-F]{3,8}$/;
   var theme = { dark: false, primary: '#075AA9', gold: '#D8A83E', gray: '#8B97A4', grayStroke: '#5B6570' };
   var tiles = null, tileLayer = null, tileErrors = 0, tileLoads = 0, tileErrorSent = false;
+  var baseMode = 'map', labelLayer = null;
 
   var map = L.map('map', { zoomControl: false, attributionControl: true, worldCopyJump: true, minZoom: 3, maxZoom: 19 });
   map.attributionControl.setPrefix('Leaflet');
@@ -96,7 +97,7 @@ const BRIDGE_JS = `
     m.setIcon(iconFor(d));
     m.setZIndexOffset(id === selected ? 1000 : (favs[id] ? 500 : 0));
   }
-  function onMarkerClick(){ post({ type: 'select', id: this._pid }); }
+  function onMarkerClick(){ if (this._pid) post({ type: 'select', id: this._pid }); }
 
   // ---------- Bolhas do modo agrupado ----------
   function fmtCount(n){
@@ -181,26 +182,42 @@ const BRIDGE_JS = `
   map.on('click', function(){ post({ type: 'mapclick' }); });
 
   // ---------- Mapa-base ----------
+  // Satélite só se o servidor mandou a camada; o tema escuro não vale para a imagem
+  function satelliteCfg(){
+    var s = tiles && tiles.satellite;
+    return (baseMode === 'satellite' && s && typeof s.tileUrl === 'string') ? s : null;
+  }
   function applyTiles(){
     if (!tiles) return;
-    var url = (theme.dark && tiles.tileUrlDark) ? tiles.tileUrlDark : tiles.tileUrl;
-    if (tileLayer && tileLayer._url === url) return;
-    if (tileLayer) map.removeLayer(tileLayer);
-    tileErrors = 0; tileLoads = 0; tileErrorSent = false;
-    tileLayer = L.tileLayer(url, {
-      maxZoom: tiles.maxZoom || 19, subdomains: tiles.subdomains || 'abc', attribution: tiles.attribution || ''
-    });
-    tileLayer.on('tileload', function(){ tileLoads++; });
-    tileLayer.on('tileerror', function(){
-      tileErrors++;
-      if (!tileErrorSent && tileLoads === 0 && tileErrors >= 6) { tileErrorSent = true; post({ type: 'tileerror' }); }
-    });
-    tileLayer.addTo(map);
-    map.setMaxZoom(tiles.maxZoom || 19);
+    var sat = satelliteCfg();
+    var url = sat ? sat.tileUrl : ((theme.dark && tiles.tileUrlDark) ? tiles.tileUrlDark : tiles.tileUrl);
+    var maxZoom = (sat ? sat.maxZoom : tiles.maxZoom) || 19;
+    if (!(tileLayer && tileLayer._url === url)) {
+      if (tileLayer) map.removeLayer(tileLayer);
+      tileErrors = 0; tileLoads = 0; tileErrorSent = false;
+      var base = sat ? 'satellite' : 'map';
+      tileLayer = L.tileLayer(url, sat
+        ? { maxZoom: maxZoom, attribution: sat.attribution || '', zIndex: 1 }
+        : { maxZoom: maxZoom, subdomains: tiles.subdomains || 'abc', attribution: tiles.attribution || '', zIndex: 1 });
+      tileLayer.on('tileload', function(){ tileLoads++; });
+      tileLayer.on('tileerror', function(){
+        tileErrors++;
+        if (!tileErrorSent && tileLoads === 0 && tileErrors >= 6) { tileErrorSent = true; post({ type: 'tileerror', base: base }); }
+      });
+      tileLayer.addTo(map);
+    }
+    // Ruas e nomes por cima da imagem de satélite
+    var labelsUrl = (sat && typeof sat.labelsUrl === 'string') ? sat.labelsUrl : null;
+    if (labelLayer && labelLayer._url !== labelsUrl) { map.removeLayer(labelLayer); labelLayer = null; }
+    if (labelsUrl && !labelLayer) {
+      labelLayer = L.tileLayer(labelsUrl, { maxZoom: maxZoom, zIndex: 2 }).addTo(map);
+    }
+    map.setMaxZoom(maxZoom);
   }
 
   window.parishMap = {
     setTiles: function(cfg){ if (cfg && typeof cfg.tileUrl === 'string') { tiles = cfg; applyTiles(); } },
+    setBaseMode: function(mode){ baseMode = mode === 'satellite' ? 'satellite' : 'map'; applyTiles(); },
     setTheme: function(t){
       if (!t) return;
       theme.dark = !!t.dark;

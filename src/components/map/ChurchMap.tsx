@@ -58,6 +58,8 @@ export interface ChurchMapHandle {
   setInsets(top: number, bottom: number): void;
 }
 
+export type MapBaseMode = 'map' | 'satellite';
+
 interface Props {
   config: MapConfig | null;
   dark: boolean;
@@ -68,7 +70,10 @@ interface Props {
   /** Toque no pino de uma igreja sozinha no modo agrupado (o mapa já aproxima). */
   onClusterPin?: (id: string) => void;
   onMapPress?: () => void;
-  onTileError?: () => void;
+  /** Tiles falhando em série; `base` diz se foi o mapa ou a imagem de satélite. */
+  onTileError?: (base: MapBaseMode) => void;
+  /** Mapa ou imagem de satélite (só se `config.satellite` existir). */
+  baseMode?: MapBaseMode;
 }
 
 /**
@@ -101,7 +106,7 @@ export function sanitizeAttribution(html: string): string {
 }
 
 const ChurchMap = forwardRef<ChurchMapHandle, Props>(function ChurchMap(
-  { config, dark, colors, onReady, onMoveEnd, onSelect, onClusterPin, onMapPress, onTileError },
+  { config, dark, colors, onReady, onMoveEnd, onSelect, onClusterPin, onMapPress, onTileError, baseMode = 'map' },
   ref,
 ) {
   const webRef = useRef<WebView>(null);
@@ -149,6 +154,14 @@ const ChurchMap = forwardRef<ChurchMapHandle, Props>(function ChurchMap(
             attribution: sanitizeAttribution(config.attribution),
             maxZoom: config.maxZoom,
             subdomains: config.subdomains,
+            satellite: config.satellite?.tileUrl
+              ? {
+                  tileUrl: config.satellite.tileUrl,
+                  labelsUrl: config.satellite.labelsUrl || null,
+                  attribution: sanitizeAttribution(config.satellite.attribution || ''),
+                  maxZoom: config.satellite.maxZoom,
+                }
+              : null,
           }
         : null,
     [config],
@@ -207,6 +220,12 @@ const ChurchMap = forwardRef<ChurchMapHandle, Props>(function ChurchMap(
     if (t) send('setTiles', t);
   }, [send, tilesPayload]);
 
+  const baseModeRef = useRef<MapBaseMode>(baseMode);
+  baseModeRef.current = baseMode;
+  useEffect(() => {
+    send('setBaseMode', baseMode);
+  }, [send, baseMode]);
+
   const onMessage = useCallback(
     (event: WebViewMessageEvent) => {
       let msg: any;
@@ -224,6 +243,7 @@ const ChurchMap = forwardRef<ChurchMapHandle, Props>(function ChurchMap(
         const s = state.current;
         const replay = [
           ['setTheme', themePayload()],
+          ['setBaseMode', baseModeRef.current],
           ...(tilesPayload() ? [['setTiles', tilesPayload()]] : []),
           ['setInsets', ...s.insets],
           ...(s.view ? [['setView', s.view.lat, s.view.lng, s.view.zoom, null]] : []),
@@ -274,7 +294,7 @@ const ChurchMap = forwardRef<ChurchMapHandle, Props>(function ChurchMap(
         return;
       }
       if (msg.type === 'tileerror') {
-        onTileError?.();
+        onTileError?.(msg.base === 'satellite' ? 'satellite' : 'map');
         return;
       }
       if (msg.type === 'error' && __DEV__) {

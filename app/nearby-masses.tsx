@@ -37,7 +37,13 @@ import {
   searchPlace,
 } from '../src/services/publicMapService';
 import { clearCache, readCache, writeCache } from '../src/utils/offlineCache';
-import ChurchMap, { ChurchMapHandle, MapClusterPoint, MapMoveEvent, MapPoint } from '../src/components/map/ChurchMap';
+import ChurchMap, {
+  ChurchMapHandle,
+  MapBaseMode,
+  MapClusterPoint,
+  MapMoveEvent,
+  MapPoint,
+} from '../src/components/map/ChurchMap';
 import CommunityCard from '../src/components/map/CommunityCard';
 import ChurchListPanel, { ListItem } from '../src/components/map/ChurchListPanel';
 import MapFilters, { DayFilter } from '../src/components/map/MapFilters';
@@ -88,6 +94,8 @@ const CACHE_KEY = 'church-map:last-area';
 const OLD_CACHE_KEY = 'church-map:last';
 const CONFIG_CACHE_KEY = 'church-map:config';
 const FAV_KEY = '@parish:nearby:favorites';
+/** Mapa ou satélite: a última escolha vale na próxima abertura */
+const BASE_MODE_KEY = '@parish:map:baseMode';
 
 /** `inner` cabe em `outer` (com uma folga pequena)? */
 const contains = (outer: BBox, inner: BBox) => {
@@ -143,6 +151,7 @@ export default function NearbyMassesScreen() {
   const [types, setTypes] = useState<string[]>(['MASS']);
   const [day, setDay] = useState<DayFilter>('all');
   const [approx, setApprox] = useState(false);
+  const [baseMode, setBaseMode] = useState<MapBaseMode>('map');
   const [favorites, setFavorites] = useState<string[]>([]);
   const [selected, setSelected] = useState<MapCommunity | null>(null);
   const [userPos, setUserPos] = useState<{ lat: number; lng: number } | null>(null);
@@ -206,10 +215,33 @@ export default function NearbyMassesScreen() {
     };
   }, []);
 
-  // Tiles do provedor falhando em série: cai para o OSM padrão
-  const onTileError = useCallback(() => {
+  // Tiles do provedor falhando em série: cai para o OSM padrão; satélite
+  // falhando volta para o mapa (a imagem é um extra)
+  const onTileError = useCallback((base: MapBaseMode) => {
+    if (base === 'satellite') {
+      setBaseMode('map');
+      Alert.alert('Satélite indisponível', 'Não foi possível carregar as imagens de satélite agora. Voltamos para o mapa.');
+      return;
+    }
     setConfig((prev) => (prev && prev.tileUrl !== FALLBACK_MAP_CONFIG.tileUrl ? FALLBACK_MAP_CONFIG : prev));
   }, []);
+
+  useEffect(() => {
+    AsyncStorage.getItem(BASE_MODE_KEY)
+      .then((v) => {
+        if (v === 'satellite') setBaseMode('satellite');
+      })
+      .catch(() => undefined);
+  }, []);
+
+  const toggleBaseMode = useCallback(() => {
+    setBaseMode((prev) => {
+      const next: MapBaseMode = prev === 'satellite' ? 'map' : 'satellite';
+      AsyncStorage.setItem(BASE_MODE_KEY, next).catch(() => undefined);
+      return next;
+    });
+  }, []);
+  const hasSatellite = !!config?.satellite?.tileUrl;
 
   // ---------- Favoritos (só no aparelho) ----------
   useEffect(() => {
@@ -615,6 +647,7 @@ export default function NearbyMassesScreen() {
         onClusterPin={onClusterPin}
         onMapPress={onMapPress}
         onTileError={onTileError}
+        baseMode={hasSatellite ? baseMode : 'map'}
       />
 
       {/* TOPO: voltar + busca + filtros */}
@@ -728,6 +761,24 @@ export default function NearbyMassesScreen() {
             {!!searchError && <Text style={styles.ddHint}>{searchError}</Text>}
           </ScrollView>
         </View>
+      )}
+
+      {/* Mapa ou satélite */}
+      {!panelOpen && hasSatellite && (
+        <TouchableOpacity
+          style={[styles.locBtn, { bottom: bottomCover + 14 + 56 }]}
+          onPress={toggleBaseMode}
+          activeOpacity={0.85}
+          accessibilityRole="button"
+          accessibilityLabel={baseMode === 'satellite' ? 'Mostrar o mapa' : 'Mostrar imagem de satélite'}
+        >
+          <FontAwesome5
+            name={baseMode === 'satellite' ? 'map' : 'globe-americas'}
+            size={18}
+            color={colors.primary}
+          />
+          <Text style={styles.layerLabel}>{baseMode === 'satellite' ? 'Mapa' : 'Satélite'}</Text>
+        </TouchableOpacity>
       )}
 
       {/* Minha localização */}
@@ -854,5 +905,6 @@ function createStyles(colors: ThemeColors) {
       justifyContent: 'center',
       ...shadow,
     },
+    layerLabel: { fontSize: 8.5, fontWeight: '800', color: colors.primary, marginTop: 1 },
   });
 }
