@@ -11,7 +11,7 @@ import {
   Platform,
   ScrollView,
 } from 'react-native';
-import { Link, useRouter } from 'expo-router';
+import { Link, useLocalSearchParams, useRouter } from 'expo-router';
 import { authService } from '../../src/services/authService';
 import { useColors } from '../../src/context/ThemeContext';
 
@@ -23,7 +23,9 @@ export default function ForgotPasswordScreen() {
   const colors = useColors();
   const router = useRouter();
   const [step, setStep] = useState<'request' | 'reset'>('request');
-  const [email, setEmail] = useState('');
+  // Vem preenchido quando a pessoa já digitou o e-mail na tela de login
+  const params = useLocalSearchParams<{ email?: string }>();
+  const [email, setEmail] = useState(typeof params.email === 'string' ? params.email : '');
   const [token, setToken] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');

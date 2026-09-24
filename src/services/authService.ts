@@ -1,5 +1,10 @@
 import api, { saveTokens, saveUser, clearTokens, getErrorMessage } from '../config/api';
 
+/** Erro com o status HTTP junto (0 = sem resposta do servidor), para a tela escolher a mensagem */
+export type AuthFailure = Error & { status: number };
+const authFailure = (error: any): AuthFailure =>
+  Object.assign(new Error(getErrorMessage(error)), { status: Number(error?.response?.status) || 0 });
+
 // ============================================
 // TIPOS
 // ============================================
@@ -188,7 +193,7 @@ export const authService = {
 
       return response.data;
     } catch (error) {
-      throw new Error(getErrorMessage(error));
+      throw authFailure(error);
     }
   },
 
@@ -213,7 +218,7 @@ export const authService = {
 
       return response.data;
     } catch (error) {
-      throw new Error(getErrorMessage(error));
+      throw authFailure(error);
     }
   },
 
