@@ -258,8 +258,16 @@ const PUBLIC_ROUTES = [
   '/auth/otp/verify',
 ];
 
+/**
+ * Prefixo das rotas abertas a quem não está logado (mapa das igrejas, página
+ * pública da comunidade). Elas vão SEM token — um token vencido não pode
+ * atrapalhar uma leitura pública — e um 401 nelas nunca vira refresh/logout.
+ */
+const PUBLIC_PREFIX = '/public/';
+
 const isPublicRoute = (url?: string): boolean =>
-  !!url && PUBLIC_ROUTES.some((route) => url.includes(route));
+  !!url &&
+  (url.startsWith(PUBLIC_PREFIX) || PUBLIC_ROUTES.some((route) => url.includes(route)));
 
 /**
  * Interceptor de request: adiciona o token JWT e os cabeçalhos de dispositivo

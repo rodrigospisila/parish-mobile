@@ -8,9 +8,17 @@ import { NotificationProvider } from '../src/context/NotificationContext';
 import { CommunityProvider } from '../src/context/CommunityContext';
 import { flushWriteQueue } from '../src/utils/offlineQueue';
 import { applyGlobalFont } from '../src/utils/globalFont';
+import { consumePostLoginRoute } from '../src/utils/postLoginRoute';
 
 // Instala o mapeamento peso→Nunito Sans antes de qualquer render de texto.
 applyGlobalFont();
+
+/**
+ * Rotas abertas a quem não está logado (primeiro segmento da URL): o mapa das
+ * igrejas e a página pública da comunidade. Nelas o guard não redireciona —
+ * nem para o login, nem para o wizard de comunidade.
+ */
+const PUBLIC_SEGMENTS = new Set(['nearby-masses', 'comunidade']);
 
 // Componente interno que gerencia a navegação baseada no estado de autenticação
 function RootLayoutNav() {
@@ -38,21 +46,29 @@ function RootLayoutNav() {
 
     const inAuthGroup = segments[0] === '(auth)';
     const inSelectCommunity = segments[0] === 'select-community';
+    const inPublicRoute = PUBLIC_SEGMENTS.has(segments[0] as string);
 
     if (!isAuthenticated) {
-      // Usuário não autenticado - deve estar em (auth)
-      if (!inAuthGroup) {
+      // Usuário não autenticado - deve estar em (auth) ou numa rota pública
+      if (!inAuthGroup && !inPublicRoute) {
         router.replace('/(auth)/login');
       }
     } else {
       // Usuário autenticado
       if (inAuthGroup) {
-        // Se está em auth, redireciona baseado no hasCommunity
-        if (hasCommunity) {
+        // Entrou a partir de uma tela pública (ex.: "Sugerir correção"):
+        // volta para ela (tirando o login da pilha) em vez de ir para a Home.
+        // dismissTo reaproveita a tela que ficou embaixo, com o texto digitado.
+        const returnTo = consumePostLoginRoute();
+        if (returnTo && hasCommunity) {
+          router.dismissTo(returnTo as never);
+        } else if (hasCommunity) {
           router.replace('/(tabs)');
         } else {
           router.replace('/select-community');
         }
+      } else if (inPublicRoute) {
+        // Rota pública: nunca força o wizard de comunidade
       } else if (!hasCommunity && !inSelectCommunity) {
         // Se não tem communityId e não está no wizard, vai para o wizard
         router.replace('/select-community');

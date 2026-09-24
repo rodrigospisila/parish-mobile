@@ -1,0 +1,205 @@
+import React, { useMemo } from 'react';
+import { LayoutChangeEvent, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { FontAwesome5 } from '@expo/vector-icons';
+import type { ThemeColors } from '../../constants/Colors';
+import type { MapCommunity } from '../../services/publicMapService';
+import { cityLine, formatDistance, formatMassTime, isSoon, typeLabel } from './format';
+
+interface Props {
+  community: MapCommunity;
+  distanceKm: number | null;
+  favorite: boolean;
+  colors: ThemeColors;
+  bottomInset: number;
+  onClose: () => void;
+  onToggleFavorite: () => void;
+  onDirections: () => void;
+  onOpen: () => void;
+  onLayout?: (e: LayoutChangeEvent) => void;
+}
+
+/** Cartão nativo que sobe ao tocar num pino. */
+export default function CommunityCard({
+  community: c,
+  distanceKm,
+  favorite,
+  colors,
+  bottomInset,
+  onClose,
+  onToggleFavorite,
+  onDirections,
+  onOpen,
+  onLayout,
+}: Props) {
+  const styles = useMemo(() => createStyles(colors), [colors]);
+  const now = new Date();
+  const masses = c.nextMasses.slice(0, 3);
+  const dist = formatDistance(distanceKm);
+  const sub = [c.parish?.name, cityLine(c)].filter(Boolean).join(' · ');
+
+  return (
+    <View style={[styles.card, { paddingBottom: 14 + bottomInset }]} onLayout={onLayout}>
+      <View style={styles.headerRow}>
+        <View style={styles.pinIcon}>
+          <FontAwesome5 name="church" size={15} color="#fff" />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.name} numberOfLines={2}>
+            {c.name}
+          </Text>
+          {!!sub && (
+            <Text style={styles.sub} numberOfLines={1}>
+              {sub}
+            </Text>
+          )}
+        </View>
+        <TouchableOpacity
+          onPress={onToggleFavorite}
+          hitSlop={10}
+          style={styles.iconBtn}
+          accessibilityLabel={favorite ? 'Remover dos favoritos' : 'Adicionar aos favoritos'}
+        >
+          <FontAwesome5 name="star" solid={favorite} size={17} color={favorite ? colors.gold : colors.textTertiary} />
+        </TouchableOpacity>
+        <TouchableOpacity onPress={onClose} hitSlop={10} style={styles.iconBtn} accessibilityLabel="Fechar">
+          <FontAwesome5 name="times" size={17} color={colors.textSecondary} />
+        </TouchableOpacity>
+      </View>
+
+      <View style={styles.badges}>
+        {!!dist && (
+          <View style={[styles.badge, { backgroundColor: colors.primary }]}>
+            <FontAwesome5 name="location-arrow" size={9} color="#fff" />
+            <Text style={[styles.badgeText, { color: '#fff' }]}>{dist}</Text>
+          </View>
+        )}
+        {c.verified && !c.approximate && (
+          <View style={[styles.badge, { backgroundColor: colors.highlightLight }]}>
+            <FontAwesome5 name="check-circle" size={10} color={colors.success} solid />
+            <Text style={[styles.badgeText, { color: colors.success }]}>pino conferido</Text>
+          </View>
+        )}
+      </View>
+
+      {c.approximate && (
+        <View style={styles.approxBox}>
+          <FontAwesome5 name="exclamation-triangle" size={11} color={colors.warning} />
+          <Text style={styles.approxText}>Localização aproximada — pode estar a quilômetros.</Text>
+        </View>
+      )}
+
+      <View style={styles.masses}>
+        {masses.length > 0 ? (
+          masses.map((m) => {
+            const soon = isSoon(m, now);
+            return (
+              <View key={m.id} style={styles.massRow}>
+                <View style={[styles.dot, { backgroundColor: soon ? colors.success : colors.border }]} />
+                <Text style={[styles.massText, soon && { color: colors.success, fontWeight: '800' }]}>
+                  {formatMassTime(m.start, now)}
+                </Text>
+                {m.type !== 'MASS' && <Text style={styles.tag}>{typeLabel(m.type)}</Text>}
+                {m.source === 'event' && <Text style={styles.tag}>especial</Text>}
+              </View>
+            );
+          })
+        ) : (
+          <Text style={styles.noMass}>Sem horários cadastrados para os próximos dias.</Text>
+        )}
+      </View>
+
+      <View style={styles.actions}>
+        <TouchableOpacity style={[styles.btn, styles.btnPrimary]} onPress={onDirections} activeOpacity={0.85}>
+          <FontAwesome5 name="directions" size={14} color="#fff" />
+          <Text style={[styles.btnText, { color: '#fff' }]}>Como chegar</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={[styles.btn, styles.btnGhost]} onPress={onOpen} activeOpacity={0.85}>
+          <FontAwesome5 name="info-circle" size={14} color={colors.primary} />
+          <Text style={[styles.btnText, { color: colors.primary }]}>Ver comunidade</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+}
+
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
+    card: {
+      position: 'absolute',
+      left: 0,
+      right: 0,
+      bottom: 0,
+      backgroundColor: colors.surface,
+      borderTopLeftRadius: 20,
+      borderTopRightRadius: 20,
+      paddingHorizontal: 16,
+      paddingTop: 16,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: -3 },
+      shadowOpacity: 0.15,
+      shadowRadius: 8,
+      elevation: 12,
+    },
+    headerRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
+    pinIcon: {
+      width: 34,
+      height: 34,
+      borderRadius: 17,
+      backgroundColor: colors.gold,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    name: { fontSize: 17, fontWeight: '800', color: colors.text, lineHeight: 22 },
+    sub: { fontSize: 13, color: colors.textSecondary, marginTop: 2 },
+    iconBtn: { padding: 4 },
+    badges: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 10 },
+    badge: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 5,
+      paddingHorizontal: 9,
+      paddingVertical: 4,
+      borderRadius: 20,
+    },
+    badgeText: { fontSize: 12, fontWeight: '800' },
+    approxBox: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      marginTop: 10,
+      paddingHorizontal: 10,
+      paddingVertical: 8,
+      borderRadius: 10,
+      backgroundColor: colors.goldSoft,
+    },
+    approxText: { flex: 1, fontSize: 12.5, color: colors.text, fontWeight: '600' },
+    masses: { marginTop: 12, gap: 7 },
+    massRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+    dot: { width: 8, height: 8, borderRadius: 4 },
+    massText: { fontSize: 14, color: colors.text, fontWeight: '600' },
+    tag: {
+      fontSize: 11,
+      fontWeight: '700',
+      color: colors.primary,
+      backgroundColor: colors.highlightLight,
+      paddingHorizontal: 7,
+      paddingVertical: 2,
+      borderRadius: 6,
+      overflow: 'hidden',
+    },
+    noMass: { fontSize: 13, color: colors.textTertiary, fontStyle: 'italic' },
+    actions: { flexDirection: 'row', gap: 10, marginTop: 14 },
+    btn: {
+      flex: 1,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 8,
+      paddingVertical: 12,
+      borderRadius: 12,
+    },
+    btnPrimary: { backgroundColor: colors.primary },
+    btnGhost: { backgroundColor: colors.highlightLight },
+    btnText: { fontSize: 14.5, fontWeight: '800' },
+  });
+}

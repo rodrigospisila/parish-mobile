@@ -13,7 +13,8 @@ import {
 } from 'react-native';
 import { useAuth } from '../../src/context/AuthContext';
 import { useColors } from '../../src/context/ThemeContext';
-import { Link } from 'expo-router';
+import { Link, useRouter } from 'expo-router';
+import { FontAwesome5 } from '@expo/vector-icons';
 
 type LoginStep = 'credentials' | 'twoFactor';
 
@@ -29,6 +30,7 @@ const showNewDeviceAlert = () => {
 export default function LoginScreen() {
   const { signIn, completeTwoFactorSignIn } = useAuth();
   const colors = useColors();
+  const router = useRouter();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -260,6 +262,25 @@ export default function LoginScreen() {
         </View>
 
         {step === 'twoFactor' ? renderTwoFactorStep() : renderCredentialsStep()}
+
+        {/* Mapa das igrejas: aberto a quem ainda não tem conta */}
+        {step === 'credentials' && (
+          <TouchableOpacity
+            style={styles.nearbyButton}
+            activeOpacity={0.85}
+            onPress={() => router.push('/nearby-masses' as never)}
+            accessibilityRole="button"
+          >
+            <View style={styles.nearbyIcon}>
+              <FontAwesome5 name="church" size={16} color={colors.primary} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.nearbyTitle}>Encontrar missas perto</Text>
+              <Text style={styles.nearbySub}>Veja igrejas e horários no mapa, sem precisar entrar</Text>
+            </View>
+            <FontAwesome5 name="chevron-right" size={13} color={colors.textTertiary} />
+          </TouchableOpacity>
+        )}
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -377,6 +398,35 @@ const createStyles = (colors: ReturnType<typeof useColors>) =>
       color: colors.primary,
       fontSize: 14,
       fontWeight: '600',
+    },
+    nearbyButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+      marginTop: 16,
+      padding: 14,
+      borderRadius: 12,
+      backgroundColor: colors.card,
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    nearbyIcon: {
+      width: 36,
+      height: 36,
+      borderRadius: 18,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: colors.highlightLight,
+    },
+    nearbyTitle: {
+      fontSize: 15,
+      fontWeight: '700',
+      color: colors.text,
+    },
+    nearbySub: {
+      fontSize: 12.5,
+      color: colors.textSecondary,
+      marginTop: 2,
     },
     testCredentials: {
       marginTop: 24,
