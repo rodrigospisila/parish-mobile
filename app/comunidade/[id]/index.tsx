@@ -21,7 +21,7 @@ import type { ThemeColors } from '../../../src/constants/Colors';
 import { CommunitySchedule, PublicCommunity, getPublicCommunity } from '../../../src/services/publicMapService';
 import { cachedFetch } from '../../../src/utils/offlineCache';
 import { descreverRecorrencia, ehMensal } from '../../../src/utils/recorrencia';
-import { formatMassTime, isCancelled, isSoon, typeLabel } from '../../../src/components/map/format';
+import { formatMassTime, isCancelled, isOnSearchedDay, typeLabel } from '../../../src/components/map/format';
 import { chaveDaquiA, diaMes, juntarLista, motivoCurto, suspensoesDe } from '../../../src/utils/suspensoes';
 import { openDirectionsTo } from '../../../src/components/map/directions';
 
@@ -282,7 +282,7 @@ export default function CommunityPublicScreen() {
               <Text style={styles.sectionTitle}>Próximas celebrações</Text>
               {data.nextMasses.slice(0, 6).map((m) => {
                 const off = isCancelled(m);
-                const soon = !off && isSoon(m);
+                const soon = !off && isOnSearchedDay(m);
                 const motivo = motivoCurto(m.cancelReason);
                 return (
                   <View key={m.id} style={styles.nextItem}>

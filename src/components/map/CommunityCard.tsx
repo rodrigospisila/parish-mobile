@@ -3,7 +3,7 @@ import { LayoutChangeEvent, StyleSheet, Text, TouchableOpacity, View } from 'rea
 import { FontAwesome5 } from '@expo/vector-icons';
 import type { ThemeColors } from '../../constants/Colors';
 import type { MapCommunity } from '../../services/publicMapService';
-import { cityLine, formatDistance, formatMassTime, isCancelled, isSoon, typeLabel } from './format';
+import { cityLine, formatDistance, formatMassTime, isCancelled, isOnSearchedDay, SearchedDay, typeLabel } from './format';
 
 interface Props {
   community: MapCommunity;
@@ -16,6 +16,8 @@ interface Props {
   onDirections: () => void;
   onOpen: () => void;
   onLayout?: (e: LayoutChangeEvent) => void;
+  /** Dia pesquisado no mapa: os horários desse dia ficam em verde */
+  day?: SearchedDay;
 }
 
 /** Cartão nativo que sobe ao tocar num pino. */
@@ -30,6 +32,7 @@ export default function CommunityCard({
   onDirections,
   onOpen,
   onLayout,
+  day = 'all',
 }: Props) {
   const styles = useMemo(() => createStyles(colors), [colors]);
   const now = new Date();
@@ -102,7 +105,7 @@ export default function CommunityCard({
         {masses.length > 0 ? (
           masses.map((m) => {
             const off = isCancelled(m);
-            const soon = !off && isSoon(m, now);
+            const soon = !off && isOnSearchedDay(m, day, now);
             const reason = (m.cancelReason || '').trim();
             return (
               <View key={m.id}>

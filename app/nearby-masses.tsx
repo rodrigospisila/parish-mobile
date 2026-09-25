@@ -47,7 +47,7 @@ import ChurchMap, {
 import CommunityCard from '../src/components/map/CommunityCard';
 import ChurchListPanel, { ListItem } from '../src/components/map/ChurchListPanel';
 import MapFilters, { DayFilter } from '../src/components/map/MapFilters';
-import { cityLine, distanceFor, hasSoonMass, isCancelled } from '../src/components/map/format';
+import { cityLine, distanceFor, hasMassOnSearchedDay, isCancelled } from '../src/components/map/format';
 import { openDirectionsTo } from '../src/components/map/directions';
 
 /**
@@ -442,10 +442,11 @@ export default function NearbyMassesScreen() {
       lat: c.latitude,
       lng: c.longitude,
       approx: !!c.approximate,
-      soon: hasSoonMass(c, now),
+      // Círculo verde: tem celebração no dia pesquisado (hoje, ou o domingo)
+      soon: hasMassOnSearchedDay(c, day, now),
     }));
     mapRef.current?.setData(points);
-  }, [visibleCommunities]);
+  }, [visibleCommunities, day]);
 
   // Bolhas do modo agrupado: só números (e o id da igreja sozinha)
   useEffect(() => {
@@ -804,6 +805,7 @@ export default function NearbyMassesScreen() {
           community={selected}
           distanceKm={selectedDistance}
           favorite={favorites.includes(selected.id)}
+          day={day}
           colors={colors}
           bottomInset={bottomSafe}
           onClose={() => setSelected(null)}
@@ -816,6 +818,7 @@ export default function NearbyMassesScreen() {
         <ChurchListPanel
           colors={colors}
           items={listItems}
+          day={day}
           open={panelOpen}
           openHeight={panelOpenHeight}
           collapsedHeight={PANEL_COLLAPSED}

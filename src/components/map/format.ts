@@ -11,8 +11,11 @@ export const TYPE_LABELS: Record<string, string> = {
 
 export const typeLabel = (type: string) => TYPE_LABELS[type] || type;
 
-/** Janela do "tem missa já já" (ponto verde no pino). */
-export const SOON_WINDOW_MS = 3 * 60 * 60 * 1000;
+/** Dia pesquisado no mapa (mesmos valores do filtro de dia). */
+export type SearchedDay = 'all' | 'today' | 'sunday';
+
+/** Tolerância para uma celebração que acabou de começar ainda contar como "de hoje". */
+const STARTED_TOLERANCE_MS = 30 * 60 * 1000;
 
 /** Converte o horário flutuante (sem fuso) em Date local; null se inválido. */
 export function parseLocal(start: string): Date | null {
@@ -49,18 +52,26 @@ export const isCancelled = (m: { cancelled?: boolean | null }) => m.cancelled ==
 /** Próxima ocorrência que vai mesmo acontecer (pula as suspensas). */
 export const firstActiveMass = (list: PublicMass[]): PublicMass | undefined => list.find((m) => !isCancelled(m));
 
-/** Celebração começa nas próximas ~3 h (ou começou há até 15 min). Suspensa nunca conta. */
-export function isSoon(m: PublicMass, now: Date = new Date()): boolean {
+/**
+ * Celebração do dia pesquisado (círculo verde): no filtro "Domingo", o domingo;
+ * em "Hoje" e "Próximos dias", hoje — desde que ainda não tenha passado
+ * (começou há até 30 min ainda conta). Suspensa nunca conta.
+ */
+export function isOnSearchedDay(m: PublicMass, day: SearchedDay = 'all', now: Date = new Date()): boolean {
   if (isCancelled(m)) return false;
   const d = parseLocal(m.start);
   if (!d) return false;
-  const diff = d.getTime() - now.getTime();
-  return diff >= -15 * 60 * 1000 && diff <= SOON_WINDOW_MS;
+  if (day === 'sunday') return d.getDay() === 0;
+  if (m.start.slice(0, 10) !== format(now, 'yyyy-MM-dd')) return false;
+  return d.getTime() >= now.getTime() - STARTED_TOLERANCE_MS;
 }
 
-/** Ponto verde no pino: alguma celebração em breve que NÃO foi suspensa. */
-export const hasSoonMass = (c: { nextMasses: PublicMass[] }, now: Date = new Date()) =>
-  c.nextMasses.some((m) => !isCancelled(m) && isSoon(m, now));
+/** Círculo verde no pino: alguma celebração do dia pesquisado que NÃO foi suspensa. */
+export const hasMassOnSearchedDay = (
+  c: { nextMasses: PublicMass[] },
+  day: SearchedDay = 'all',
+  now: Date = new Date(),
+) => c.nextMasses.some((m) => isOnSearchedDay(m, day, now));
 
 /** Distância em km entre dois pontos (haversine). */
 export function haversineKm(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {

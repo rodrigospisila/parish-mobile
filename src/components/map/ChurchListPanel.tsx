@@ -12,7 +12,16 @@ import {
 import { FontAwesome5 } from '@expo/vector-icons';
 import type { ThemeColors } from '../../constants/Colors';
 import type { MapCommunity } from '../../services/publicMapService';
-import { cityLine, firstActiveMass, formatDistance, formatMassTime, isCancelled, isSoon, typeLabel } from './format';
+import {
+  cityLine,
+  firstActiveMass,
+  formatDistance,
+  formatMassTime,
+  isCancelled,
+  isOnSearchedDay,
+  SearchedDay,
+  typeLabel,
+} from './format';
 
 export interface ListItem {
   community: MapCommunity;
@@ -35,6 +44,8 @@ interface Props {
   onPressItem: (c: MapCommunity) => void;
   onToggleFavorite: (id: string) => void;
   onLayout?: (e: LayoutChangeEvent) => void;
+  /** Dia pesquisado no mapa: o próximo horário desse dia fica em verde */
+  day?: SearchedDay;
 }
 
 /**
@@ -57,6 +68,7 @@ export default function ChurchListPanel({
   onPressItem,
   onToggleFavorite,
   onLayout,
+  day = 'all',
 }: Props) {
   const styles = useMemo(() => createStyles(colors), [colors]);
   const total = openHeight + bottomInset;
@@ -78,7 +90,7 @@ export default function ChurchListPanel({
     const c = item.community;
     // Próximo horário que vai mesmo acontecer; uma suspensão antes dele vira aviso
     const next = firstActiveMass(c.nextMasses);
-    const soon = next ? isSoon(next, now) : false;
+    const soon = next ? isOnSearchedDay(next, day, now) : false;
     const skipped = c.nextMasses.find((m) => isCancelled(m) && (!next || m.start < next.start));
     const dist = formatDistance(item.distanceKm);
     return (
