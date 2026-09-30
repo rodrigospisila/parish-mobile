@@ -101,3 +101,82 @@ export function distanceFor(c: MapCommunity, user: { lat: number; lng: number } 
   if (!user) return null;
   return haversineKm(user, { lat: c.latitude, lng: c.longitude });
 }
+
+// ---------- Filtro de horário (barra de 00:00 a 23:59) ----------
+
+/** Pontos da barra: 00:00, 00:30 … 23:30 e 23:59 no fim (49 posições). */
+export const TIME_STEPS = 48;
+
+/** Intervalo em posições da barra: [início, fim], inclusive. */
+export type TimeRange = [number, number];
+
+/** Intervalo inteiro = sem filtro de horário. */
+export const FULL_TIME_RANGE: TimeRange = [0, TIME_STEPS];
+
+export const isFullTimeRange = (r: TimeRange) => r[0] <= 0 && r[1] >= TIME_STEPS;
+
+/** Minutos do dia de uma posição da barra (a última é 23:59). */
+export const stepToMinutes = (step: number) => (step >= TIME_STEPS ? 23 * 60 + 59 : Math.max(0, step) * 30);
+
+/** "06:30" */
+export const fmtMinutes = (min: number) =>
+  `${String(Math.floor(min / 60)).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`;
+
+/** "06:30" de uma posição da barra. */
+export const fmtStep = (step: number) => fmtMinutes(stepToMinutes(step));
+
+/** Hora falada para leitor de tela: "6 horas e 30 minutos", "meia-noite". */
+export function spokenStep(step: number): string {
+  const min = stepToMinutes(step);
+  const h = Math.floor(min / 60);
+  const m = min % 60;
+  if (h === 0 && m === 0) return 'meia-noite';
+  const hs = h === 0 ? '' : `${h} ${h === 1 ? 'hora' : 'horas'}`;
+  const ms = m ? `${m} minutos` : '';
+  return [hs, ms].filter(Boolean).join(' e ');
+}
+
+/** "06:00–12:00" (curto, para o chip). */
+export const timeRangeShort = (r: TimeRange) => `${fmtStep(r[0])}–${fmtStep(r[1])}`;
+
+/** "Das 06:00 às 12:00". */
+export const timeRangeLong = (r: TimeRange) => `Das ${fmtStep(r[0])} às ${fmtStep(r[1])}`;
+
+/** Minutos do dia em que a celebração começa (lidos do texto, sem fuso); null se inválido. */
+export function startMinutes(start: string): number | null {
+  const h = Number(start.slice(11, 13));
+  const m = Number(start.slice(14, 16));
+  if (!Number.isInteger(h) || !Number.isInteger(m) || start.charAt(13) !== ':') return null;
+  return h * 60 + m;
+}
+
+/** A celebração começa dentro do intervalo (inclusive nas duas pontas)? */
+export function startsInTimeRange(m: { start: string }, r: TimeRange): boolean {
+  if (isFullTimeRange(r)) return true;
+  const min = startMinutes(m.start);
+  if (min == null) return false;
+  return min >= stepToMinutes(r[0]) && min <= stepToMinutes(r[1]);
+}
+
+/**
+ * Horários de uma igreja que valem para os filtros de dia e de horário. Sem
+ * filtro nenhum devolve a própria igreja (mesmo objeto).
+ */
+export function filterCommunityMasses<C extends { nextMasses: PublicMass[] }>(
+  c: C,
+  day: SearchedDay,
+  range: TimeRange,
+  todayStr: string,
+): C {
+  const full = isFullTimeRange(range);
+  if (day === 'all' && full) return c;
+  const masses = c.nextMasses.filter((m) => {
+    if (day === 'today' && m.start.slice(0, 10) !== todayStr) return false;
+    if (day === 'sunday') {
+      const d = parseLocal(m.start);
+      if (!d || d.getDay() !== 0) return false;
+    }
+    return full || startsInTimeRange(m, range);
+  });
+  return masses.length === c.nextMasses.length ? c : { ...c, nextMasses: masses };
+}

@@ -18,7 +18,7 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { FontAwesome5 } from '@expo/vector-icons';
 import * as Location from 'expo-location';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { format, parseISO } from 'date-fns';
+import { format } from 'date-fns';
 import { useTheme } from '../src/context/ThemeContext';
 import { useAuth } from '../src/context/AuthContext';
 import type { ThemeColors } from '../src/constants/Colors';
@@ -47,7 +47,18 @@ import ChurchMap, {
 import CommunityCard from '../src/components/map/CommunityCard';
 import ChurchListPanel, { ListItem } from '../src/components/map/ChurchListPanel';
 import MapFilters, { DayFilter } from '../src/components/map/MapFilters';
-import { cityLine, distanceFor, hasMassOnSearchedDay, isCancelled } from '../src/components/map/format';
+import TimeFilter from '../src/components/map/TimeFilter';
+import {
+  FULL_TIME_RANGE,
+  TimeRange,
+  cityLine,
+  distanceFor,
+  filterCommunityMasses,
+  hasMassOnSearchedDay,
+  isCancelled,
+  isFullTimeRange,
+  timeRangeLong,
+} from '../src/components/map/format';
 import { openDirectionsTo } from '../src/components/map/directions';
 
 /**
@@ -150,6 +161,9 @@ export default function NearbyMassesScreen() {
   const [offlineAt, setOfflineAt] = useState<number | null>(null);
   const [types, setTypes] = useState<string[]>(['MASS']);
   const [day, setDay] = useState<DayFilter>('all');
+  // Filtro de horário: vale só enquanto a tela está aberta (reabrir = intervalo inteiro)
+  const [timeRange, setTimeRange] = useState<TimeRange>(FULL_TIME_RANGE);
+  const [timeOpen, setTimeOpen] = useState(false);
   const [approx, setApprox] = useState(false);
   const [baseMode, setBaseMode] = useState<MapBaseMode>('map');
   const [favorites, setFavorites] = useState<string[]>([]);
@@ -399,24 +413,18 @@ export default function NearbyMassesScreen() {
   );
 
   // ---------- Dados derivados ----------
+  // Filtros locais sobre os horários que já vieram do servidor (dia e horário)
+  const timeActive = !isFullTimeRange(timeRange);
   const visibleCommunities = useMemo(() => {
     if (!result) return [];
     const todayStr = format(new Date(), 'yyyy-MM-dd');
-    const list = result.communities.map((c) => {
-      if (day === 'all') return c;
-      const masses = c.nextMasses.filter((m) => {
-        if (day === 'today') return m.start.slice(0, 10) === todayStr;
-        try {
-          return parseISO(m.start).getDay() === 0;
-        } catch {
-          return false;
-        }
-      });
-      return { ...c, nextMasses: masses };
-    });
-    // "Hoje"/"Domingo": só fica a igreja que tem algum horário que vai mesmo acontecer
-    return day === 'all' ? list : list.filter((c) => c.nextMasses.some((m) => !isCancelled(m)));
-  }, [result, day]);
+    const list = result.communities.map((c) => filterCommunityMasses(c, day, timeRange, todayStr));
+    // "Hoje"/"Domingo"/horário ajustado: só fica a igreja que tem algum horário
+    // (dentro do filtro) que vai mesmo acontecer
+    return day === 'all' && isFullTimeRange(timeRange)
+      ? list
+      : list.filter((c) => c.nextMasses.some((m) => !isCancelled(m)));
+  }, [result, day, timeRange]);
 
   const listItems: ListItem[] = useMemo(() => {
     const vb = view?.bbox;
@@ -526,6 +534,7 @@ export default function NearbyMassesScreen() {
 
   const onMapPress = useCallback(() => {
     setSelected(null);
+    setTimeOpen(false);
     setSearchFocused(false);
     Keyboard.dismiss();
   }, []);
@@ -535,6 +544,10 @@ export default function NearbyMassesScreen() {
   useFocusEffect(
     useCallback(() => {
       const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+        if (timeOpen) {
+          setTimeOpen(false);
+          return true;
+        }
         if (selected) {
           setSelected(null);
           return true;
@@ -546,7 +559,7 @@ export default function NearbyMassesScreen() {
         return false;
       });
       return () => sub.remove();
-    }, [selected, panelOpen]),
+    }, [selected, panelOpen, timeOpen]),
   );
 
   const goBack = () => {
@@ -619,7 +632,9 @@ export default function NearbyMassesScreen() {
       ? `Aproxime o mapa para ver a lista (${igrejas(clusterTotal)} nesta área).`
       : !result
         ? 'Carregando o mapa…'
-        : day !== 'all' && (result.communities.length || 0) > 0
+        : timeActive && (result.communities.length || 0) > 0
+          ? `Nenhuma celebração ${day === 'today' ? 'hoje' : day === 'sunday' ? 'no domingo' : 'nos próximos dias'} ${timeRangeLong(timeRange).replace('Das', 'das')} nas igrejas desta área.`
+          : day !== 'all' && (result.communities.length || 0) > 0
           ? `Nenhuma celebração ${day === 'today' ? 'hoje' : 'no domingo'} nas igrejas desta área.`
           : approx
             ? 'Nenhuma igreja encontrada nesta área.'
@@ -635,6 +650,19 @@ export default function NearbyMassesScreen() {
   })();
 
   const selectedDistance = selected ? distanceFor(selected, userPos) : null;
+  // Cartão: horários da igreja pelos filtros atuais (parte do original do servidor,
+  // para que alargar o horário traga de volta o que tinha sumido)
+  const selectedView = useMemo(() => {
+    if (!selected) return null;
+    const raw = result?.communities.find((x) => x.id === selected.id) ?? selected;
+    return filterCommunityMasses(raw, day, timeRange, format(new Date(), 'yyyy-MM-dd'));
+  }, [selected, result, day, timeRange]);
+  const cardNoMassText =
+    day === 'all' && !timeActive
+      ? undefined
+      : `Nenhuma celebração ${day === 'today' ? 'hoje' : day === 'sunday' ? 'no domingo' : 'nos próximos dias'}${
+          timeActive ? ` ${timeRangeLong(timeRange).replace('Das', 'das')}` : ''
+        }.`;
 
   return (
     <View style={styles.container}>
@@ -710,6 +738,17 @@ export default function NearbyMassesScreen() {
           }
           onDay={setDay}
           onToggleApprox={() => setApprox((a) => !a)}
+        />
+        <TimeFilter
+          colors={colors}
+          range={timeRange}
+          onChange={(r) => setTimeRange((prev) => (prev[0] === r[0] && prev[1] === r[1] ? prev : r))}
+          open={timeOpen}
+          onToggleOpen={() => {
+            setTimeOpen((o) => !o);
+            setSearchFocused(false);
+            Keyboard.dismiss();
+          }}
         />
       </View>
 
@@ -802,10 +841,11 @@ export default function NearbyMassesScreen() {
       {/* Painel da lista ou cartão da igreja selecionada */}
       {selected ? (
         <CommunityCard
-          community={selected}
+          community={selectedView ?? selected}
           distanceKm={selectedDistance}
           favorite={favorites.includes(selected.id)}
           day={day}
+          noMassText={cardNoMassText}
           colors={colors}
           bottomInset={bottomSafe}
           onClose={() => setSelected(null)}

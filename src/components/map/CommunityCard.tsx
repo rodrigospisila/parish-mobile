@@ -18,6 +18,8 @@ interface Props {
   onLayout?: (e: LayoutChangeEvent) => void;
   /** Dia pesquisado no mapa: os horários desse dia ficam em verde */
   day?: SearchedDay;
+  /** Texto quando não sobra horário (ex.: filtro de dia/horário ativo) */
+  noMassText?: string;
 }
 
 /** Cartão nativo que sobe ao tocar num pino. */
@@ -33,6 +35,7 @@ export default function CommunityCard({
   onOpen,
   onLayout,
   day = 'all',
+  noMassText,
 }: Props) {
   const styles = useMemo(() => createStyles(colors), [colors]);
   const now = new Date();
@@ -137,7 +140,7 @@ export default function CommunityCard({
             );
           })
         ) : (
-          <Text style={styles.noMass}>Sem horários cadastrados para os próximos dias.</Text>
+          <Text style={styles.noMass}>{noMassText || 'Sem horários cadastrados para os próximos dias.'}</Text>
         )}
       </View>
 
