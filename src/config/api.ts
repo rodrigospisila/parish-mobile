@@ -15,7 +15,18 @@ import { secureDelete, secureGet, secureSet } from '../utils/secureStorage';
 // SEGURANÇA: dados mock NUNCA são usados em produção. USE_MOCK só pode ser
 // ativado em build de desenvolvimento (__DEV__), mesmo que a env esteja setada.
 export const USE_MOCK = __DEV__ && process.env.EXPO_PUBLIC_USE_MOCK === 'true';
-const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3003/api/v1';
+const PRODUCTION_API_URL = 'https://parish-backend-production.up.railway.app/api/v1';
+/**
+ * Fora do desenvolvimento, só HTTPS público: uma atualização pelo ar publicada
+ * com o .env local (ex.: http://192.168.0.5:3003) derrubaria o app de todos.
+ */
+const resolveApiUrl = (configured?: string): string => {
+  const url = (configured || '').trim();
+  if (__DEV__) return url || 'http://localhost:3003/api/v1';
+  const local = /^http:\/\/|\/\/(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/i;
+  return url && !local.test(url) ? url : PRODUCTION_API_URL;
+};
+const API_URL = resolveApiUrl(process.env.EXPO_PUBLIC_API_URL);
 
 // Chaves do AsyncStorage (os tokens migraram para o SecureStore; as chaves
 // antigas ficam aqui para a migração e para o web)
