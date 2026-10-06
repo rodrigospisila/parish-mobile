@@ -15,6 +15,7 @@ import {
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '../../src/context/AuthContext';
+import { coordinatedPastoralIdsOf } from '../../src/utils/pastoralCoordination';
 import { useColors } from '../../src/context/ThemeContext';
 import { UserRoster, ScheduleTeamMember, getUserUpcomingRosters, getUserRosterHistory, confirmRosterPresence, declineRosterPresence, respondGroupPresence, getScheduleTeam, RosterConfirmationStatus, declineRosterPresenceWithCouple } from '../../src/services/pastoralService';
 import {
@@ -496,6 +497,20 @@ export default function ScheduleScreen() {
     );
   };
 
+  /**
+   * Recusar (regra do backend): o CONVIDADO da troca direcionada ou a
+   * coordenação com escopo. Troca ABERTA recusada por fiel dá 403 — para ele
+   * basta não assumir a escala.
+   */
+  const canRejectSwap = (swap: SwapRequest) => {
+    if (swap.targetId) return true; // convite direcionado listado aqui = convite para mim
+    if (['SYSTEM_ADMIN', 'DIOCESAN_ADMIN', 'PARISH_ADMIN', 'COMMUNITY_COORDINATOR'].includes(user?.role ?? '')) {
+      return true;
+    }
+    const pastoralId = swap.assignment?.communityPastoralId;
+    return user?.role === 'PASTORAL_COORDINATOR' && !!pastoralId && coordinatedPastoralIdsOf(user).includes(pastoralId);
+  };
+
   const renderSwapRow = (swap: SwapRequest, kind: 'invite' | 'mine') => {
     const isProcessing = processingSwapId === swap.id;
     const scheduleInfo = swap.assignment?.schedule;
@@ -524,13 +539,15 @@ export default function ScheduleScreen() {
               >
                 {isProcessing ? <ActivityIndicator size="small" color="#fff" /> : <Text style={styles.confirmButtonText}>Assumir escala</Text>}
               </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.actionButton, styles.declineButton]}
-                disabled={isProcessing}
-                onPress={() => handleSwapAction(swap, 'reject')}
-              >
-                <Text style={styles.declineButtonText}>Recusar</Text>
-              </TouchableOpacity>
+              {canRejectSwap(swap) && (
+                <TouchableOpacity
+                  style={[styles.actionButton, styles.declineButton]}
+                  disabled={isProcessing}
+                  onPress={() => handleSwapAction(swap, 'reject')}
+                >
+                  <Text style={styles.declineButtonText}>{swap.targetId ? 'Recusar' : 'Encerrar pedido'}</Text>
+                </TouchableOpacity>
+              )}
             </>
           ) : (
             <TouchableOpacity

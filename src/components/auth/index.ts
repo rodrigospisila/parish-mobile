@@ -15,4 +15,4 @@ export {
   type AuthPalette,
   type AuthColors,
 } from './authPalette';
-export { authErrorMessage, NO_CONNECTION_MESSAGE } from './authErrors';
+export { authErrorMessage, rateLimitMessage, retryWaitPhrase, NO_CONNECTION_MESSAGE } from './authErrors';

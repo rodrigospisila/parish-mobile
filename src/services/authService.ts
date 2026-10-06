@@ -1,9 +1,18 @@
-import api, { saveTokens, saveUser, clearTokens, getErrorMessage } from '../config/api';
+import api, { saveTokens, saveUser, clearTokens, getErrorMessage, getRetryAfterSeconds } from '../config/api';
 
-/** Erro com o status HTTP junto (0 = sem resposta do servidor), para a tela escolher a mensagem */
-export type AuthFailure = Error & { status: number };
-const authFailure = (error: any): AuthFailure =>
-  Object.assign(new Error(getErrorMessage(error)), { status: Number(error?.response?.status) || 0 });
+/**
+ * Erro com o status HTTP junto (0 = sem resposta do servidor), para a tela
+ * escolher a mensagem. Em 429, `retryAfter` traz o Retry-After (segundos).
+ */
+export type AuthFailure = Error & { status: number; retryAfter?: number };
+const authFailure = (error: any): AuthFailure => {
+  const status = Number(error?.response?.status) || 0;
+  const retryAfter = status === 429 ? getRetryAfterSeconds(error) : null;
+  return Object.assign(new Error(getErrorMessage(error)), {
+    status,
+    ...(retryAfter !== null ? { retryAfter } : {}),
+  });
+};
 
 // ============================================
 // TIPOS
@@ -18,6 +27,7 @@ export type UserRole =
   | 'PARISH_ADMIN'
   | 'COMMUNITY_COORDINATOR'
   | 'PASTORAL_COORDINATOR'
+  | 'VOLUNTEER'
   | 'SECRETARY'
   | 'CATECHIST'
   | 'MINISTER'
@@ -43,7 +53,13 @@ export interface User {
   forcePasswordChange?: boolean;
   dioceseId?: string;
   parishId?: string;
+  /**
+   * Comunidade do usuário. No gestor sem comunidade de escopo (PARISH_ADMIN,
+   * DIOCESAN_ADMIN...), o backend novo devolve a comunidade de FÉ (só exibição).
+   */
   communityId?: string;
+  /** Comunidade de ESCOPO gravada (backend novo; ausente no servidor antigo) */
+  scopeCommunityId?: string | null;
   // Escopo resolvido (nomes) retornado por /users/me
   diocese?: { id: string; name: string };
   parish?: { id: string; name: string };
@@ -51,6 +67,8 @@ export interface User {
   createdAt: string;
   /** IDs das pastorais da comunidade em que o usuário é membro ativo */
   pastoralIds?: string[];
+  /** Pastorais que o usuário COORDENA (backend novo) — só elas dão gestão */
+  coordinatedPastoralIds?: string[];
   pastorals?: UserPastoral[];
   /** Segundo fator (TOTP) ativo — governança de acesso (D4.7) */
   twoFactorEnabled?: boolean;

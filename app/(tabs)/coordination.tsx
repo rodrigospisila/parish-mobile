@@ -27,6 +27,7 @@ import { formatToBrazilianDate } from '../../src/utils/dateUtils';
 import { isFinancialRole } from '../../src/services/titheService';
 import { canManageScheduleCancellations } from '../../src/services/massScheduleService';
 import { FontAwesome5 } from '@expo/vector-icons';
+import { coordinatesAnyPastoral } from '../../src/utils/pastoralCoordination';
 
 type AssignmentFilter = 'all' | 'PENDING' | 'CONFIRMED' | 'DECLINED' | 'CHECKED_IN';
 type DateRange = 'next7' | 'next30' | 'next90' | 'all';
@@ -76,11 +77,9 @@ export default function CoordinationScreen() {
   const [fixedPending, setFixedPending] = useState<FixedPendingItem[]>([]);
   const [creatingFixedKey, setCreatingFixedKey] = useState<string | null>(null);
 
-  // Mesma regra da tab: papel gestor OU coordenação/vice de alguma pastoral
-  const coordinatorPastoralRoles = ['COORDINATOR', 'Coordenador', 'Vice-Coordenador'];
-  const isCoordinator =
-    (!!user?.role && coordinatorRoles.includes(user.role)) ||
-    !!user?.pastorals?.some((pastoral) => coordinatorPastoralRoles.includes(pastoral.role));
+  // Mesma regra da tab e do backend: papel gestor OU coordenação de alguma
+  // pastoral (vice-coordenação não conta — as ações dariam 403)
+  const isCoordinator = (!!user?.role && coordinatorRoles.includes(user.role)) || coordinatesAnyPastoral(user);
   const styles = createStyles(colors);
   // Tesouraria/coordenação de comunidade: atalho para o modo agente do Dízimo
   const isFinancial = isFinancialRole(user?.role);

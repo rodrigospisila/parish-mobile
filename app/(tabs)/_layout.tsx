@@ -2,6 +2,7 @@ import { Tabs } from 'expo-router';
 import { FontAwesome } from '@expo/vector-icons';
 import { useColors } from '../../src/context/ThemeContext';
 import { useAuth } from '../../src/context/AuthContext';
+import { coordinatesAnyPastoral } from '../../src/utils/pastoralCoordination';
 
 function TabBarIcon(props: { name: React.ComponentProps<typeof FontAwesome>['name']; color: string }) {
   return <FontAwesome size={24} style={{ marginBottom: -3 }} {...props} />;
@@ -10,13 +11,14 @@ function TabBarIcon(props: { name: React.ComponentProps<typeof FontAwesome>['nam
 export default function TabLayout() {
   const colors = useColors();
   const { user } = useAuth();
-  const COORDINATOR_ROLES = new Set(['COORDINATOR', 'Coordenador', 'Vice-Coordenador']);
+  // Papel gestor OU coordenação de alguma pastoral (coordinatedPastoralIds do
+  // backend; vice-coordenação não conta — o servidor recusaria as ações)
   const canCoordinate =
     (!!user?.role &&
       ['SYSTEM_ADMIN', 'DIOCESAN_ADMIN', 'PARISH_ADMIN', 'COMMUNITY_COORDINATOR', 'PASTORAL_COORDINATOR'].includes(
         user.role,
       )) ||
-    !!user?.pastorals?.some((p) => !!p.role && COORDINATOR_ROLES.has(p.role));
+    coordinatesAnyPastoral(user);
   const isPastoralMember = !!user?.pastoralIds?.length;
 
   return (

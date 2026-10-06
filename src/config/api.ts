@@ -251,6 +251,31 @@ const emitAuthFailure = () => {
 
 // Flag para evitar múltiplas tentativas de refresh simultâneas
 let isRefreshing = false;
+
+/**
+ * Falha TEMPORÁRIA no refresh (429, 5xx, sem rede): a sessão fica e a
+ * renovação só é tentada de novo depois desta hora — respeitando o
+ * Retry-After do servidor — para não martelar um servidor que pediu calma.
+ */
+let refreshBlockedUntil = 0;
+let lastTemporaryRefreshError: unknown = null;
+/** Espera padrão quando a falha temporária não trouxe Retry-After */
+const TEMPORARY_REFRESH_BACKOFF_SECONDS = 15;
+
+/**
+ * Lê o cabeçalho Retry-After (segundos ou data HTTP) de um erro do axios.
+ * null quando não veio. Toda resposta 429 do backend traz o cabeçalho.
+ */
+export const getRetryAfterSeconds = (error: unknown): number | null => {
+  if (!axios.isAxiosError(error)) return null;
+  const headers: any = error.response?.headers;
+  const raw = typeof headers?.get === 'function' ? headers.get('retry-after') : headers?.['retry-after'];
+  if (raw === undefined || raw === null || raw === '') return null;
+  const seconds = Number(raw);
+  if (Number.isFinite(seconds) && seconds >= 0) return Math.ceil(seconds);
+  const date = Date.parse(String(raw));
+  return Number.isFinite(date) ? Math.max(0, Math.ceil((date - Date.now()) / 1000)) : null;
+};
 let failedQueue: Array<{
   resolve: (token: string) => void;
   reject: (error: any) => void;
@@ -374,6 +399,13 @@ api.interceptors.response.use(
           });
       }
 
+      // Renovação falhou há pouco por motivo temporário: não tenta de novo
+      // antes da hora (a sessão continua; a tela mostra o erro e o usuário
+      // pode repetir depois)
+      if (Date.now() < refreshBlockedUntil) {
+        return Promise.reject(lastTemporaryRefreshError ?? error);
+      }
+
       originalRequest._retry = true;
       isRefreshing = true;
 
@@ -396,6 +428,8 @@ api.interceptors.response.use(
 
         // Salva os novos tokens
         await saveTokens(newAccessToken, newRefreshToken);
+        refreshBlockedUntil = 0;
+        lastTemporaryRefreshError = null;
 
         // Processa a fila de requisições que estavam esperando
         processQueue(null, newAccessToken);
@@ -405,13 +439,22 @@ api.interceptors.response.use(
         return api(originalRequest);
       } catch (refreshError) {
         processQueue(refreshError, null);
-        // Só desloga se o SERVIDOR rejeitou o refresh (token inválido/expirado).
-        // Falha de REDE (offline, backend fora do ar) mantém a sessão — o app
-        // continua com o cache offline e tenta de novo quando reconectar.
-        const isServerRejection = axios.isAxiosError(refreshError) && !!refreshError.response;
-        if (isServerRejection || !axios.isAxiosError(refreshError)) {
+        // Só desloga quando o SERVIDOR recusa o refresh (401/403: token
+        // inválido, expirado, revogado) ou não há refresh token guardado.
+        // Limite (429), servidor com problema (5xx) ou falha de REDE são
+        // TEMPORÁRIOS: mantém os tokens, não desloga e tenta de novo depois
+        // (respeitando o Retry-After) — o app segue com o cache offline.
+        const status = axios.isAxiosError(refreshError) ? refreshError.response?.status : undefined;
+        const sessionRejected = status === 401 || status === 403 || !axios.isAxiosError(refreshError);
+        if (sessionRejected) {
+          refreshBlockedUntil = 0;
+          lastTemporaryRefreshError = null;
           await clearTokens();
           emitAuthFailure();
+        } else {
+          const waitSeconds = getRetryAfterSeconds(refreshError) ?? TEMPORARY_REFRESH_BACKOFF_SECONDS;
+          refreshBlockedUntil = Date.now() + waitSeconds * 1000;
+          lastTemporaryRefreshError = refreshError;
         }
         return Promise.reject(refreshError);
       } finally {
@@ -470,6 +513,8 @@ export const getErrorMessage = (error: any): string => {
         return 'Recurso não encontrado.';
       case 409:
         return 'Conflito de dados. Este registro já existe.';
+      case 429:
+        return 'Muitas requisições seguidas. Aguarde um pouco e tente de novo.';
       case 500:
         return 'Erro interno do servidor. Tente novamente.';
       default:

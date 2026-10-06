@@ -55,6 +55,53 @@ interface AuthContextType {
 }
 
 // ============================================
+// GESTOR SEM COMUNIDADE DE ESCOPO
+// ============================================
+
+/**
+ * Papéis acima de VOLUNTEER. Um PARISH_ADMIN/DIOCESAN_ADMIN não tem comunidade
+ * de ESCOPO; o backend novo devolve em `communityId` a comunidade de FÉ dele
+ * (só exibição). Sem ela o app mandava o gestor ao assistente a cada login.
+ */
+const MANAGEMENT_ROLES = new Set([
+  'SYSTEM_ADMIN',
+  'DIOCESAN_ADMIN',
+  'PARISH_ADMIN',
+  'COMMUNITY_COORDINATOR',
+  'PASTORAL_COORDINATOR',
+]);
+
+const isManager = (user: User | null | undefined): boolean => !!user && MANAGEMENT_ROLES.has(user.role);
+
+/**
+ * Antes de decidir "tem comunidade?" depois do login: se o gestor veio sem
+ * communityId (servidor antigo ou cadastro sem vínculo principal), pergunta
+ * UMA vez ao /users/me. Falhou ou continua sem: segue com o que veio — sem
+ * nova tentativa (nada de laço).
+ */
+const resolveManagerCommunity = async (user: User): Promise<User> => {
+  if (user.communityId || !isManager(user)) return user;
+  try {
+    const fresh = await authService.getCurrentUser();
+    return fresh?.id === user.id ? fresh : user;
+  } catch {
+    return user;
+  }
+};
+
+/**
+ * Atualização em segundo plano (/users/me ao voltar ao app) não pode tirar a
+ * comunidade de um gestor que já estava usando o app — senão o layout o
+ * jogaria no assistente no meio da sessão. Só vale para gestor e o mesmo id.
+ */
+const keepManagerCommunity = (previous: User | null, fresh: User): User => {
+  if (fresh.communityId || !isManager(fresh) || !previous?.communityId || previous.id !== fresh.id) {
+    return fresh;
+  }
+  return { ...fresh, communityId: previous.communityId, community: fresh.community ?? previous.community };
+};
+
+// ============================================
 // CONTEXTO
 // ============================================
 
@@ -105,7 +152,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
           const storedUser = await getStoredUser();
           
           if (storedUser) {
-            setUser(storedUser);
+            // Gestor salvo sem comunidade (sessão de antes do backend novo):
+            // uma consulta ao /users/me antes de abrir — sem rede, segue como está
+            const resolved = await resolveManagerCommunity(storedUser);
+            setUser(resolved);
           } else {
             // Token existe mas usuário não, limpa tudo
             await clearTokens();
@@ -147,7 +197,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
       if (wasBackground && isActive) {
         getAccessToken().then((token) => {
           if (token) {
-            authService.getCurrentUser().then(setUser).catch(() => {});
+            authService
+              .getCurrentUser()
+              .then((fresh) => setUser((previous) => keepManagerCommunity(previous, fresh)))
+              .catch(() => {});
           }
         });
       }
@@ -172,7 +225,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
         return { requiresTwoFactor: true, challengeToken: result.challengeToken };
       }
 
-      setUser(result.user);
+      // Gestor: decide a comunidade com o que o login devolveu (comunidade de
+      // fé) e, se veio vazio, com UMA consulta ao /users/me — antes do setUser,
+      // para o layout não abrir o assistente por um instante
+      setUser(await resolveManagerCommunity(result.user));
       return { requiresTwoFactor: false, newDevice: !!result.newDevice };
     } catch (error) {
       // Re-throw para que o componente possa tratar
@@ -187,7 +243,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const completeTwoFactorSignIn = useCallback(
     async (challengeToken: string, code: string): Promise<SignInResult> => {
       const response: AuthResponse = await authService.loginWithTwoFactor(challengeToken, code);
-      setUser(response.user);
+      setUser(await resolveManagerCommunity(response.user));
       return { requiresTwoFactor: false, newDevice: !!response.newDevice };
     },
     [],
@@ -237,7 +293,15 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
     try {
       const updatedUser = await authService.updateCommunity(user.id, communityId, consentGiven);
-      setUser(updatedUser);
+      // Servidor antigo devolvia o gestor sem communityId mesmo após escolher a
+      // comunidade — mantém a escolhida (só exibição) para não reabrir o assistente
+      if (!updatedUser.communityId && isManager(updatedUser)) {
+        const withCommunity = { ...updatedUser, communityId };
+        setUser(withCommunity);
+        await saveUser(withCommunity);
+      } else {
+        setUser(updatedUser);
+      }
     } catch (error) {
       // Re-throw para que o componente possa tratar
       throw error;
@@ -250,7 +314,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const refreshUser = useCallback(async (): Promise<void> => {
     try {
       const currentUser = await authService.getCurrentUser();
-      setUser(currentUser);
+      setUser((previous) => keepManagerCommunity(previous, currentUser));
     } catch (error) {
       console.error('Erro ao atualizar usuário:', error);
       // Se falhar ao buscar usuário, pode ser que o token expirou

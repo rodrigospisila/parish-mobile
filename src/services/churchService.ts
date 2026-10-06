@@ -1,3 +1,4 @@
+import axios from 'axios';
 import api, { getErrorMessage } from '../config/api';
 
 // ============================================
@@ -58,6 +59,31 @@ export interface Diocese {
   _count?: {
     parishes: number;
   };
+}
+
+/** Itens enxutos da cascata Diocese → Paróquia → Comunidade (GET /territory/*) */
+export interface TerritoryDiocese {
+  id: string;
+  name: string;
+  state?: string | null;
+}
+
+export interface TerritoryParish {
+  id: string;
+  name: string;
+  city?: string | null;
+}
+
+export interface TerritoryCommunity {
+  id: string;
+  name: string;
+  address?: string | null;
+}
+
+/** Diocese e paróquia de uma comunidade (para abrir a cascata pré-selecionada) */
+export interface CommunityAncestors {
+  dioceseId: string;
+  parishId: string;
 }
 
 // ============================================
@@ -124,30 +150,134 @@ const mockDioceses: Diocese[] = [
 // SERVIÇO
 // ============================================
 
-/**
- * Busca todas as dioceses
- * Retorna dioceses com suas paróquias (sem comunidades no findAll)
- */
-export const getDioceses = async (): Promise<Diocese[]> => {
-  if (USE_MOCK) {
-    return mockGetDioceses();
-  }
+// ============================================
+// CASCATA ENXUTA (Diocese → Paróquia → Comunidade)
+// ============================================
 
+/**
+ * O app baixava GET /dioceses e depois GET /dioceses/:id de CADA uma das 281
+ * dioceses (282 requisições) só para montar os seletores. Agora cada nível é
+ * carregado quando o anterior é escolhido (GET /territory/*). Servidor antigo
+ * (404 nessas rotas): cai no formato antigo SÓ para a diocese escolhida.
+ */
+let territoryRoutesMissing = false;
+
+const isNotFound = (error: unknown) => axios.isAxiosError(error) && error.response?.status === 404;
+
+/** Detalhe antigo da diocese (com paróquias e comunidades), uma por vez e em cache */
+const legacyDioceseCache = new Map<string, Promise<Diocese>>();
+const getLegacyDiocese = (dioceseId: string): Promise<Diocese> => {
+  let pending = legacyDioceseCache.get(dioceseId);
+  if (!pending) {
+    pending = api.get<Diocese>(`/dioceses/${dioceseId}`).then((response) => response.data);
+    // Falha não fica no cache: o "Tentar de novo" precisa refazer a chamada
+    pending.catch(() => legacyDioceseCache.delete(dioceseId));
+    legacyDioceseCache.set(dioceseId, pending);
+  }
+  return pending;
+};
+
+const byName = <T extends { name: string }>(items: T[]) =>
+  [...items].sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
+
+/** Lista de dioceses (id, nome, UF) — uma requisição */
+export const listDioceses = async (): Promise<TerritoryDiocese[]> => {
+  if (USE_MOCK) {
+    return (await mockGetDioceses()).map(({ id, name }) => ({ id, name }));
+  }
   try {
-    const response = await api.get<Diocese[]>('/dioceses');
-    
-    // O backend retorna dioceses com paróquias, mas sem comunidades no findAll
-    // Precisamos buscar os detalhes de cada diocese para ter as comunidades
-    const diocesesWithCommunities = await Promise.all(
-      response.data.map(async (diocese) => {
-        const detailedDiocese = await getDioceseById(diocese.id);
-        return detailedDiocese;
-      })
-    );
-    
-    return diocesesWithCommunities;
+    if (!territoryRoutesMissing) {
+      try {
+        const { data } = await api.get<TerritoryDiocese[]>('/territory/dioceses');
+        return byName(data);
+      } catch (error) {
+        if (!isNotFound(error)) throw error;
+        territoryRoutesMissing = true;
+      }
+    }
+    // Servidor antigo: só a lista (sem buscar o detalhe de cada diocese)
+    const { data } = await api.get<Diocese[]>('/dioceses');
+    return byName(data.map(({ id, name }) => ({ id, name })));
   } catch (error) {
     throw new Error(getErrorMessage(error));
+  }
+};
+
+/** Paróquias de UMA diocese */
+export const listParishes = async (dioceseId: string): Promise<TerritoryParish[]> => {
+  if (USE_MOCK) {
+    return (await mockGetParishes(dioceseId)).map(({ id, name }) => ({ id, name }));
+  }
+  try {
+    if (!territoryRoutesMissing) {
+      try {
+        const { data } = await api.get<TerritoryParish[]>(`/territory/dioceses/${dioceseId}/parishes`);
+        return byName(data);
+      } catch (error) {
+        if (!isNotFound(error)) throw error;
+        territoryRoutesMissing = true;
+      }
+    }
+    const diocese = await getLegacyDiocese(dioceseId);
+    return byName((diocese.parishes ?? []).map(({ id, name }) => ({ id, name })));
+  } catch (error) {
+    throw new Error(getErrorMessage(error));
+  }
+};
+
+/** Comunidades de UMA paróquia (dioceseId só é usado no servidor antigo) */
+export const listCommunities = async (parishId: string, dioceseId?: string): Promise<TerritoryCommunity[]> => {
+  if (USE_MOCK) {
+    return (await mockGetCommunities(parishId)).map(({ id, name, address }) => ({ id, name, address }));
+  }
+  try {
+    if (!territoryRoutesMissing) {
+      try {
+        const { data } = await api.get<TerritoryCommunity[]>(`/territory/parishes/${parishId}/communities`);
+        return byName(data);
+      } catch (error) {
+        if (!isNotFound(error)) throw error;
+        territoryRoutesMissing = true;
+      }
+    }
+    if (dioceseId) {
+      const diocese = await getLegacyDiocese(dioceseId);
+      const parish = (diocese.parishes ?? []).find((p) => p.id === parishId);
+      if (parish?.communities) {
+        return byName(parish.communities.map(({ id, name, address }) => ({ id, name, address })));
+      }
+    }
+    const { data } = await api.get<Parish>(`/parishes/${parishId}`);
+    return byName((data.communities ?? []).map(({ id, name, address }) => ({ id, name, address })));
+  } catch (error) {
+    throw new Error(getErrorMessage(error));
+  }
+};
+
+/**
+ * Diocese e paróquia de uma comunidade (GET /communities/:id, rota de dados
+ * públicos) — usado para abrir a troca de comunidade já pré-selecionada.
+ */
+export const getCommunityAncestors = async (communityId: string): Promise<CommunityAncestors | null> => {
+  if (USE_MOCK) {
+    for (const diocese of mockDioceses) {
+      for (const parish of diocese.parishes) {
+        if (parish.communities.some((c) => c.id === communityId)) {
+          return { dioceseId: diocese.id, parishId: parish.id };
+        }
+      }
+    }
+    return null;
+  }
+  try {
+    const { data } = await api.get<{ parishId?: string; parish?: { id?: string; dioceseId?: string } }>(
+      `/communities/${communityId}`,
+    );
+    const parishId = data.parishId ?? data.parish?.id;
+    const dioceseId = data.parish?.dioceseId;
+    return parishId && dioceseId ? { dioceseId, parishId } : null;
+  } catch {
+    return null;
   }
 };
 
@@ -309,7 +439,10 @@ async function mockGetCommunityById(id: string): Promise<Community> {
 }
 
 export default {
-  getDioceses,
+  listDioceses,
+  listParishes,
+  listCommunities,
+  getCommunityAncestors,
   getDioceseById,
   getParishes,
   getParishById,

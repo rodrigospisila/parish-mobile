@@ -25,6 +25,7 @@ import {
   AuthScreen,
   AUTH_WEB_URL,
   NO_CONNECTION_MESSAGE,
+  rateLimitMessage,
   useAnnouncedError,
   useAuthPalette,
   type AuthColors,
@@ -63,7 +64,7 @@ const toLoginData = (typed: string, password: string): LoginData | null => {
 const loginErrorMessage = (error: any): string => {
   const status: number = error?.status ?? 0;
   const raw: string = error?.message || '';
-  if (status === 429) return 'Muitas tentativas seguidas. Aguarde 1 minuto e tente de novo.';
+  if (status === 429) return rateLimitMessage(error?.retryAfter);
   if (status === 0) return NO_CONNECTION_MESSAGE;
   if (status >= 500) return 'O servidor está com um problema agora. Tente de novo em instantes.';
   if (/inativ|desativad/i.test(raw)) return 'Esta conta está desativada. Procure a secretaria da sua paróquia.';
@@ -267,7 +268,7 @@ export default function LoginScreen() {
       } else if (/muitas tentativas/i.test(message)) {
         showError(message);
       } else if (error?.status === 429) {
-        showError('Muitas tentativas seguidas. Aguarde 1 minuto e tente de novo.');
+        showError(rateLimitMessage(error?.retryAfter));
       } else if (error?.status === 0) {
         showError(NO_CONNECTION_MESSAGE);
       } else {

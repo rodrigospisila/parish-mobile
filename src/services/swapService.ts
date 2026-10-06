@@ -12,9 +12,12 @@ export interface SwapRequest {
   message?: string | null;
   createdAt: string;
   requesterName?: string | null;
+  /** Convidado (troca direcionada); null = troca ABERTA à pastoral */
+  targetId?: string | null;
   targetName?: string | null;
   assignment?: {
     role: string;
+    communityPastoralId?: string | null;
     schedule?: { id: string; title: string; date: string } | null;
   } | null;
 }
