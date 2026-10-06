@@ -13,7 +13,7 @@ import {
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import { FontAwesome5 } from '@expo/vector-icons';
-import { useAuth } from '../../src/context/AuthContext';
+import { useAuth, type SignedInAccount } from '../../src/context/AuthContext';
 import type { LoginData } from '../../src/services/authService';
 import { biometricService, type BiometricSupport } from '../../src/services/biometricService';
 import {
@@ -107,8 +107,17 @@ export default function LoginScreen() {
         // sem armazenamento: só não pré-preenche
       }
     })();
-    biometricService.getSupport().then(setBioSupport);
-    biometricService.isEnabled().then(setBioEnabled);
+    (async () => {
+      const support = await biometricService.getSupport();
+      setBioSupport(support);
+      let enabled = await biometricService.isEnabled();
+      // Aparelho que não guarda o item protegido por biometria: nada de senha guardada
+      if (enabled && !support.available) {
+        await biometricService.disable();
+        enabled = false;
+      }
+      setBioEnabled(enabled);
+    })().catch(() => undefined);
   }, []);
 
   // Botão "voltar" do Android na etapa do código volta para o login
@@ -124,23 +133,41 @@ export default function LoginScreen() {
 
   const bioReady = !!bioSupport?.available && bioEnabled;
 
+  /** Ativa a biometria; se o aparelho não conseguir guardar protegido, avisa e não ativa. */
+  const enableBiometric = async (loginText: string, secret: string, account: SignedInAccount) => {
+    try {
+      await biometricService.enable(loginText, secret, account.id);
+      setBioEnabled(true);
+    } catch {
+      Alert.alert(
+        'Não foi possível ativar',
+        `Este aparelho não conseguiu guardar a entrada com ${bioSupport?.label ?? 'biometria'} com segurança. Continue entrando com a senha.`,
+      );
+    }
+  };
+
   /**
-   * Depois de entrar com a senha: mantém as credenciais da biometria em dia
-   * (senha trocada, outra conta) ou convida a ativar, uma vez só.
+   * Depois de entrar: mantém a biometria da conta certa ou convida a ativar,
+   * uma vez só. A comparação é pela CONTA (id), não pelo texto digitado — quem
+   * ativou com o e-mail e entra pelo celular continua com a biometria (B9).
    */
-  const afterPasswordLogin = async () => {
+  const afterPasswordLogin = async (account: SignedInAccount) => {
     const pending = pendingCredentials.current;
     pendingCredentials.current = null;
-    if (!pending || pending.viaBiometric || !bioSupport?.available) return;
+    if (!pending || !bioSupport?.available) return;
+
+    if (pending.viaBiometric) {
+      // Item antigo (sem a conta): registra a dona para as próximas comparações
+      await biometricService.rememberOwner(account, pending.login);
+      return;
+    }
 
     if (bioEnabled) {
-      const stored = await biometricService.readCredentials();
-      if (stored && stored.login.toLowerCase() === pending.login.toLowerCase()) {
-        if (stored.password !== pending.password) await biometricService.enable(pending.login, pending.password);
-        return;
-      }
+      const mine = await biometricService.belongsTo(account);
+      if (mine) return;
       // Outra conta neste aparelho: a biometria não pode abrir a conta anterior
       await biometricService.disable();
+      setBioEnabled(false);
     } else if (await biometricService.wasDeclined()) {
       return;
     }
@@ -148,10 +175,10 @@ export default function LoginScreen() {
     const label = bioSupport.label;
     Alert.alert(
       `Entrar com ${label}?`,
-      `Da próxima vez, entre usando ${label}, sem digitar a senha. A senha fica guardada apenas neste aparelho.`,
+      `Da próxima vez, entre usando ${label}, sem digitar a senha. A senha fica guardada apenas neste aparelho e só sai com ${label}.`,
       [
         { text: 'Agora não', style: 'cancel', onPress: () => biometricService.setDeclined() },
-        { text: 'Ativar', onPress: () => biometricService.enable(pending.login, pending.password) },
+        { text: 'Ativar', onPress: () => void enableBiometric(pending.login, pending.password, account) },
       ],
     );
   };
@@ -183,7 +210,7 @@ export default function LoginScreen() {
 
       // Navegação é feita automaticamente pelo AuthContext
       if (result.newDevice) showNewDeviceAlert();
-      afterPasswordLogin();
+      afterPasswordLogin(result.account);
     } catch (error: any) {
       if (viaBiometric && (error?.status === 401 || error?.status === 403)) {
         // Senha guardada não vale mais (trocou a senha, conta desativada…)
@@ -255,8 +282,10 @@ export default function LoginScreen() {
     try {
       const result = await completeTwoFactorSignIn(challengeToken, cleanCode);
       // Sessão aberta — navegação é feita automaticamente pelo AuthContext
-      if (!result.requiresTwoFactor && result.newDevice) showNewDeviceAlert();
-      afterPasswordLogin();
+      if (!result.requiresTwoFactor) {
+        if (result.newDevice) showNewDeviceAlert();
+        afterPasswordLogin(result.account);
+      }
     } catch (error: any) {
       const message: string = error?.message || 'Código inválido. Tente novamente.';
       // Desafio vale 5 minutos e só uma vez — expirado, usado ou inválido,

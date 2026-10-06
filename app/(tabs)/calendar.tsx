@@ -540,7 +540,7 @@ export default function CalendarScreen() {
       setFavoriteIds((prev) =>
         isFavorite ? [...prev, event.id] : prev.filter((id) => id !== event.id)
       );
-      Alert.alert('Erro', 'Nao foi possivel atualizar os favoritos.');
+      Alert.alert('Erro', 'Não foi possível atualizar os favoritos.');
     }
   };
 
@@ -791,7 +791,7 @@ export default function CalendarScreen() {
   /** Faixa com os 7 dias da semana do dia selecionado (modo Semana e modo Mês recolhido). */
   const renderWeekStrip = () => (
     <View style={styles.weekStrip}>
-      <Pressable style={styles.weekNav} onPress={() => shiftWeek(-7)}>
+      <Pressable accessibilityRole="button" accessibilityLabel="Semana anterior" style={styles.weekNav} onPress={() => shiftWeek(-7)}>
         <Ionicons name="chevron-back" size={18} color={colors.textSecondary} />
       </Pressable>
       {weekDays.map((day) => {
@@ -815,7 +815,7 @@ export default function CalendarScreen() {
           </Pressable>
         );
       })}
-      <Pressable style={styles.weekNav} onPress={() => shiftWeek(7)}>
+      <Pressable accessibilityRole="button" accessibilityLabel="Próxima semana" style={styles.weekNav} onPress={() => shiftWeek(7)}>
         <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
       </Pressable>
     </View>
@@ -1105,7 +1105,7 @@ export default function CalendarScreen() {
                           {selectedEvent.isFixed ? `🕐 ${eventLabel(selectedEvent)}` : eventLabel(selectedEvent)}
                         </Text>
                       </View>
-                      <TouchableOpacity onPress={closeEventDetails} style={styles.closeButton}>
+                      <TouchableOpacity accessibilityRole="button" accessibilityLabel="Fechar" onPress={closeEventDetails} style={styles.closeButton}>
                         <Text style={styles.closeButtonText}>✕</Text>
                       </TouchableOpacity>
                     </View>

@@ -9,6 +9,9 @@ import { CommunityProvider } from '../src/context/CommunityContext';
 import { flushWriteQueue } from '../src/utils/offlineQueue';
 import { applyGlobalFont } from '../src/utils/globalFont';
 import { consumePostLoginRoute } from '../src/utils/postLoginRoute';
+// Plano da comunidade: aviso amigável no 403 PLAN_REQUIRED (interceptor)
+import '../src/services/planService';
+import TermsAcceptanceGate from '../src/components/TermsAcceptanceGate';
 
 // Instala o mapeamento peso→Nunito Sans antes de qualquer render de texto.
 applyGlobalFont();
@@ -53,6 +56,11 @@ function RootLayoutNav() {
       if (!inAuthGroup && !inPublicRoute) {
         router.replace('/(auth)/login');
       }
+    } else if (user?.forcePasswordChange) {
+      // Senha definida pela secretaria (conta nova/redefinida): troca antes de tudo (M18)
+      if ((segments[0] as string) !== 'change-password') {
+        router.replace('/change-password' as never);
+      }
     } else {
       // Usuário autenticado
       if (inAuthGroup) {
@@ -78,7 +86,7 @@ function RootLayoutNav() {
       }
       // Se já está nas tabs com communityId, não faz nada
     }
-  }, [isAuthenticated, hasCommunity, isLoading, segments]);
+  }, [isAuthenticated, hasCommunity, isLoading, segments, user?.forcePasswordChange]);
 
   // Mostra loading enquanto carrega o estado de autenticação
   if (isLoading) {
@@ -98,6 +106,8 @@ function RootLayoutNav() {
         <Stack.Screen name="select-community" />
         <Stack.Screen name="+not-found" />
       </Stack>
+      {/* Aceite dos termos vigentes (M3/M4): bloqueia até aceitar */}
+      <TermsAcceptanceGate />
     </>
   );
 }

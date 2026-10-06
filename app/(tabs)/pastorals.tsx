@@ -267,7 +267,7 @@ export default function PastoralsScreen() {
                       <View style={styles.modalTitleContainer}>
                         <Text style={styles.modalTitle}>{selectedPastoral.name}</Text>
                       </View>
-                      <TouchableOpacity onPress={closePastoralDetails} style={styles.closeButton}>
+                      <TouchableOpacity accessibilityRole="button" accessibilityLabel="Fechar" onPress={closePastoralDetails} style={styles.closeButton}>
                         <Text style={styles.closeButtonText}>✕</Text>
                       </TouchableOpacity>
                     </View>

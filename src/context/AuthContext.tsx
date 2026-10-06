@@ -8,13 +8,16 @@ import {
   RegisterData,
   authService,
   isTwoFactorChallenge,
+  clearAccountLocalData,
 } from '../services/authService';
+import { biometricService } from '../services/biometricService';
 import {
   getStoredUser,
   getAccessToken,
   clearTokens,
   saveUser,
-  onAuthFailure
+  onAuthFailure,
+  onPasswordChangeRequired,
 } from '../config/api';
 
 // ============================================
@@ -25,9 +28,14 @@ import {
  * Resultado do login (D4.7): ou a sessão foi aberta, ou a conta tem 2FA e a
  * tela precisa pedir o código para concluir com `completeTwoFactorSignIn`.
  */
+/** Conta que entrou (id/e-mail/celular) — a tela compara com a dona da biometria guardada */
+export type SignedInAccount = { id: string; email: string; phone?: string | null };
+
 export type SignInResult =
   | { requiresTwoFactor: true; challengeToken: string }
-  | { requiresTwoFactor: false; newDevice: boolean };
+  | { requiresTwoFactor: false; newDevice: boolean; account: SignedInAccount };
+
+const accountOf = (user: User): SignedInAccount => ({ id: user.id, email: user.email, phone: user.phone ?? null });
 
 interface AuthContextType {
   /** Usuário autenticado */
@@ -42,8 +50,12 @@ interface AuthContextType {
   signIn: (data: LoginData) => Promise<SignInResult>;
   /** Conclui o login com o código do autenticador / de recuperação */
   completeTwoFactorSignIn: (challengeToken: string, code: string) => Promise<SignInResult>;
-  /** Realiza logout */
+  /** Sai deste aparelho (os outros seguem logados) */
   signOut: () => Promise<void>;
+  /** Encerra a sessão em todos os aparelhos, inclusive este */
+  signOutAllDevices: () => Promise<void>;
+  /** Troca a senha da própria conta (Segurança / troca obrigatória) */
+  changePassword: (currentPassword: string, newPassword: string) => Promise<void>;
   /** Registra novo usuário */
   register: (data: RegisterData) => Promise<void>;
   /** Atualiza dados do usuário no contexto */
@@ -179,7 +191,23 @@ export function AuthProvider({ children }: AuthProviderProps) {
    * Sem isso o app ficava "logado" com o storage limpo, falhando em loop.
    */
   useEffect(() => {
-    const unsubscribe = onAuthFailure(() => setUser(null));
+    const unsubscribe = onAuthFailure(() => {
+      setUser(null);
+      // A conta caiu sem "Sair": a fila offline e os lembretes dela não
+      // podem ficar para quem entrar depois neste aparelho (B24)
+      clearAccountLocalData().catch(() => undefined);
+    });
+    return unsubscribe;
+  }, []);
+
+  /**
+   * Servidor recusou com PASSWORD_CHANGE_REQUIRED: marca o usuário — o layout
+   * leva à tela de troca de senha (M18).
+   */
+  useEffect(() => {
+    const unsubscribe = onPasswordChangeRequired(() =>
+      setUser((previous) => (previous && !previous.forcePasswordChange ? { ...previous, forcePasswordChange: true } : previous)),
+    );
     return unsubscribe;
   }, []);
 
@@ -229,7 +257,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       // fé) e, se veio vazio, com UMA consulta ao /users/me — antes do setUser,
       // para o layout não abrir o assistente por um instante
       setUser(await resolveManagerCommunity(result.user));
-      return { requiresTwoFactor: false, newDevice: !!result.newDevice };
+      return { requiresTwoFactor: false, newDevice: !!result.newDevice, account: accountOf(result.user) };
     } catch (error) {
       // Re-throw para que o componente possa tratar
       throw error;
@@ -244,7 +272,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     async (challengeToken: string, code: string): Promise<SignInResult> => {
       const response: AuthResponse = await authService.loginWithTwoFactor(challengeToken, code);
       setUser(await resolveManagerCommunity(response.user));
-      return { requiresTwoFactor: false, newDevice: !!response.newDevice };
+      return { requiresTwoFactor: false, newDevice: !!response.newDevice, account: accountOf(response.user) };
     },
     [],
   );
@@ -274,6 +302,30 @@ export function AuthProvider({ children }: AuthProviderProps) {
       setUser(null);
     }
   }, []);
+
+  const signOutAllDevices = useCallback(async (): Promise<void> => {
+    try {
+      await authService.logoutAllDevices();
+    } finally {
+      setUser(null);
+    }
+  }, []);
+
+  /**
+   * Troca a senha. Tira a troca obrigatória do usuário e mantém a senha da
+   * biometria em dia (se estiver ativa).
+   */
+  const changePassword = useCallback(
+    async (currentPassword: string, newPassword: string): Promise<void> => {
+      if (!user) throw new Error('Usuário não autenticado');
+      await authService.changePassword(user.id, currentPassword, newPassword);
+      const updated = { ...user, forcePasswordChange: false };
+      setUser(updated);
+      await saveUser(updated);
+      await biometricService.updatePassword(newPassword).catch(() => undefined);
+    },
+    [user],
+  );
 
   /**
    * Atualiza os dados do usuário no contexto e storage
@@ -343,6 +395,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
         signIn,
         completeTwoFactorSignIn,
         signOut,
+        signOutAllDevices,
+        changePassword,
         register,
         updateUser,
         updateCommunity,

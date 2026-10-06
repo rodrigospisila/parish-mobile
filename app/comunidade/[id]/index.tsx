@@ -166,7 +166,10 @@ export default function CommunityPublicScreen() {
       data.name,
       data.parish?.name && data.parish.name !== data.name ? data.parish.name : null,
       addressLine || null,
-      hasCoords ? `https://www.google.com/maps/search/?api=1&query=${data.latitude},${data.longitude}` : null,
+      // Link do OpenStreetMap (Google Maps nunca é link nem fonte — contrato)
+      hasCoords
+        ? `https://www.openstreetmap.org/?mlat=${data.latitude}&mlon=${data.longitude}#map=18/${data.latitude}/${data.longitude}`
+        : null,
     ].filter(Boolean);
     Share.share({ message: lines.join('\n') }).catch(() => undefined);
   };

@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { isPlanError } from './planErrors';
 
 /**
  * Cache de leitura para resiliência offline (roadmap 4.7).
@@ -51,6 +52,12 @@ export async function cachedFetch<T>(
     await writeCache(key, fresh);
     return { data: fresh, fromCache: false };
   } catch (error) {
+    // 403 do plano da comunidade é resposta definitiva, não falta de rede:
+    // devolver o cache mostraria escalas antigas como se valessem
+    if (isPlanError(error)) {
+      await clearCache(key);
+      throw error;
+    }
     const cached = await readCache<T>(key);
     if (cached) {
       return { data: cached.data, fromCache: true, cachedAt: cached.cachedAt };

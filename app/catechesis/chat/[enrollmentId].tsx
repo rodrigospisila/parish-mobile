@@ -104,7 +104,7 @@ export default function CatechesisChatScreen() {
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
       <Stack.Screen options={{ headerShown: false }} />
       <View style={styles.header}>
-        <TouchableOpacity style={styles.headerBtn} onPress={() => router.back()} hitSlop={10}>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Voltar" style={styles.headerBtn} onPress={() => router.back()} hitSlop={10}>
           <FontAwesome5 name="arrow-left" size={17} color={colors.text} />
         </TouchableOpacity>
         <View style={{ flex: 1, alignItems: 'center' }}>
@@ -189,7 +189,7 @@ export default function CatechesisChatScreen() {
               maxLength={1000}
               multiline
             />
-            <TouchableOpacity
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Enviar mensagem"
               style={[styles.sendBtn, (!text.trim() || sending) && styles.sendBtnOff]}
               disabled={!text.trim() || sending}
               onPress={() => void handleSend()}

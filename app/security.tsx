@@ -38,7 +38,7 @@ import { authService } from '../src/services/authService';
 export default function SecurityScreen() {
   const router = useRouter();
   const colors = useColors();
-  const { refreshUser, signOut, user } = useAuth();
+  const { refreshUser, signOut, signOutAllDevices, user } = useAuth();
   const styles = createStyles(colors);
 
   // ---------- estado principal ----------
@@ -54,6 +54,8 @@ export default function SecurityScreen() {
   const [setup, setSetup] = useState<TwoFactorSetup | null>(null);
   const [setupLoading, setSetupLoading] = useState(false);
   const [enableCode, setEnableCode] = useState('');
+  // Ativar o 2FA pede a senha atual: só o token da sessão não basta (M5)
+  const [enablePassword, setEnablePassword] = useState('');
   const [enabling, setEnabling] = useState(false);
   const [secretCopied, setSecretCopied] = useState(false);
 
@@ -119,7 +121,11 @@ export default function SecurityScreen() {
     setBioModalVisible(true);
   };
 
-  /** Confere a senha no servidor antes de guardar (senha errada guardada = biometria que nunca funciona) */
+  /**
+   * Confere a senha no servidor antes de guardar (senha errada guardada =
+   * biometria que nunca funciona) — sem abrir outra sessão nem gerar um
+   * "novo acesso" (B9). A biometria fica ligada à CONTA (id), não ao texto.
+   */
   const confirmBiometric = async () => {
     if (!user?.email || !bioPassword) {
       setBioError('Digite a sua senha.');
@@ -128,16 +134,24 @@ export default function SecurityScreen() {
     setBioSaving(true);
     setBioError('');
     try {
-      await authService.login({ email: user.email, password: bioPassword });
-      await biometricService.enable(user.email, bioPassword);
-      setBioEnabled(true);
-      setBioModalVisible(false);
+      await authService.verifyPassword(bioPassword);
     } catch (error: any) {
       setBioError(
-        error?.status === 401 || error?.status === 400
+        error?.status === 400 || error?.status === 401
           ? 'Senha incorreta.'
           : error?.message || 'Não foi possível conferir a senha agora.',
       );
+      setBioSaving(false);
+      setBioPassword('');
+      return;
+    }
+    try {
+      await biometricService.enable(user.email, bioPassword, user.id);
+      setBioEnabled(true);
+      setBioModalVisible(false);
+    } catch {
+      // Sem item protegido pela biometria do sistema, a senha não é guardada
+      setBioError(`Este aparelho não conseguiu guardar a entrada com ${bioSupport?.label ?? 'biometria'} com segurança.`);
     } finally {
       setBioSaving(false);
       setBioPassword('');
@@ -168,6 +182,7 @@ export default function SecurityScreen() {
 
     setSetup(null);
     setEnableCode('');
+    setEnablePassword('');
     setSecretCopied(false);
     setSetupVisible(true);
     setSetupLoading(true);
@@ -199,10 +214,15 @@ export default function SecurityScreen() {
       Alert.alert('Código incompleto', 'Digite os 6 dígitos mostrados no app autenticador.');
       return;
     }
+    if (!enablePassword) {
+      Alert.alert('Senha atual', 'Digite a sua senha atual para confirmar a ativação.');
+      return;
+    }
 
     setEnabling(true);
     try {
-      const result = await securityService.enableTwoFactor(cleanCode);
+      const result = await securityService.enableTwoFactor(cleanCode, enablePassword);
+      setEnablePassword('');
       setSetupVisible(false);
       setSetup(null);
       setEnableCode('');
@@ -223,6 +243,38 @@ export default function SecurityScreen() {
     setSetupVisible(false);
     setSetup(null);
     setEnableCode('');
+    setEnablePassword('');
+  };
+
+  // ============================================
+  // SENHA E SESSÕES
+  // ============================================
+
+  const [loggingOutAll, setLoggingOutAll] = useState(false);
+
+  /** "Sair" no perfil encerra só este aparelho; aqui, todos (inclusive este). */
+  const confirmLogoutAll = () => {
+    Alert.alert(
+      'Sair de todos os aparelhos',
+      'Todas as sessões da sua conta serão encerradas — no painel, em outros celulares e também aqui. Você precisará entrar de novo em cada um.',
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Sair de todos',
+          style: 'destructive',
+          onPress: async () => {
+            setLoggingOutAll(true);
+            try {
+              await signOutAllDevices();
+            } catch (error: any) {
+              Alert.alert('Erro', error?.message ?? 'Não foi possível encerrar as sessões.');
+            } finally {
+              setLoggingOutAll(false);
+            }
+          },
+        },
+      ],
+    );
   };
 
   // ============================================
@@ -429,7 +481,7 @@ export default function SecurityScreen() {
             <View style={{ flex: 1 }}>
               <Text style={styles.statusTitle}>Entrar com {bioSupport.label}</Text>
               <Text style={styles.statusDescription}>
-                A senha fica guardada só neste aparelho, protegida pelo sistema.
+                A senha fica guardada só neste aparelho e só sai com {bioSupport.label}.
               </Text>
             </View>
             <Switch
@@ -456,7 +508,7 @@ export default function SecurityScreen() {
         <View style={styles.sheet}>
           <View style={styles.sheetHeader}>
             <Text style={styles.sheetTitle}>Entrar com {bioSupport?.label ?? 'biometria'}</Text>
-            <TouchableOpacity onPress={() => setBioModalVisible(false)} hitSlop={10} disabled={bioSaving}>
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Fechar" onPress={() => setBioModalVisible(false)} hitSlop={10} disabled={bioSaving}>
               <Ionicons name="close" size={24} color={colors.textSecondary} />
             </TouchableOpacity>
           </View>
@@ -502,6 +554,42 @@ export default function SecurityScreen() {
         </View>
       </KeyboardAvoidingView>
     </Modal>
+  );
+
+  const renderPasswordSection = () => (
+    <View style={styles.section}>
+      <Text style={styles.sectionTitle}>Senha e sessões</Text>
+      <Text style={styles.sectionHint}>
+        Trocar a senha encerra as sessões nos outros aparelhos. "Sair" no perfil encerra só este
+        aparelho.
+      </Text>
+      <View style={styles.card}>
+        <View style={styles.cardActions}>
+          <TouchableOpacity
+            style={styles.primaryButton}
+            onPress={() => router.push('/change-password' as never)}
+            activeOpacity={0.8}
+          >
+            <Ionicons name="key-outline" size={18} color={colors.textInverse} />
+            <Text style={styles.primaryButtonText}>Trocar senha</Text>
+          </TouchableOpacity>
+        </View>
+        <View style={styles.cardActions}>
+          <TouchableOpacity
+            style={[styles.dangerButton, styles.dangerButtonFull, loggingOutAll && styles.buttonDisabled]}
+            onPress={confirmLogoutAll}
+            disabled={loggingOutAll}
+            activeOpacity={0.8}
+          >
+            {loggingOutAll ? (
+              <ActivityIndicator color={colors.error} />
+            ) : (
+              <Text style={styles.dangerButtonText}>Sair de todos os aparelhos</Text>
+            )}
+          </TouchableOpacity>
+        </View>
+      </View>
+    </View>
   );
 
   const renderDevicesSection = () => (
@@ -580,7 +668,7 @@ export default function SecurityScreen() {
         <View style={styles.sheet}>
           <View style={styles.sheetHeader}>
             <Text style={styles.sheetTitle}>Ativar verificação em duas etapas</Text>
-            <TouchableOpacity onPress={cancelSetup} hitSlop={10} disabled={enabling}>
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Fechar" onPress={cancelSetup} hitSlop={10} disabled={enabling}>
               <Ionicons name="close" size={24} color={colors.textSecondary} />
             </TouchableOpacity>
           </View>
@@ -631,8 +719,20 @@ export default function SecurityScreen() {
 
                 <Text style={[styles.stepText, { marginTop: 18 }]}>
                   <Text style={styles.stepNumber}>2. </Text>
-                  Digite o código de 6 dígitos que o app mostra para confirmar.
+                  Digite o código de 6 dígitos que o app mostra e a sua senha atual para confirmar.
                 </Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="Senha atual"
+                  placeholderTextColor={colors.placeholder}
+                  secureTextEntry
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  textContentType="password"
+                  value={enablePassword}
+                  onChangeText={setEnablePassword}
+                  editable={!enabling}
+                />
                 <TextInput
                   style={[styles.input, styles.codeInput]}
                   placeholder="000000"
@@ -741,7 +841,7 @@ export default function SecurityScreen() {
         <View style={styles.sheet}>
           <View style={styles.sheetHeader}>
             <Text style={styles.sheetTitle}>Desativar verificação em duas etapas</Text>
-            <TouchableOpacity
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Fechar"
               onPress={() => setDisableVisible(false)}
               hitSlop={10}
               disabled={disabling}
@@ -806,7 +906,7 @@ export default function SecurityScreen() {
     <SafeAreaView style={styles.safe} edges={['top']}>
       <Stack.Screen options={{ headerShown: false }} />
       <View style={styles.header}>
-        <TouchableOpacity style={styles.headerBtn} onPress={() => router.back()} hitSlop={10}>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Voltar" style={styles.headerBtn} onPress={() => router.back()} hitSlop={10}>
           <FontAwesome5 name="arrow-left" size={17} color={colors.text} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Segurança da conta</Text>
@@ -827,6 +927,7 @@ export default function SecurityScreen() {
         >
           {renderTwoFactorSection()}
           {renderBiometricSection()}
+          {renderPasswordSection()}
           {renderDevicesSection()}
           <View style={{ height: 32 }} />
         </ScrollView>

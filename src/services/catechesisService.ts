@@ -1,5 +1,6 @@
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
+import axios from 'axios';
 import api, { getAccessToken, getErrorMessage } from '../config/api';
 
 // ============================================
@@ -177,7 +178,36 @@ export interface FamilyCatechesisItem {
   rejectionReason?: string | null;
   /** Mensagens da equipe ainda não lidas pela família (Onda 4) */
   unreadMessages?: number;
+  /** Uso de imagem respondido (null = não respondido) */
+  imageConsent?: boolean | null;
+  /** Termo LGPD da matrícula ainda não registrado — o app pede o aceite (M8) */
+  guardianConsentPending?: boolean;
 }
+
+/** Matrículas cujo termo ainda deve ser pedido ao responsável (recusadas e concluídas ficam de fora). */
+export const isConsentPending = (item: FamilyCatechesisItem): boolean =>
+  item.guardianConsentPending === true &&
+  (item.status === 'ACTIVE' || item.status === 'PENDING_APPROVAL' || item.status === 'WAITLISTED');
+
+/** Última resposta de termo enviada — o Início usa para recarregar o aviso. */
+let familyCatechesisChangedAt = 0;
+export const getFamilyCatechesisChangedAt = (): number => familyCatechesisChangedAt;
+
+/**
+ * Termo LGPD / uso de imagem de uma matrícula, respondido pelo responsável
+ * (ou pelo próprio adulto). Retirar o consentimento é pela tela Privacidade.
+ */
+export const recordCatechesisConsent = async (
+  enrollmentId: string,
+  dto: { consentGiven: true; imageConsent: boolean },
+): Promise<void> => {
+  try {
+    await api.patch(`/catechesis/enrollments/${enrollmentId}/consent`, dto);
+    familyCatechesisChangedAt = Date.now();
+  } catch (error) {
+    throw new Error(getErrorMessage(error));
+  }
+};
 
 /** Catequese da FAMÍLIA: matrículas próprias e dos dependentes. */
 export const getMyFamilyCatechesis = async (): Promise<FamilyCatechesisItem[]> => {
@@ -234,6 +264,15 @@ export const getCatechesisSessions = async (
   }
 };
 
+/** Encontro duplicado (mesma turma, mesmo dia) — POST de encontro devolveu 409. */
+export class DuplicateSessionError extends Error {
+  readonly duplicate = true;
+}
+
+/** Checagem por campo (instanceof em subclasse de Error não é confiável em todo runtime). */
+export const isDuplicateSessionError = (error: unknown): boolean =>
+  (error as { duplicate?: boolean } | null)?.duplicate === true;
+
 export const createCatechesisSession = async (
   classId: string,
   date: string,
@@ -243,6 +282,10 @@ export const createCatechesisSession = async (
     const { data } = await api.post(`/catechesis/classes/${classId}/sessions`, { date, topic });
     return data;
   } catch (error) {
+    // 409 = já existe encontro da turma nesse dia: a tela oferece abrir o existente
+    if (axios.isAxiosError(error) && error.response?.status === 409) {
+      throw new DuplicateSessionError(getErrorMessage(error));
+    }
     throw new Error(getErrorMessage(error));
   }
 };

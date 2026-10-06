@@ -246,6 +246,32 @@ const emitAuthFailure = () => {
 };
 
 // ============================================
+// TROCA DE SENHA OBRIGATÓRIA (servidor com PASSWORD_CHANGE_ENFORCEMENT=on)
+// ============================================
+
+/** Código do 403 quando a conta precisa trocar a senha antes de qualquer outra coisa */
+export const PASSWORD_CHANGE_REQUIRED = 'PASSWORD_CHANGE_REQUIRED';
+
+type PasswordChangeListener = () => void;
+const passwordChangeListeners = new Set<PasswordChangeListener>();
+
+/** O AuthContext marca o usuário e o layout leva à tela de troca de senha. */
+export const onPasswordChangeRequired = (listener: PasswordChangeListener): (() => void) => {
+  passwordChangeListeners.add(listener);
+  return () => passwordChangeListeners.delete(listener);
+};
+
+const emitPasswordChangeRequired = () => {
+  passwordChangeListeners.forEach((listener) => {
+    try {
+      listener();
+    } catch {
+      // ouvinte não pode quebrar o interceptor
+    }
+  });
+};
+
+// ============================================
 // INTERCEPTOR DE REQUEST
 // ============================================
 
@@ -366,6 +392,11 @@ api.interceptors.response.use(
 
     // Se não houver config ou já tentou retry, rejeita
     if (!originalRequest) {
+      return Promise.reject(error);
+    }
+
+    if (error.response?.status === 403 && (error.response?.data as any)?.code === PASSWORD_CHANGE_REQUIRED) {
+      emitPasswordChangeRequired();
       return Promise.reject(error);
     }
 

@@ -44,7 +44,9 @@ import {
   AppNotification,
   shareFeeReceipt,
   getCommunityCatechesisClasses,
+  isConsentPending,
 } from '../../src/services/catechesisService';
+import { CATECHESIS_CONSENT_TEXT } from '../../src/constants/catechesisConsent';
 import { useAuth } from '../../src/context/AuthContext';
 import { useCommunity } from '../../src/context/CommunityContext';
 
@@ -433,7 +435,13 @@ export default function CatechesisClassesScreen() {
     <SafeAreaView style={styles.safe} edges={['top']}>
       <Stack.Screen options={{ headerShown: false }} />
       <View style={styles.header}>
-        <TouchableOpacity style={styles.headerBtn} onPress={() => router.back()} hitSlop={10}>
+        <TouchableOpacity
+          style={styles.headerBtn}
+          onPress={() => router.back()}
+          hitSlop={10}
+          accessibilityRole="button"
+          accessibilityLabel="Voltar"
+        >
           <FontAwesome5 name="arrow-left" size={17} color={colors.text} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Catequese</Text>
@@ -555,7 +563,7 @@ export default function CatechesisClassesScreen() {
                   autoCorrect={false}
                 />
                 {search.length > 0 && (
-                  <TouchableOpacity onPress={() => setSearch('')} hitSlop={10}>
+                  <TouchableOpacity accessibilityRole="button" accessibilityLabel="Limpar busca" onPress={() => setSearch('')} hitSlop={10}>
                     <FontAwesome5 name="times-circle" size={15} color={colors.textTertiary} />
                   </TouchableOpacity>
                 )}
@@ -687,6 +695,23 @@ export default function CatechesisClassesScreen() {
                       : ''}
                     {item.class.time ? ` às ${item.class.time}` : ''}
                   </Text>
+                  {isConsentPending(item) && (
+                    <TouchableOpacity
+                      style={styles.consentBanner}
+                      activeOpacity={0.85}
+                      onPress={() =>
+                        router.push(`/catechesis/consent?enrollmentId=${item.enrollmentId}` as never)
+                      }
+                      accessibilityRole="button"
+                      accessibilityLabel={`${CATECHESIS_CONSENT_TEXT.pendingBanner}: ${
+                        item.member.isSelf ? 'você' : item.member.fullName
+                      }`}
+                    >
+                      <FontAwesome5 name="file-signature" size={13} color={colors.warning} />
+                      <Text style={styles.consentBannerText}>{CATECHESIS_CONSENT_TEXT.pendingBanner}</Text>
+                      <FontAwesome5 name="chevron-right" size={11} color={colors.warning} />
+                    </TouchableOpacity>
+                  )}
                   <View style={styles.cardStats}>
                     <TouchableOpacity
                       onPress={() =>
@@ -1334,6 +1359,19 @@ const createStyles = (colors: ReturnType<typeof useColors>) =>
       marginBottom: 2,
     },
     pendingLine: { fontSize: 12.5, color: colors.warning, marginTop: 6 },
+    consentBanner: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      borderWidth: 1.25,
+      borderColor: colors.warning,
+      backgroundColor: `${colors.warning}14`,
+      borderRadius: 10,
+      paddingHorizontal: 10,
+      paddingVertical: 8,
+      marginTop: 8,
+    },
+    consentBannerText: { flex: 1, fontSize: 13, fontWeight: '700', color: colors.warning },
     okLine: { fontSize: 12.5, color: colors.success, marginTop: 6, fontWeight: '600' },
     docBtnRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
     denomInput: {

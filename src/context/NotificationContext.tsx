@@ -49,6 +49,12 @@ export function NotificationProvider({ children }: NotificationProviderProps) {
   const notificationListener = useRef<Notifications.EventSubscription | null>(null);
   const responseListener = useRef<Notifications.EventSubscription | null>(null);
   const pushTokenListener = useRef<Notifications.EventSubscription | null>(null);
+  /**
+   * Conta logada para o ouvinte de token rotacionado: o efeito abaixo roda uma
+   * vez só e fecharia sobre user=null (M42) — o token novo nunca seria enviado.
+   */
+  const userIdRef = useRef<string | null>(user?.id ?? null);
+  userIdRef.current = user?.id ?? null;
 
   // Inicialização
   useEffect(() => {
@@ -100,7 +106,7 @@ export function NotificationProvider({ children }: NotificationProviderProps) {
 
     // Token de push pode rotacionar (reinstalacao, troca de credenciais do dispositivo etc.)
     pushTokenListener.current = Notifications.addPushTokenListener(() => {
-      registerPushTokenWithBackend();
+      registerPushTokenWithBackend().catch(() => undefined);
     });
 
     return () => {
@@ -112,7 +118,7 @@ export function NotificationProvider({ children }: NotificationProviderProps) {
 
   // Envia o token de push atual do dispositivo para o backend (best-effort)
   const registerPushTokenWithBackend = async () => {
-    if (!user?.id) {
+    if (!userIdRef.current) {
       return;
     }
 
@@ -150,7 +156,7 @@ export function NotificationProvider({ children }: NotificationProviderProps) {
       const scheduled = await getScheduledNotifications();
       setScheduledCount(scheduled.length);
     } catch (error) {
-      console.error('Erro ao agendar notificacoes:', error);
+      console.error('Erro ao agendar notificações:', error);
     }
   };
 
@@ -158,7 +164,8 @@ export function NotificationProvider({ children }: NotificationProviderProps) {
     if (isPermissionGranted && settings.enabled) {
       rescheduleEventNotifications();
     }
-  }, [user?.communityId, settings.enabled, settings.eventReminders, settings.reminderTime, isPermissionGranted]);
+    // user?.id: outra conta na mesma comunidade também refaz os lembretes (B24)
+  }, [user?.id, user?.communityId, settings.enabled, settings.eventReminders, settings.reminderTime, isPermissionGranted]);
 
   const updateSettings = async (newSettings: Partial<NotificationSettings>) => {
     const updated = { ...settings, ...newSettings };

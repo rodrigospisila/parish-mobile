@@ -228,7 +228,7 @@ export default function ProfileScreen() {
     <SafeAreaView style={styles.safeArea}>
       <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
         <View style={styles.header}>
-          <TouchableOpacity activeOpacity={0.8} onPress={handleChangeAvatar}>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Trocar foto do perfil" activeOpacity={0.8} onPress={handleChangeAvatar}>
             <UserAvatar
               userId={user?.id}
               name={user?.name}
@@ -330,6 +330,17 @@ export default function ProfileScreen() {
               </View>
             </TouchableOpacity>
             <View style={styles.divider} />
+            {/* Direitos do titular (LGPD — B62): consentimentos, exportação e exclusão */}
+            <TouchableOpacity style={styles.infoRow} onPress={() => router.push('/privacy' as never)}>
+              <Text style={styles.infoLabel}>Privacidade</Text>
+              <View style={styles.infoValueLink}>
+                <Text style={[styles.infoValue, { color: colors.primary }]} numberOfLines={1}>
+                  Consentimentos e meus dados
+                </Text>
+                <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />
+              </View>
+            </TouchableOpacity>
+            <View style={styles.divider} />
             <TouchableOpacity
               style={styles.infoRow}
               onPress={() => router.push('/change-community' as never)}
@@ -388,7 +399,7 @@ export default function ProfileScreen() {
                       ) : null}
                     </View>
                     {!link.isPrimary && (
-                      <TouchableOpacity
+                      <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Opções do vínculo com ${link.community.name}`}
                         hitSlop={8}
                         onPress={() => {
                           Alert.alert(link.community.name, 'O que deseja fazer com este vínculo?', [

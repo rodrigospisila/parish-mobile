@@ -308,7 +308,7 @@ export const getCoordinatorScheduleDetail = async (
   scheduleId: string,
 ): Promise<CoordinatorScheduleDetail> => {
   if (USE_MOCK) {
-    throw new Error('Detalhe da escala indisponivel em modo mock');
+    throw new Error('Detalhe da escala indisponível em modo mock');
   }
 
   try {

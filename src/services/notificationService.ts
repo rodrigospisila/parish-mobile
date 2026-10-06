@@ -5,7 +5,17 @@ import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Event } from './eventService';
 import { MassSchedule, eventTypeLabels } from '../types';
-import { descreverRecorrencia, ehMensal, proximaOcorrencia } from '../utils/recorrencia';
+import { descreverRecorrencia, ehMensal } from '../utils/recorrencia';
+import { chaveDataCivil, dataCivilComHora, formatarDataCivil } from '../utils/dataCivil';
+import { proximaOcorrenciaValida, suspensaoNoDia, suspensoesDe } from '../utils/suspensoes';
+
+/**
+ * Horário semanal com suspensões à vista ("não haverá"): em vez do lembrete
+ * repetido (que não sabe pular uma data), agenda avulsos para as próximas
+ * ocorrências válidas. Poucos, por causa do limite de 64 avisos locais do iOS;
+ * o reagendamento ao abrir o app renova a lista.
+ */
+const MAX_WEEKLY_REMINDERS_WITH_SUSPENSIONS = 6;
 
 // Chaves para AsyncStorage
 const NOTIFICATION_SETTINGS_KEY = '@parish_notification_settings';
@@ -47,20 +57,29 @@ interface ScheduledNotification {
 
 const massScheduleTypeLabels: Record<string, string> = {
   MASS: 'Missa',
-  CONFESSION: 'Confissao',
-  ADORATION: 'Adoracao',
-  ROSARY: 'Terco',
+  CONFESSION: 'Confissão',
+  ADORATION: 'Adoração',
+  ROSARY: 'Terço',
 };
 
 const weekdayLabels = [
   'Domingo',
   'Segunda',
-  'Terca',
+  'Terça',
   'Quarta',
   'Quinta',
   'Sexta',
-  'Sabado',
+  'Sábado',
 ];
+
+/** Antecedência do lembrete por extenso: "1 hora", "2 horas", "1 hora e 30 minutos", "15 minutos". */
+const formatLeadTime = (minutesBefore: number): string => {
+  const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+  if (minutesBefore < 60) return plural(minutesBefore, 'minuto', 'minutos');
+  const hours = Math.floor(minutesBefore / 60);
+  const rest = minutesBefore % 60;
+  return rest ? `${plural(hours, 'hora', 'horas')} e ${plural(rest, 'minuto', 'minutos')}` : plural(hours, 'hora', 'horas');
+};
 
 const parseTime = (time: string) => {
   const [hourStr, minuteStr] = time.split(':');
@@ -216,9 +235,7 @@ export const scheduleEventNotification = async (
 
     // Mapeia tipo de evento para texto amigável
     const eventTypeLabel = eventTypeLabels[event.type] || event.type;
-    const timeLabel = minutesBefore >= 60 
-      ? `${Math.floor(minutesBefore / 60)} hora(s)` 
-      : `${minutesBefore} minutos`;
+    const timeLabel = formatLeadTime(minutesBefore);
 
     const notificationId = await Notifications.scheduleNotificationAsync({
       content: {
@@ -268,21 +285,22 @@ export const scheduleMassScheduleNotification = async (
     }
 
     const typeLabel = massScheduleTypeLabels[schedule.type] || schedule.type;
-    const timeLabel = minutesBefore >= 60
-      ? `${Math.floor(minutesBefore / 60)} hora(s)`
-      : `${minutesBefore} minutos`;
+    const timeLabel = formatLeadTime(minutesBefore);
 
     if (schedule.isSpecial && schedule.specialDate) {
-      const specialDate = new Date(schedule.specialDate);
-      const notificationDate = new Date(specialDate);
-      notificationDate.setHours(hour, minute, 0, 0);
+      // Data só-dia (A20): '2026-10-12T00:00:00.000Z' é 12/10, não 11/10 às 21:00
+      const notificationDate = dataCivilComHora(schedule.specialDate, schedule.time);
+      if (!notificationDate) return null;
+      // Especial suspensa ("não haverá"): sem lembrete
+      const dayKey = chaveDataCivil(schedule.specialDate);
+      if (dayKey && suspensaoNoDia(schedule, dayKey)) return null;
       const reminderDate = new Date(notificationDate.getTime() - minutesBefore * 60 * 1000);
 
       if (reminderDate <= new Date()) {
         return null;
       }
 
-      const bodyLabel = schedule.specialDate.split('T')[0];
+      const bodyLabel = formatarDataCivil(schedule.specialDate);
       return await Notifications.scheduleNotificationAsync({
         content: {
           title: `${typeLabel} especial em ${timeLabel}`,
@@ -303,7 +321,8 @@ export const scheduleMassScheduleNotification = async (
     // Recorrência mensal: um único aviso para a próxima ocorrência. Repetir
     // toda semana anunciaria missas que não acontecem.
     if (ehMensal(schedule)) {
-      const proxima = proximaOcorrencia(schedule, schedule.time, new Date());
+      // Pula as datas suspensas ("não haverá")
+      const proxima = proximaOcorrenciaValida(schedule, schedule.time, new Date());
       if (!proxima) return null;
       const lembrete = new Date(proxima.getTime() - minutesBefore * 60 * 1000);
       if (lembrete <= new Date()) return null;
@@ -326,6 +345,35 @@ export const scheduleMassScheduleNotification = async (
     }
 
     if (schedule.dayOfWeek === null || schedule.dayOfWeek === undefined) return null;
+
+    const weekdayName = weekdayLabels[schedule.dayOfWeek] || 'Dia';
+    if (suspensoesDe(schedule).length > 0) {
+      // Semanal com suspensão à vista: lembretes avulsos, pulando os dias suspensos
+      let firstId: string | null = null;
+      let base = new Date();
+      for (let i = 0; i < MAX_WEEKLY_REMINDERS_WITH_SUSPENSIONS; i += 1) {
+        const occurrence = proximaOcorrenciaValida(schedule, schedule.time, base);
+        if (!occurrence) break;
+        base = new Date(occurrence.getFullYear(), occurrence.getMonth(), occurrence.getDate() + 1, 0, 0, 0, 0);
+        const reminder = new Date(occurrence.getTime() - minutesBefore * 60 * 1000);
+        if (reminder <= new Date()) continue;
+        const id = await Notifications.scheduleNotificationAsync({
+          content: {
+            title: `${typeLabel} em ${timeLabel}`,
+            body: schedule.notes ? `${weekdayName} ${schedule.time} - ${schedule.notes}` : `${weekdayName} ${schedule.time}`,
+            data: { massScheduleId: schedule.id, type: 'mass_schedule_reminder' },
+            sound: true,
+          },
+          trigger: {
+            type: Notifications.SchedulableTriggerInputTypes.DATE,
+            date: reminder,
+            channelId: 'events',
+          },
+        });
+        firstId = firstId ?? id;
+      }
+      return firstId;
+    }
 
     const { reminderDay, reminderHour, reminderMinute } = computeReminderTime(
       schedule.dayOfWeek,
@@ -354,7 +402,7 @@ export const scheduleMassScheduleNotification = async (
       },
     });
   } catch (error) {
-    console.error('Erro ao agendar notificacao de missa fixa:', error);
+    console.error('Erro ao agendar notificação de missa fixa:', error);
     return null;
   }
 };
@@ -382,9 +430,7 @@ export const scheduleRosterNotification = async (
       return null;
     }
 
-    const timeLabel = minutesBefore >= 60 
-      ? `${Math.floor(minutesBefore / 60)} hora(s)` 
-      : `${minutesBefore} minutos`;
+    const timeLabel = formatLeadTime(minutesBefore);
 
     const notificationId = await Notifications.scheduleNotificationAsync({
       content: {

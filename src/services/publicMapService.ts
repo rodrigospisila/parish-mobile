@@ -171,23 +171,41 @@ export interface MapQueryFilters {
   types?: string[];
   /** incluir comunidades com pino aproximado (approx=1) */
   approx?: boolean;
+  /**
+   * Filtros de dia e de horário da tela: o servidor PRIORIZA as celebrações que casam
+   * antes do teto por igreja (não filtra). Sem isso, igreja grande perdia o domingo.
+   */
+  day?: 'today' | 'sunday';
+  /** "HH:MM", inclusive */
+  from?: string;
+  to?: string;
 }
 
 // ---------- Mapa-base ----------
 
-/** Mapa-base padrão (OSM) — usado quando /public/map/config não responde. */
+/**
+ * Mapa-base padrão (OSM) — usado quando /public/map/config não responde. Sem
+ * satélite: o provedor de imagem (e o contrato dele) é escolhido no servidor
+ * (MAP_SATELLITE_*), nunca fixo no app.
+ */
 export const FALLBACK_MAP_CONFIG: MapConfig = {
   tileUrl: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
   tileUrlDark: null,
   attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
   maxZoom: 19,
   subdomains: 'abc',
-  satellite: {
-    tileUrl: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-    labelsUrl: 'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}',
-    attribution: 'Imagens &copy; Esri, Maxar, Earthstar Geographics',
-    maxZoom: 19,
-  },
+  satellite: null,
+};
+
+/** Satélite do servidor, validado; ausente ou sem tileUrl = sem modo satélite. */
+const toSatellite = (raw: MapConfig['satellite']): SatelliteConfig | null => {
+  if (!raw || typeof raw.tileUrl !== 'string' || !raw.tileUrl) return null;
+  return {
+    tileUrl: raw.tileUrl,
+    labelsUrl: typeof raw.labelsUrl === 'string' && raw.labelsUrl ? raw.labelsUrl : null,
+    attribution: raw.attribution || '',
+    maxZoom: Number(raw.maxZoom) || 19,
+  };
 };
 
 export const getMapConfig = async (): Promise<MapConfig> => {
@@ -202,6 +220,8 @@ export const getMapConfig = async (): Promise<MapConfig> => {
       attribution: data.attribution || FALLBACK_MAP_CONFIG.attribution,
       maxZoom: Number(data.maxZoom) || 19,
       subdomains: data.subdomains ?? 'abc',
+      // Antes este campo era descartado e o botão "Satélite" nunca aparecia
+      satellite: toSatellite(data.satellite),
     };
   } catch (error) {
     throw new Error(getErrorMessage(error));
@@ -214,6 +234,9 @@ const filterParams = (f: MapQueryFilters) => ({
   ...(f.days != null ? { days: f.days } : {}),
   ...(f.types?.length ? { types: f.types.join(',') } : {}),
   approx: f.approx ? 1 : 0,
+  ...(f.day ? { day: f.day } : {}),
+  ...(f.from ? { from: f.from } : {}),
+  ...(f.to ? { to: f.to } : {}),
 });
 
 /** Igrejas num raio em torno de um ponto (abertura com GPS / "minha localização"). */

@@ -356,7 +356,7 @@ export default function CatechesisApplyScreen() {
     <SafeAreaView style={styles.safe} edges={['top']}>
       <Stack.Screen options={{ headerShown: false }} />
       <View style={styles.header}>
-        <TouchableOpacity style={styles.headerBtn} onPress={() => router.back()} hitSlop={10}>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Voltar" style={styles.headerBtn} onPress={() => router.back()} hitSlop={10}>
           <FontAwesome5 name="arrow-left" size={17} color={colors.text} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Inscrição na catequese</Text>
@@ -575,7 +575,7 @@ export default function CatechesisApplyScreen() {
                               <Text style={styles.docChosenText} numberOfLines={1}>
                                 {draftLabel(draft)}
                               </Text>
-                              <TouchableOpacity
+                              <TouchableOpacity accessibilityRole="button" accessibilityLabel="Remover documento escolhido"
                                 hitSlop={8}
                                 onPress={() =>
                                   setDocsDraft((prev) => {

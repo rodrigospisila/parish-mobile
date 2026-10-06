@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -12,7 +12,7 @@ import {
   Alert,
   Linking,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -24,7 +24,13 @@ import {
 } from '../../src/utils/recorrencia';
 import { getCoordinatorOverview, CoordinatorOverview } from '../../src/services/pastoralService';
 import { useCommunity } from '../../src/context/CommunityContext';
-import { getMyCatechesisClasses, getMyFamilyCatechesis } from '../../src/services/catechesisService';
+import {
+  getFamilyCatechesisChangedAt,
+  getMyCatechesisClasses,
+  getMyFamilyCatechesis,
+  isConsentPending,
+} from '../../src/services/catechesisService';
+import { CATECHESIS_CONSENT_TEXT } from '../../src/constants/catechesisConsent';
 import { useColors } from '../../src/context/ThemeContext';
 import { useNotifications } from '../../src/context/NotificationContext';
 import UserAvatar from '../../src/components/UserAvatar';
@@ -50,6 +56,7 @@ import {
   suspensoesDe,
 } from '../../src/utils/suspensoes';
 import { formatDateBR, formatDateTimeBR } from '../../src/utils/dateUtils';
+import { dataCivilComHora, formatarDataCivil } from '../../src/utils/dataCivil';
 import {
   ClergyMessage,
   getClergyMessages,
@@ -105,6 +112,19 @@ function splitIntoVerses(text?: string): { num?: string; text: string }[] {
 
 
 /**
+ * Evento de dia inteiro — mesmo critério do Calendário (B21): começa à
+ * meia-noite local e não tem fim, ou termina também à meia-noite.
+ */
+function isAllDayEvent(event: { startDate: string; endDate?: string | null }): boolean {
+  const start = new Date(event.startDate);
+  if (Number.isNaN(start.getTime())) return false;
+  const startsMidnight = start.getHours() === 0 && start.getMinutes() === 0;
+  if (!event.endDate) return startsMidnight;
+  const end = new Date(event.endDate);
+  return startsMidnight && !Number.isNaN(end.getTime()) && end.getHours() === 0 && end.getMinutes() === 0;
+}
+
+/**
  * Ocorrência mais próxima entre os horários fixos (semanais + especiais).
  * Pula as datas suspensas ("não haverá") — mandar o fiel para uma missa que
  * não vai acontecer é pior do que mostrar a seguinte.
@@ -117,9 +137,11 @@ function nextFixedOccurrence(
   for (const s of schedules) {
     let date: Date;
     if (s.isSpecial && s.specialDate) {
-      const [hh, mm] = (s.time || '00:00').split(':').map((n) => parseInt(n, 10) || 0);
-      date = new Date(s.specialDate);
-      date.setHours(hh, mm, 0, 0);
+      // specialDate é só-dia (00:00Z): new Date() dela cai no dia ANTERIOR em
+      // Brasília — monta a data civil + hora no horário local (A20)
+      const especial = dataCivilComHora(s.specialDate, s.time);
+      if (!especial) continue;
+      date = especial;
       if (date.getTime() < from.getTime()) continue; // especial no passado
       if (suspensaoNoDia(s, chaveDoDia(date))) continue; // especial suspensa
     } else {
@@ -190,10 +212,14 @@ export default function HomeScreen() {
   const [isLiturgyModalVisible, setIsLiturgyModalVisible] = useState(false);
   const [showCommunityPicker, setShowCommunityPicker] = useState(false);
   const [catechesisClassCount, setCatechesisClassCount] = useState(0);
+  // Matrículas da família com o termo da catequese ainda sem resposta (M8)
+  const [consentPendingCount, setConsentPendingCount] = useState(0);
   const [massSchedules, setMassSchedules] = useState<MassSchedule[]>([]);
   const [favoriteMassScheduleIds, setFavoriteMassScheduleIds] = useState<string[]>([]);
   const [isLoadingMassSchedules, setIsLoadingMassSchedules] = useState(true);
   const [upcomingEventsError, setUpcomingEventsError] = useState(false);
+  // Tocar em "tentar de novo" (B30) incrementa e refaz a busca
+  const [upcomingReloadKey, setUpcomingReloadKey] = useState(0);
   const [massSchedulesError, setMassSchedulesError] = useState(false);
   const [liturgyError, setLiturgyError] = useState(false);
 
@@ -201,10 +227,13 @@ export default function HomeScreen() {
   const [clergyMessages, setClergyMessages] = useState<ClergyMessage[]>([]);
   const [isLoadingClergy, setIsLoadingClergy] = useState(true);
   const [clergyFromCache, setClergyFromCache] = useState(false);
+  const [clergyError, setClergyError] = useState(false);
+  const [clergyReloadKey, setClergyReloadKey] = useState(0);
 
   useEffect(() => {
     const loadClergyMessages = async () => {
       setIsLoadingClergy(true);
+      setClergyError(false);
       try {
         const { messages, fromCache } = await getClergyMessages(5, activeCommunityId);
         setClergyMessages(messages.slice(0, 3));
@@ -212,6 +241,7 @@ export default function HomeScreen() {
       } catch (error) {
         console.error('Erro ao carregar Palavra do Pastor:', error);
         setClergyMessages([]);
+        setClergyError(true);
       } finally {
         setIsLoadingClergy(false);
       }
@@ -219,7 +249,7 @@ export default function HomeScreen() {
     loadClergyMessages();
     // Recarrega ao logar (user.id) E ao trocar de comunidade (communityId),
     // senão a Palavra Pastoral fica presa na comunidade anterior.
-  }, [user?.id, user?.communityId]);
+  }, [user?.id, user?.communityId, clergyReloadKey]);
 
   useEffect(() => {
     if (!activeCommunityId) {
@@ -247,7 +277,7 @@ export default function HomeScreen() {
     };
 
     loadUpcomingEvents();
-  }, [activeCommunityId]);
+  }, [activeCommunityId, upcomingReloadKey]);
 
   useEffect(() => {
     if (!activeCommunityId) {
@@ -268,7 +298,7 @@ export default function HomeScreen() {
           console.error('Erro ao carregar favoritos das missas fixas:', error);
         }
       } catch (error) {
-        console.error('Erro ao carregar horarios fixos:', error);
+        console.error('Erro ao carregar horários fixos:', error);
         setMassSchedulesError(true);
       } finally {
         setIsLoadingMassSchedules(false);
@@ -328,7 +358,7 @@ export default function HomeScreen() {
     return colorMap[key] || colors.border;
   };
 
-  const dayLabels = ['Domingo', 'Segunda', 'Terca', 'Quarta', 'Quinta', 'Sexta', 'Sabado'];
+  const dayLabels = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
 
   const getDayLabel = (dayOfWeek: number) => {
     return dayLabels[dayOfWeek] || 'Dia';
@@ -355,7 +385,7 @@ export default function HomeScreen() {
       setFavoriteMassScheduleIds((prev) =>
         isFavorite ? [...prev, schedule.id] : prev.filter((id) => id !== schedule.id)
       );
-      Alert.alert('Erro', 'Nao foi possivel atualizar seus favoritos.');
+      Alert.alert('Erro', 'Não foi possível atualizar seus favoritos.');
     }
   };
 
@@ -377,7 +407,7 @@ export default function HomeScreen() {
         await rescheduleEventNotifications();
       } catch (error) {
         setFavoriteMassScheduleIds(previousFavorites);
-        Alert.alert('Erro', 'Nao foi possivel remover os favoritos.');
+        Alert.alert('Erro', 'Não foi possível remover os favoritos.');
       }
       return;
     }
@@ -393,7 +423,7 @@ export default function HomeScreen() {
       await rescheduleEventNotifications();
     } catch (error) {
       setFavoriteMassScheduleIds(previousFavorites);
-      Alert.alert('Erro', 'Nao foi possivel favoritar todas as missas.');
+      Alert.alert('Erro', 'Não foi possível favoritar todas as missas.');
     }
   };
 
@@ -402,11 +432,17 @@ export default function HomeScreen() {
   // ocorrência das missas fixas (agenda semanal).
   const nextCelebration = (() => {
     const now = new Date();
-    const candidates: { start: Date; title: string; location?: string; isFixed: boolean }[] = [];
+    const candidates: { start: Date; title: string; location?: string; isFixed: boolean; isAllDay?: boolean }[] = [];
     if (nextMass) {
       const d = new Date(nextMass.startDate);
       if (!Number.isNaN(d.getTime())) {
-        candidates.push({ start: d, title: nextMass.title, location: nextMass.location, isFixed: false });
+        candidates.push({
+          start: d,
+          title: nextMass.title,
+          location: nextMass.location,
+          isFixed: false,
+          isAllDay: isAllDayEvent(nextMass),
+        });
       }
     }
     const fixed = nextFixedOccurrence(massSchedules, now);
@@ -464,7 +500,7 @@ export default function HomeScreen() {
       );
     }
 
-    const { start, title, location, isFixed } = nextCelebration;
+    const { start, title, location, isFixed, isAllDay } = nextCelebration;
     const startOfToday = new Date();
     startOfToday.setHours(0, 0, 0, 0);
     const diffDays = Math.round((new Date(start).setHours(0, 0, 0, 0) - startOfToday.getTime()) / 86400000);
@@ -485,7 +521,7 @@ export default function HomeScreen() {
         <View style={styles.nextMassInfo}>
           <View style={styles.nextMassBadge}>
             <FontAwesome5 name="clock" size={10} color={colors.primary} />
-            <Text style={styles.nextMassBadgeText}>{relative} · {format(start, 'HH:mm')}</Text>
+            <Text style={styles.nextMassBadgeText}>{relative} · {isAllDay ? 'Dia todo' : format(start, 'HH:mm')}</Text>
           </View>
           <Text style={styles.nextMassTitle} numberOfLines={2}>{title}</Text>
           <View style={styles.nextMassMetaRow}>
@@ -530,7 +566,7 @@ export default function HomeScreen() {
     }
 
     if (massSchedules.length === 0) {
-      return <Text style={styles.infoText}>Nenhum horario fixo cadastrado.</Text>;
+      return <Text style={styles.infoText}>Nenhum horário fixo cadastrado.</Text>;
     }
 
     return (
@@ -553,7 +589,7 @@ export default function HomeScreen() {
                 </Text>
                 {schedule.isSpecial && schedule.specialDate ? (
                   <Text style={styles.massScheduleSpecial}>
-                    Especial: {formatDateBR(schedule.specialDate)}
+                    Especial: {formatarDataCivil(schedule.specialDate)}
                   </Text>
                 ) : null}
                 {(() => {
@@ -601,7 +637,7 @@ export default function HomeScreen() {
     }
 
     if (!liturgy) {
-      return <Text style={styles.infoText}>Liturgia nao disponivel no momento.</Text>;
+      return <Text style={styles.infoText}>Liturgia não disponível no momento.</Text>;
     }
 
     const liturgicalColor = getLiturgicalColor(liturgy.liturgicalColor);
@@ -740,7 +776,7 @@ export default function HomeScreen() {
           </View>
           {isFallback && (
             <View style={styles.liturgyFallbackBadge}>
-              <Text style={styles.liturgyFallbackText}>Indisponivel</Text>
+              <Text style={styles.liturgyFallbackText}>Indisponível</Text>
             </View>
           )}
         </View>
@@ -757,7 +793,7 @@ export default function HomeScreen() {
                 {availableReadings.map(renderReadingCard)}
               </View>
             ) : (
-              <Text style={styles.liturgyFallbackMessage}>Leituras nao disponiveis.</Text>
+              <Text style={styles.liturgyFallbackMessage}>Leituras não disponíveis.</Text>
             )}
             {canOpenModal && (
               <View style={styles.liturgyCta}>
@@ -805,6 +841,19 @@ export default function HomeScreen() {
       return <ActivityIndicator size="small" color={colors.primary} />;
     }
 
+    // Falha de rede/API não é "não há eventos" (B30)
+    if (upcomingEventsError) {
+      return (
+        <TouchableOpacity
+          onPress={() => setUpcomingReloadKey((key) => key + 1)}
+          accessibilityRole="button"
+          accessibilityLabel="Tentar carregar os eventos de novo"
+        >
+          <Text style={styles.errorText}>Não foi possível carregar os eventos — toque para tentar de novo.</Text>
+        </TouchableOpacity>
+      );
+    }
+
     if (upcomingEvents.length === 0) {
       return <Text style={styles.infoText}>Nenhum evento próximo para sua comunidade.</Text>;
     }
@@ -830,7 +879,7 @@ export default function HomeScreen() {
               <View style={styles.upcomingInfo}>
                 <Text style={styles.upcomingTitle} numberOfLines={2}>{event.title}</Text>
                 <Text style={styles.upcomingMeta} numberOfLines={1}>
-                  {format(start, 'HH:mm')}
+                  {isAllDayEvent(event) ? 'Dia todo' : format(start, 'HH:mm')}
                   {event.location ? ` · ${event.location}` : ''}
                 </Text>
               </View>
@@ -847,6 +896,17 @@ export default function HomeScreen() {
   const renderClergyMessages = () => {
     if (isLoadingClergy) {
       return <ActivityIndicator size="small" color={colors.primary} />;
+    }
+    if (clergyError) {
+      return (
+        <TouchableOpacity
+          onPress={() => setClergyReloadKey((key) => key + 1)}
+          accessibilityRole="button"
+          accessibilityLabel="Tentar carregar a Palavra Pastoral de novo"
+        >
+          <Text style={styles.errorText}>Não foi possível carregar as mensagens — toque para tentar de novo.</Text>
+        </TouchableOpacity>
+      );
     }
     if (clergyMessages.length === 0) {
       return <Text style={styles.clergyEmpty}>Nenhuma mensagem do clero por enquanto.</Text>;
@@ -888,18 +948,35 @@ export default function HomeScreen() {
     );
   };
 
-  useEffect(() => {
-    if (!user?.id) {
-      setCatechesisClassCount(0);
-      return;
-    }
-    Promise.all([
-      getMyCatechesisClasses().catch(() => []),
-      getMyFamilyCatechesis().catch(() => []),
-    ])
-      .then(([classes, family]) => setCatechesisClassCount(classes.length + family.length))
-      .catch(() => setCatechesisClassCount(0));
-  }, [user?.id]);
+  // Recarrega ao voltar para o Início no máximo a cada 30 s (não repete a
+  // consulta a cada toque) — ou logo após o termo da catequese ser respondido
+  const catechesisLoadedAt = useRef<{ userId: string | null; at: number }>({ userId: null, at: 0 });
+  useFocusEffect(
+    useCallback(() => {
+      if (!user?.id) {
+        setCatechesisClassCount(0);
+        setConsentPendingCount(0);
+        catechesisLoadedAt.current = { userId: null, at: 0 };
+        return;
+      }
+      const last = catechesisLoadedAt.current;
+      const fresh = Date.now() - last.at < 30_000 && getFamilyCatechesisChangedAt() < last.at;
+      if (last.userId === user.id && fresh) return;
+      catechesisLoadedAt.current = { userId: user.id, at: Date.now() };
+      Promise.all([
+        getMyCatechesisClasses().catch(() => []),
+        getMyFamilyCatechesis().catch(() => []),
+      ])
+        .then(([classes, family]) => {
+          setCatechesisClassCount(classes.length + family.length);
+          setConsentPendingCount(family.filter(isConsentPending).length);
+        })
+        .catch(() => {
+          setCatechesisClassCount(0);
+          setConsentPendingCount(0);
+        });
+    }, [user?.id]),
+  );
 
   // Recursos desligados pelo administrador do sistema (Configurações → Aplicativo)
   const [hiddenFeatures, setHiddenFeatures] = useState<Set<string>>(new Set());
@@ -947,7 +1024,7 @@ export default function HomeScreen() {
                 {format(new Date(), "EEE, d 'de' MMMM", { locale: ptBR })}
               </Text>
             </View>
-            <TouchableOpacity
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Avisos"
               style={styles.heroBell}
               activeOpacity={0.8}
               onPress={() => router.push('/notifications' as never)}
@@ -955,7 +1032,7 @@ export default function HomeScreen() {
             >
               <FontAwesome5 name="bell" size={16} color="#fff" />
             </TouchableOpacity>
-            <TouchableOpacity
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Meu perfil"
               activeOpacity={0.8}
               onPress={() => router.push('/(tabs)/profile' as never)}
             >
@@ -1236,11 +1313,18 @@ export default function HomeScreen() {
             </View>
             <View style={{ flex: 1 }}>
               <Text style={styles.nearbyTitle}>Catequese</Text>
-              <Text style={styles.nearbySub} numberOfLines={1}>
-                {catechesisClassCount > 0
-                  ? 'Turmas, encontros, chamada e acompanhamento da família'
-                  : 'Inscrições e acompanhamento da família'}
-              </Text>
+              {consentPendingCount > 0 ? (
+                <Text style={[styles.nearbySub, { color: colors.warning, fontWeight: '700' }]} numberOfLines={2}>
+                  {CATECHESIS_CONSENT_TEXT.pendingBannerShort}
+                  {consentPendingCount > 1 ? ` (${consentPendingCount})` : ''} — toque para responder
+                </Text>
+              ) : (
+                <Text style={styles.nearbySub} numberOfLines={1}>
+                  {catechesisClassCount > 0
+                    ? 'Turmas, encontros, chamada e acompanhamento da família'
+                    : 'Inscrições e acompanhamento da família'}
+                </Text>
+              )}
             </View>
             <FontAwesome5 name="chevron-right" size={14} color={colors.textTertiary} />
           </TouchableOpacity>

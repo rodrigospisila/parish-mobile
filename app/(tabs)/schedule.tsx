@@ -662,7 +662,7 @@ export default function ScheduleScreen() {
                 <Text style={styles.modalTitle}>{teamModal?.roster.eventTitle}</Text>
                 <Text style={styles.modalSubtitle}>Equipe escalada</Text>
               </View>
-              <TouchableOpacity onPress={() => setTeamModal(null)} style={styles.modalCloseButton}>
+              <TouchableOpacity accessibilityRole="button" accessibilityLabel="Fechar" onPress={() => setTeamModal(null)} style={styles.modalCloseButton}>
                 <Text style={styles.modalCloseText}>✕</Text>
               </TouchableOpacity>
             </View>
@@ -749,7 +749,7 @@ export default function ScheduleScreen() {
                   {swapModalRoster?.eventTitle} · {swapModalRoster ? formatToBrazilianDate(swapModalRoster.eventDate, 'dd/MM/yyyy') : ''}
                 </Text>
               </View>
-              <TouchableOpacity onPress={() => setSwapModalRoster(null)} style={styles.modalCloseButton}>
+              <TouchableOpacity accessibilityRole="button" accessibilityLabel="Fechar" onPress={() => setSwapModalRoster(null)} style={styles.modalCloseButton}>
                 <Text style={styles.modalCloseText}>✕</Text>
               </TouchableOpacity>
             </View>

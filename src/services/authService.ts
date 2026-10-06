@@ -1,4 +1,30 @@
-import api, { saveTokens, saveUser, clearTokens, getErrorMessage, getRetryAfterSeconds } from '../config/api';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import api, {
+  saveTokens,
+  saveUser,
+  clearTokens,
+  getErrorMessage,
+  getRetryAfterSeconds,
+  getAccessToken,
+  getRefreshToken,
+} from '../config/api';
+import { clearWriteQueue } from '../utils/offlineQueue';
+import { cancelAllNotifications } from './notificationService';
+
+/** Último push token registrado por este aparelho (para desligá-lo no logout) */
+const PUSH_TOKEN_KEY = '@parish:push_token';
+
+/**
+ * Dados locais da conta que NÃO podem passar para a próxima pessoa que entrar
+ * neste aparelho (B24): ações pendentes da fila offline e lembretes locais.
+ */
+export const clearAccountLocalData = async (): Promise<void> => {
+  await Promise.all([
+    clearWriteQueue(),
+    cancelAllNotifications(),
+    AsyncStorage.removeItem(PUSH_TOKEN_KEY).catch(() => {}),
+  ]);
+};
 
 /**
  * Erro com o status HTTP junto (0 = sem resposta do servidor), para a tela
@@ -295,25 +321,76 @@ export const authService = {
   },
 
   /**
-   * Realiza logout do usuário
+   * Sai DESTE aparelho: o servidor encerra só esta sessão (os outros aparelhos
+   * seguem logados) e desliga o push deste aparelho na conta. Fila offline e
+   * lembretes locais são apagados — não passam para a próxima conta.
    */
   async logout(): Promise<void> {
     // Modo Mock
     if (USE_MOCK) {
       await clearTokens();
+      await clearAccountLocalData();
       return;
     }
 
     // Chamada real para a API
     try {
-      // Limpa o push token no servidor antes de derrubar a sessão
-      await authService.registerPushToken(null);
-      await api.post('/auth/logout');
+      const [refreshToken, pushToken] = await Promise.all([
+        getRefreshToken(),
+        AsyncStorage.getItem(PUSH_TOKEN_KEY).catch(() => null),
+      ]);
+      if (await getAccessToken()) {
+        await api.post('/auth/logout', {
+          ...(refreshToken ? { refreshToken } : {}),
+          ...(pushToken ? { pushToken } : {}),
+        });
+      }
     } catch (error) {
-      // Mesmo se a chamada falhar, limpa os tokens locais
+      // Mesmo se a chamada falhar, limpa os tokens locais (o servidor tira o
+      // push desta conta quando a próxima conta registrar o mesmo aparelho)
       console.warn('Erro ao fazer logout na API:', error);
     } finally {
       await clearTokens();
+      await clearAccountLocalData();
+    }
+  },
+
+  /** "Sair de todos os aparelhos": encerra todas as sessões da conta, inclusive esta. */
+  async logoutAllDevices(): Promise<void> {
+    if (USE_MOCK) {
+      await clearTokens();
+      await clearAccountLocalData();
+      return;
+    }
+    try {
+      await api.post('/auth/logout-all');
+    } catch (error) {
+      throw authFailure(error);
+    }
+    await clearTokens();
+    await clearAccountLocalData();
+  },
+
+  /**
+   * Troca a senha da própria conta. O servidor encerra as sessões dos outros
+   * aparelhos; a deste segue (o próximo pedido renova o token sozinho).
+   */
+  async changePassword(userId: string, currentPassword: string, newPassword: string): Promise<void> {
+    if (USE_MOCK) return;
+    try {
+      await api.post(`/users/${userId}/change-password`, { currentPassword, newPassword });
+    } catch (error) {
+      throw authFailure(error);
+    }
+  },
+
+  /** Confere a senha da conta logada SEM abrir outra sessão (ex.: ativar a biometria). */
+  async verifyPassword(password: string): Promise<void> {
+    if (USE_MOCK) return;
+    try {
+      await api.post('/auth/password/verify', { password });
+    } catch (error) {
+      throw authFailure(error);
     }
   },
 
@@ -340,6 +417,9 @@ export const authService = {
 
     try {
       await api.patch('/users/me/push-token', { pushToken });
+      // Guardado para o logout desligar exatamente este aparelho
+      if (pushToken) await AsyncStorage.setItem(PUSH_TOKEN_KEY, pushToken).catch(() => {});
+      else await AsyncStorage.removeItem(PUSH_TOKEN_KEY).catch(() => {});
     } catch (error) {
       console.warn('Erro ao registrar push token:', error);
     }

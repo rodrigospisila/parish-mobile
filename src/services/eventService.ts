@@ -377,12 +377,17 @@ export const getEventWithRosters = async (event: Event): Promise<EventWithRoster
   }
 
   try {
-    const [fullEvent, schedulesResponse] = await Promise.all([
+    // A escala é opcional: se /schedules falhar (rede, ou 403 do plano da
+    // comunidade em servidor antigo), o detalhe do evento continua completo —
+    // só sem os escalados. Antes o Promise.all descartava o evento inteiro.
+    const [fullEventResult, schedulesResult] = await Promise.allSettled([
       getEventById(event.id),
       api.get(`/schedules?eventId=${event.id}`),
     ]);
+    if (fullEventResult.status === 'rejected') throw fullEventResult.reason;
+    const fullEvent = fullEventResult.value;
 
-    const schedules: any[] = schedulesResponse.data || [];
+    const schedules: any[] = schedulesResult.status === 'fulfilled' ? schedulesResult.value.data || [] : [];
 
     // Agrupa assignments de todos os schedules do evento por communityPastoralId
     const assignmentsByPastoral: Record<string, any[]> = {};

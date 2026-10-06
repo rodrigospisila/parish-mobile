@@ -101,7 +101,7 @@ const SelectModal: React.FC<SelectModalProps> = ({
                 {items.length} {items.length === 1 ? 'opção' : 'opções'}
               </Text>
             </View>
-            <TouchableOpacity style={styles.closeBtn} onPress={() => setModalVisible(false)} hitSlop={8}>
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Fechar" style={styles.closeBtn} onPress={() => setModalVisible(false)} hitSlop={8}>
               <Ionicons name="close" size={26} color={colors.text} />
             </TouchableOpacity>
           </View>
@@ -119,7 +119,7 @@ const SelectModal: React.FC<SelectModalProps> = ({
                 returnKeyType="search"
               />
               {query.length > 0 && (
-                <TouchableOpacity onPress={() => setQuery('')} hitSlop={8}>
+                <TouchableOpacity accessibilityRole="button" accessibilityLabel="Limpar busca" onPress={() => setQuery('')} hitSlop={8}>
                   <Ionicons name="close-circle" size={18} color={colors.textTertiary} />
                 </TouchableOpacity>
               )}

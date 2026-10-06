@@ -17,7 +17,7 @@ export default function ChangeCommunityScreen() {
     <SafeAreaView style={styles.safe} edges={['top']}>
       <Stack.Screen options={{ headerShown: false }} />
       <View style={styles.header}>
-        <TouchableOpacity style={styles.headerBtn} onPress={() => router.back()} hitSlop={10}>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Voltar" style={styles.headerBtn} onPress={() => router.back()} hitSlop={10}>
           <FontAwesome5 name="arrow-left" size={17} color={colors.text} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Trocar comunidade</Text>

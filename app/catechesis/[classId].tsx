@@ -24,6 +24,7 @@ import {
   CatechesisSessionSummary,
   SessionAttendance,
   createCatechesisSession,
+  isDuplicateSessionError,
   getCatechesisClassReport,
   getCatechesisSessions,
   getSessionAttendance,
@@ -666,6 +667,27 @@ export default function CatechesisClassScreen() {
       // Abre a chamada do encontro recém-criado
       await openAttendance(created.id);
     } catch (error: any) {
+      if (isDuplicateSessionError(error)) {
+        // Já existe encontro da turma nesse dia: oferece abrir a chamada dele
+        const existing = sessions.find((session) => String(session.date).slice(0, 10) === isoDate);
+        Alert.alert(
+          'Encontro já cadastrado',
+          `A turma já tem um encontro em ${newDate}. Para registrar a presença, abra esse encontro na lista.`,
+          existing
+            ? [
+                { text: 'Fechar', style: 'cancel' },
+                {
+                  text: 'Abrir chamada',
+                  onPress: () => {
+                    setShowNewSession(false);
+                    void openAttendance(existing.id);
+                  },
+                },
+              ]
+            : [{ text: 'OK' }],
+        );
+        return;
+      }
       Alert.alert('Erro', error?.message ?? 'Não foi possível criar o encontro.');
     } finally {
       setCreating(false);
@@ -749,7 +771,7 @@ export default function CatechesisClassScreen() {
     <SafeAreaView style={styles.safe} edges={['top']}>
       <Stack.Screen options={{ headerShown: false }} />
       <View style={styles.header}>
-        <TouchableOpacity style={styles.headerBtn} onPress={() => router.back()} hitSlop={10}>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Voltar" style={styles.headerBtn} onPress={() => router.back()} hitSlop={10}>
           <FontAwesome5 name="arrow-left" size={17} color={colors.text} />
         </TouchableOpacity>
         <View style={{ flex: 1, alignItems: 'center' }}>
@@ -1015,7 +1037,7 @@ export default function CatechesisClassScreen() {
                     </Text>
                   ) : null}
                 </View>
-                <TouchableOpacity
+                <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Enviar aviso à família de ${student.member.fullName}`}
                   hitSlop={8}
                   onPress={() => {
                     setNoticeText('');
@@ -1024,7 +1046,7 @@ export default function CatechesisClassScreen() {
                 >
                   <FontAwesome5 name="envelope" size={14} color={colors.textSecondary} />
                 </TouchableOpacity>
-                <TouchableOpacity
+                <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Conversa com a família de ${student.member.fullName}`}
                   hitSlop={8}
                   style={{ marginLeft: 10, flexDirection: 'row', alignItems: 'center', gap: 3 }}
                   onPress={() => router.push(`/catechesis/chat/${student.enrollmentId}` as never)}
@@ -1058,7 +1080,7 @@ export default function CatechesisClassScreen() {
       <Modal visible={showAgenda} animationType="slide" onRequestClose={() => setShowAgenda(false)}>
         <View style={[styles.safe, { paddingTop: insets.top }]}>
           <View style={styles.header}>
-            <TouchableOpacity style={styles.headerBtn} onPress={() => setShowAgenda(false)} hitSlop={10}>
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Fechar" style={styles.headerBtn} onPress={() => setShowAgenda(false)} hitSlop={10}>
               <FontAwesome5 name="times" size={18} color={colors.text} />
             </TouchableOpacity>
             <Text style={styles.headerTitle}>Gerar agenda</Text>
@@ -1159,7 +1181,7 @@ export default function CatechesisClassScreen() {
       <Modal visible={showTopics} animationType="slide" onRequestClose={() => setShowTopics(false)}>
         <View style={[styles.safe, { paddingTop: insets.top }]}>
           <View style={styles.header}>
-            <TouchableOpacity style={styles.headerBtn} onPress={() => setShowTopics(false)} hitSlop={10}>
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Fechar" style={styles.headerBtn} onPress={() => setShowTopics(false)} hitSlop={10}>
               <FontAwesome5 name="times" size={18} color={colors.text} />
             </TouchableOpacity>
             <Text style={styles.headerTitle}>Planejar temas</Text>
@@ -1204,7 +1226,7 @@ export default function CatechesisClassScreen() {
       <Modal visible={showNotices} animationType="slide" onRequestClose={() => setShowNotices(false)}>
         <View style={[styles.safe, { paddingTop: insets.top }]}>
           <View style={styles.header}>
-            <TouchableOpacity style={styles.headerBtn} onPress={() => setShowNotices(false)} hitSlop={10}>
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Fechar" style={styles.headerBtn} onPress={() => setShowNotices(false)} hitSlop={10}>
               <FontAwesome5 name="times" size={18} color={colors.text} />
             </TouchableOpacity>
             <Text style={styles.headerTitle}>Avisos enviados</Text>
@@ -1411,7 +1433,7 @@ export default function CatechesisClassScreen() {
       <Modal visible={showBatch} animationType="slide" onRequestClose={() => setShowBatch(false)}>
         <View style={[styles.safe, { paddingTop: insets.top }]}>
           <View style={styles.header}>
-            <TouchableOpacity style={styles.headerBtn} onPress={() => setShowBatch(false)} hitSlop={10}>
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Fechar" style={styles.headerBtn} onPress={() => setShowBatch(false)} hitSlop={10}>
               <FontAwesome5 name="times" size={18} color={colors.text} />
             </TouchableOpacity>
             <Text style={styles.headerTitle}>Parecer em lote</Text>
@@ -1505,7 +1527,7 @@ export default function CatechesisClassScreen() {
       >
         <View style={[styles.safe, { paddingTop: insets.top }]}>
           <View style={styles.header}>
-            <TouchableOpacity style={styles.headerBtn} onPress={() => setAssessTarget(null)} hitSlop={10}>
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Fechar" style={styles.headerBtn} onPress={() => setAssessTarget(null)} hitSlop={10}>
               <FontAwesome5 name="times" size={18} color={colors.text} />
             </TouchableOpacity>
             <Text style={styles.headerTitle} numberOfLines={1}>
@@ -1586,7 +1608,7 @@ export default function CatechesisClassScreen() {
       >
         <View style={[styles.safe, { paddingTop: insets.top }]}>
           <View style={styles.header}>
-            <TouchableOpacity style={styles.headerBtn} onPress={() => setAttendance(null)} hitSlop={10}>
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Fechar" style={styles.headerBtn} onPress={() => setAttendance(null)} hitSlop={10}>
               <FontAwesome5 name="times" size={18} color={colors.text} />
             </TouchableOpacity>
             <Text style={styles.headerTitle}>

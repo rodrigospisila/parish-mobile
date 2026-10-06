@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
-import api from '../config/api';
+import api, { getStoredUser } from '../config/api';
 
 /**
  * Fila de sincronização de ESCRITAS offline (roadmap 4.7 — camada de escrita).
@@ -15,6 +15,9 @@ import api from '../config/api';
  * - No flush, itens rejeitados pelo servidor são DESCARTADOS (poison-pill não
  *   trava a fila); itens com erro de rede permanecem para a próxima tentativa.
  * - Use somente para escritas seguras de repetir (confirmar/declinar escala).
+ * - Cada ação guarda a conta que a fez (`userId`): no flush, ação de OUTRA
+ *   conta é descartada — nunca reenviada com o token de quem entrou depois
+ *   (B24). O "Sair" e a sessão expirada também limpam a fila.
  */
 
 const QUEUE_KEY = '@parish:write-queue:v1';
@@ -27,6 +30,8 @@ export interface QueuedWrite {
   /** Descrição curta para exibir ao usuário (ex.: "Confirmar presença") */
   description: string;
   createdAt: number;
+  /** Conta que fez a ação (itens de versões antigas não têm) */
+  userId?: string;
 }
 
 export interface FlushResult {
@@ -48,6 +53,15 @@ async function readQueue(): Promise<QueuedWrite[]> {
   }
 }
 
+async function currentUserId(): Promise<string | null> {
+  try {
+    const user = await getStoredUser();
+    return typeof user?.id === 'string' ? user.id : null;
+  } catch {
+    return null;
+  }
+}
+
 async function writeQueue(queue: QueuedWrite[]): Promise<void> {
   try {
     await AsyncStorage.setItem(QUEUE_KEY, JSON.stringify(queue));
@@ -62,12 +76,14 @@ export function isNetworkError(error: unknown): boolean {
 }
 
 export async function enqueueWrite(
-  write: Omit<QueuedWrite, 'id' | 'createdAt'>,
+  write: Omit<QueuedWrite, 'id' | 'createdAt' | 'userId'>,
 ): Promise<QueuedWrite> {
+  const userId = await currentUserId();
   const item: QueuedWrite = {
     ...write,
     id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     createdAt: Date.now(),
+    ...(userId ? { userId } : {}),
   };
   const queue = await readQueue();
   queue.push(item);
@@ -96,9 +112,17 @@ export async function flushWriteQueue(): Promise<FlushResult> {
     let queue = await readQueue();
     let sent = 0;
     let discarded = 0;
+    const userId = await currentUserId();
 
     while (queue.length > 0) {
       const item = queue[0];
+      if (item.userId && item.userId !== userId) {
+        // Ação de outra conta deste aparelho: não vai com a sessão atual
+        discarded++;
+        queue = queue.slice(1);
+        await writeQueue(queue);
+        continue;
+      }
       try {
         await api.request({ method: item.method, url: item.path, data: item.body });
         sent++;

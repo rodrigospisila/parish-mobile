@@ -557,7 +557,7 @@ export default function CoordinationScheduleDetailScreen() {
         'Aviso enviado',
         result.notified > 0
           ? `${result.notified} pessoa(s) da equipe foram notificadas.`
-          : 'Nenhum membro escalado possui notificacoes habilitadas.',
+          : 'Nenhum membro escalado possui notificações habilitadas.',
       );
     } catch (error) {
       Alert.alert('Erro ao enviar aviso', error instanceof Error ? error.message : 'Tente novamente.');
@@ -595,7 +595,7 @@ export default function CoordinationScheduleDetailScreen() {
       sections.push({
         key: 'general',
         title: sections.length === 0 ? 'Equipe da escala' : 'Sem pastoral definida',
-        subtitle: 'Atribuicoes sem pastoral vinculada',
+        subtitle: 'Atribuições sem pastoral vinculada',
         requiredPeople: 0,
         defaultRole: '',
         couplesTogether: false,
@@ -1270,7 +1270,7 @@ export default function CoordinationScheduleDetailScreen() {
                 <View key={item.communityPastoralId} style={styles.slotRow}>
                   <Text style={styles.slotName}>{item.name}</Text>
                   <View style={styles.slotStepper}>
-                    <TouchableOpacity
+                    <TouchableOpacity accessibilityRole="button" accessibilityLabel="Diminuir vagas"
                       style={styles.slotStepButton}
                       onPress={() =>
                         setSlotsDraft((prev) =>
@@ -1285,7 +1285,7 @@ export default function CoordinationScheduleDetailScreen() {
                       <Text style={styles.slotStepButtonText}>−</Text>
                     </TouchableOpacity>
                     <Text style={styles.slotValue}>{item.requiredPeople}</Text>
-                    <TouchableOpacity
+                    <TouchableOpacity accessibilityRole="button" accessibilityLabel="Aumentar vagas"
                       style={styles.slotStepButton}
                       onPress={() =>
                         setSlotsDraft((prev) =>
@@ -1329,7 +1329,7 @@ export default function CoordinationScheduleDetailScreen() {
               <View style={styles.modalHeaderText}>
                 <Text style={styles.modalTitle}>Avisar equipe</Text>
                 <Text style={styles.modalSubtitle}>
-                  Envia uma notificacao para todos os membros escalados nesta escala
+                  Envia uma notificação para todos os membros escalados nesta escala
                 </Text>
               </View>
               <TouchableOpacity onPress={() => setIsNotifyModalVisible(false)}>

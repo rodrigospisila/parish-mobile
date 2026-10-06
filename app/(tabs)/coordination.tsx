@@ -127,7 +127,7 @@ export default function CoordinationScreen() {
         setSchedules(data);
         setFixedPending(pending);
       } catch (error) {
-        console.error('Erro ao carregar painel de coordenacao:', error);
+        console.error('Erro ao carregar painel de coordenação:', error);
         setSchedules([]);
       } finally {
         setIsLoading(false);
@@ -556,7 +556,7 @@ export default function CoordinationScreen() {
         {view === 'calendar' && (
           <View style={styles.calWrap}>
             <View style={styles.calToolbar}>
-              <TouchableOpacity
+              <TouchableOpacity accessibilityRole="button" accessibilityLabel="Mês anterior"
                 style={styles.calNavButton}
                 onPress={() => {
                   setCalMonth(new Date(calMonth.getFullYear(), calMonth.getMonth() - 1, 1));
@@ -566,7 +566,7 @@ export default function CoordinationScreen() {
                 <Text style={styles.calNavButtonText}>‹</Text>
               </TouchableOpacity>
               <Text style={styles.calMonthLabel}>{monthLabel}</Text>
-              <TouchableOpacity
+              <TouchableOpacity accessibilityRole="button" accessibilityLabel="Próximo mês"
                 style={styles.calNavButton}
                 onPress={() => {
                   setCalMonth(new Date(calMonth.getFullYear(), calMonth.getMonth() + 1, 1));
@@ -830,7 +830,7 @@ export default function CoordinationScreen() {
                             <Text style={styles.assignmentRole}>{a.role}</Text>
                           </View>
                           {a.hasPendingSwap && (
-                            <TouchableOpacity
+                            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Ver pedido de troca"
                               hitSlop={8}
                               onPress={() =>
                                 Alert.alert(

@@ -11,6 +11,8 @@ import { Platform } from 'react-native';
  *   no AsyncStorage — melhor manter a pessoa logada do que travar o app.
  * - `legacyKey`: chave antiga do AsyncStorage. Na primeira leitura o valor é
  *   migrado para o SecureStore e apagado de lá (quem já estava logado continua).
+ * - `protected*`: segredo que só sai com a biometria do SISTEMA
+ *   (requireAuthentication) e NUNCA cai no AsyncStorage — falhou, falhou.
  */
 
 const canUseSecureStore = Platform.OS === 'ios' || Platform.OS === 'android';
@@ -62,6 +64,54 @@ export const secureDelete = async (key: string, legacyKey?: string): Promise<voi
   if (!canUseSecureStore) return;
   try {
     await SecureStore.deleteItemAsync(key, OPTIONS);
+  } catch (error) {
+    console.warn('Erro ao apagar do SecureStore:', error);
+  }
+};
+
+// ============================================
+// ITENS PROTEGIDOS POR BIOMETRIA (sem fallback)
+// ============================================
+
+/**
+ * iOS: Keychain com biometria atual (Face ID/Touch ID; trocar a digital
+ * cadastrada invalida o item) e só com código de bloqueio definido.
+ * Android: Keystore com BiometricPrompt (biometria forte).
+ */
+const PROTECTED_OPTIONS: SecureStore.SecureStoreOptions = {
+  keychainAccessible: SecureStore.WHEN_PASSCODE_SET_THIS_DEVICE_ONLY,
+  requireAuthentication: true,
+};
+
+/** O aparelho consegue guardar um item exigindo a biometria do sistema? */
+export const canUseProtectedStore = (): boolean => {
+  if (!canUseSecureStore) return false;
+  try {
+    return SecureStore.canUseBiometricAuthentication();
+  } catch {
+    return false;
+  }
+};
+
+/** Grava exigindo biometria. Lança se não der (quem chama não ativa o recurso). */
+export const protectedSet = async (key: string, value: string, prompt: string): Promise<void> => {
+  if (!canUseSecureStore) throw new Error('Armazenamento protegido indisponível neste aparelho');
+  await SecureStore.setItemAsync(key, value, { ...PROTECTED_OPTIONS, authenticationPrompt: prompt });
+};
+
+/**
+ * Lê pedindo a biometria (o próprio sistema mostra o pedido). Lança quando a
+ * pessoa cancela ou o item foi invalidado (biometria do aparelho mudou).
+ */
+export const protectedGet = async (key: string, prompt: string): Promise<string | null> => {
+  if (!canUseSecureStore) return null;
+  return SecureStore.getItemAsync(key, { ...PROTECTED_OPTIONS, authenticationPrompt: prompt });
+};
+
+export const protectedDelete = async (key: string): Promise<void> => {
+  if (!canUseSecureStore) return;
+  try {
+    await SecureStore.deleteItemAsync(key, PROTECTED_OPTIONS);
   } catch (error) {
     console.warn('Erro ao apagar do SecureStore:', error);
   }

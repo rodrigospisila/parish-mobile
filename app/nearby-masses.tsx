@@ -54,6 +54,7 @@ import {
   cityLine,
   distanceFor,
   filterCommunityMasses,
+  fmtStep,
   hasMassOnSearchedDay,
   isCancelled,
   isFullTimeRange,
@@ -81,6 +82,9 @@ interface CachedMap {
 interface Filters {
   types: string[];
   approx: boolean;
+  /** Dia e horário da tela: vão ao servidor para priorizar o que casa antes do teto por igreja */
+  day: DayFilter;
+  timeRange: TimeRange;
 }
 /** O que já foi carregado (ou está a caminho): evita buscar de novo o mesmo recorte. */
 interface Loaded {
@@ -123,7 +127,14 @@ const padBbox = (b: BBox, f: number): BBox => {
 
 const inBbox = (b: BBox, lat: number, lng: number) => lat >= b[1] && lat <= b[3] && lng >= b[0] && lng <= b[2];
 
-const filtersKey = (f: Filters) => `${[...f.types].sort().join(',')}|${f.approx ? 1 : 0}`;
+const filtersKey = (f: Filters) =>
+  `${[...f.types].sort().join(',')}|${f.approx ? 1 : 0}|${f.day}|${isFullTimeRange(f.timeRange) ? '' : f.timeRange.join('-')}`;
+
+/** Parâmetros de prioridade (dia/horário) da busca; intervalo inteiro = sem horário. */
+const focusParams = (f: Filters) => ({
+  ...(f.day !== 'all' ? { day: f.day } : {}),
+  ...(isFullTimeRange(f.timeRange) ? {} : { from: fmtStep(f.timeRange[0]), to: fmtStep(f.timeRange[1]) }),
+});
 
 /**
  * A área visível já está coberta pelo que foi carregado? Pinos cobrem qualquer
@@ -189,10 +200,10 @@ export default function NearbyMassesScreen() {
   const userMoved = useRef(false);
   const areaRef = useRef<MapAreaResult | null>(null);
   const viewRef = useRef<MapMoveEvent | null>(null);
-  const filtersRef = useRef<Filters>({ types, approx });
+  const filtersRef = useRef<Filters>({ types, approx, day, timeRange });
   const pendingSelect = useRef<string | null>(null);
 
-  filtersRef.current = { types, approx };
+  filtersRef.current = { types, approx, day, timeRange };
   areaRef.current = area;
   const result: MapPinsResult | null = area?.mode === 'pins' ? area : null;
   const clusterData: MapClustersResult | null = area?.mode === 'clusters' ? area : null;
@@ -296,7 +307,7 @@ export default function NearbyMassesScreen() {
     setError(null);
     try {
       const data = await getMapArea(
-        { bbox, zoom, days: DAYS, types: f.types, approx: f.approx, limit: AREA_LIMIT },
+        { bbox, zoom, days: DAYS, types: f.types, approx: f.approx, limit: AREA_LIMIT, ...focusParams(f) },
         ctrl.signal,
       );
       if (id !== reqId.current) return;
@@ -342,8 +353,8 @@ export default function NearbyMassesScreen() {
       firstFilterRun.current = false;
       return;
     }
-    reloadView({ types, approx });
-  }, [types, approx, reloadView]);
+    reloadView({ types, approx, day, timeRange });
+  }, [types, approx, day, timeRange, reloadView]);
 
   // ---------- Localização ----------
   const locate = useCallback(

@@ -78,10 +78,12 @@ export const securityService = {
   },
 
   /** Confirma o código do autenticador e ativa; devolve os códigos de recuperação */
-  async enableTwoFactor(code: string): Promise<TwoFactorEnableResult> {
+  /** Ativar pede a senha atual (o servidor recusa só com o token da sessão, salvo login recente). */
+  async enableTwoFactor(code: string, password?: string): Promise<TwoFactorEnableResult> {
     try {
       const response = await api.post<TwoFactorEnableResult>('/auth/2fa/enable', {
         code: code.trim(),
+        ...(password ? { password } : {}),
       });
       // Ativar o 2FA encerra as outras sessões; este aparelho segue com os tokens novos
       if (response.data?.accessToken && response.data?.refreshToken) {
