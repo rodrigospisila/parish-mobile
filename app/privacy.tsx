@@ -10,6 +10,8 @@ import {
   ActivityIndicator,
   Linking,
   RefreshControl,
+  Modal,
+  TextInput,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Stack, useRouter } from 'expo-router';
@@ -60,6 +62,8 @@ export default function PrivacyScreen() {
   const [savingType, setSavingType] = useState<ConsentType | null>(null);
   const [exporting, setExporting] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [askPassword, setAskPassword] = useState(false);
+  const [deletePassword, setDeletePassword] = useState('');
 
   const load = useCallback(async () => {
     try {
@@ -126,13 +130,23 @@ export default function PrivacyScreen() {
   };
 
   const confirmDelete = async () => {
+    if (!deletePassword) return;
     setDeleting(true);
     try {
-      await authService.deleteAccount();
+      await authService.deleteAccount(deletePassword);
+      setAskPassword(false);
+      setDeletePassword('');
       await signOut();
-    } catch {
+    } catch (err: any) {
       setDeleting(false);
-      Alert.alert('Erro', 'Não foi possível excluir a conta agora. Tente novamente ou fale com o suporte.');
+      const status = err?.response?.status;
+      const msg = err?.response?.data?.message;
+      Alert.alert(
+        'Não foi possível excluir',
+        status === 400 || status === 401 || status === 409 || status === 429
+          ? (Array.isArray(msg) ? msg.join(' ') : msg) || 'Confira a senha e tente de novo.'
+          : 'Não foi possível excluir a conta agora. Tente novamente ou fale com o suporte.',
+      );
     }
   };
 
@@ -148,7 +162,7 @@ export default function PrivacyScreen() {
           onPress: () =>
             Alert.alert('Confirmação final', 'Tem certeza? Esta ação não pode ser desfeita.', [
               { text: 'Cancelar', style: 'cancel' },
-              { text: 'Excluir definitivamente', style: 'destructive', onPress: () => void confirmDelete() },
+              { text: 'Excluir definitivamente', style: 'destructive', onPress: () => setAskPassword(true) },
             ]),
         },
       ],
@@ -247,6 +261,44 @@ export default function PrivacyScreen() {
           </View>
         </ScrollView>
       )}
+      <Modal visible={askPassword} transparent animationType="fade" onRequestClose={() => setAskPassword(false)}>
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Confirme a sua senha</Text>
+            <Text style={styles.modalText}>Para excluir a conta, digite a senha atual.</Text>
+            <TextInput
+              style={styles.modalInput}
+              value={deletePassword}
+              onChangeText={setDeletePassword}
+              secureTextEntry
+              autoCapitalize="none"
+              autoCorrect={false}
+              placeholder="Senha atual"
+              placeholderTextColor={colors.textSecondary}
+              accessibilityLabel="Senha atual"
+            />
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                onPress={() => {
+                  setAskPassword(false);
+                  setDeletePassword('');
+                }}
+                disabled={deleting}
+                accessibilityRole="button"
+              >
+                <Text style={styles.modalCancel}>Cancelar</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => void confirmDelete()} disabled={deleting || !deletePassword} accessibilityRole="button">
+                {deleting ? (
+                  <ActivityIndicator color={colors.error} />
+                ) : (
+                  <Text style={[styles.modalDanger, !deletePassword && { opacity: 0.4 }]}>Excluir</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -273,6 +325,23 @@ const createStyles = (colors: ReturnType<typeof useColors>) =>
     card: { backgroundColor: colors.card, borderRadius: 12, overflow: 'hidden', marginTop: 8 },
     cardBody: { padding: 16 },
     errorText: { color: colors.error, fontSize: 14 },
+    modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'center', padding: 24 },
+    modalCard: { backgroundColor: colors.card, borderRadius: 14, padding: 20 },
+    modalTitle: { fontSize: 17, fontWeight: '800', color: colors.text },
+    modalText: { fontSize: 14, color: colors.textSecondary, marginTop: 6 },
+    modalInput: {
+      marginTop: 14,
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: 10,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      fontSize: 16,
+      color: colors.text,
+    },
+    modalActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 24, marginTop: 18 },
+    modalCancel: { fontSize: 16, color: colors.textSecondary, fontWeight: '600' },
+    modalDanger: { fontSize: 16, color: colors.error, fontWeight: '800' },
     mutedText: { color: colors.textSecondary, fontSize: 14, lineHeight: 20 },
     divider: { height: 1, backgroundColor: colors.border, marginLeft: 16 },
     consentRow: { flexDirection: 'row', alignItems: 'center', padding: 16, gap: 12 },

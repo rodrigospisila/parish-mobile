@@ -399,11 +399,12 @@ export const authService = {
    * exigido pela App Store e pela LGPD). Em caso de sucesso, o chamador deve
    * encerrar a sessão local (signOut) para voltar à tela de login.
    */
-  async deleteAccount(): Promise<void> {
+  async deleteAccount(password: string): Promise<void> {
     if (USE_MOCK) {
       return;
     }
-    await api.delete('/users/me');
+    // O backend exige a senha atual (R2#25): só o token não basta para apagar a conta
+    await api.delete('/users/me', { data: { password } });
   },
 
   /**

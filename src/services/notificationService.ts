@@ -12,10 +12,39 @@ import { proximaOcorrenciaValida, suspensaoNoDia, suspensoesDe } from '../utils/
 /**
  * Horário semanal com suspensões à vista ("não haverá"): em vez do lembrete
  * repetido (que não sabe pular uma data), agenda avulsos para as próximas
- * ocorrências válidas. Poucos, por causa do limite de 64 avisos locais do iOS;
- * o reagendamento ao abrir o app renova a lista.
+ * ocorrências válidas. O iOS guarda no máximo 64 avisos locais: o padrão é 6
+ * por horário e sobe até 12 (três meses) quando a soma ainda cabe no limite
+ * (R3#55). O reagendamento ao abrir/voltar ao app renova a lista.
  */
 const MAX_WEEKLY_REMINDERS_WITH_SUSPENSIONS = 6;
+const MAX_WEEKLY_REMINDERS_WITH_SUSPENSIONS_EXTENDED = 12;
+/** Limite de avisos locais pendentes do iOS, com folga para os de escala/teste. */
+const IOS_LOCAL_NOTIFICATION_LIMIT = 64;
+const LOCAL_NOTIFICATION_RESERVE = 4;
+
+/**
+ * Lembretes avulsos por horário semanal com suspensão: o máximo que cabe no
+ * limite do iOS dividido entre esses horários, entre 6 (o de sempre) e 12.
+ */
+export const weeklyRemindersBudget = (alreadyScheduled: number, otherSchedules: number, withSuspensions: number): number => {
+  if (withSuspensions <= 0) return MAX_WEEKLY_REMINDERS_WITH_SUSPENSIONS;
+  const free = IOS_LOCAL_NOTIFICATION_LIMIT - LOCAL_NOTIFICATION_RESERVE - alreadyScheduled - otherSchedules;
+  const perSchedule = Math.floor(free / withSuspensions);
+  return Math.max(MAX_WEEKLY_REMINDERS_WITH_SUSPENSIONS, Math.min(MAX_WEEKLY_REMINDERS_WITH_SUSPENSIONS_EXTENDED, perSchedule));
+};
+
+/** Reagendamento ao voltar ao primeiro plano: no máximo 1 vez a cada 6 h (R3#55). */
+export const FOREGROUND_RESCHEDULE_INTERVAL_MS = 6 * 60 * 60 * 1000;
+let lastRescheduleAt = 0;
+
+/** Marca que os lembretes acabaram de ser refeitos (abertura do app ou volta ao primeiro plano). */
+export const markNotificationsRescheduled = (now: number = Date.now()): void => {
+  lastRescheduleAt = now;
+};
+
+/** Já passou o intervalo desde o último reagendamento? */
+export const isForegroundRescheduleDue = (now: number = Date.now()): boolean =>
+  now - lastRescheduleAt >= FOREGROUND_RESCHEDULE_INTERVAL_MS;
 
 // Chaves para AsyncStorage
 const NOTIFICATION_SETTINGS_KEY = '@parish_notification_settings';
@@ -270,7 +299,8 @@ export const scheduleEventNotification = async (
  */
 export const scheduleMassScheduleNotification = async (
   schedule: MassSchedule,
-  minutesBefore: number = 60
+  minutesBefore: number = 60,
+  maxWeeklyReminders: number = MAX_WEEKLY_REMINDERS_WITH_SUSPENSIONS
 ): Promise<string | null> => {
   try {
     const settings = await loadNotificationSettings();
@@ -351,7 +381,7 @@ export const scheduleMassScheduleNotification = async (
       // Semanal com suspensão à vista: lembretes avulsos, pulando os dias suspensos
       let firstId: string | null = null;
       let base = new Date();
-      for (let i = 0; i < MAX_WEEKLY_REMINDERS_WITH_SUSPENSIONS; i += 1) {
+      for (let i = 0; i < maxWeeklyReminders; i += 1) {
         const occurrence = proximaOcorrenciaValida(schedule, schedule.time, base);
         if (!occurrence) break;
         base = new Date(occurrence.getFullYear(), occurrence.getMonth(), occurrence.getDate() + 1, 0, 0, 0, 0);
@@ -564,7 +594,14 @@ export const scheduleNotificationsForMassSchedules = async (
     return;
   }
 
+  // Janela dos avulsos (semanal com suspensão) conforme o que já está agendado
+  const withSuspensions = schedules.filter(
+    (s) => !(s.isSpecial && s.specialDate) && !ehMensal(s) && suspensoesDe(s).length > 0,
+  ).length;
+  const alreadyScheduled = (await getScheduledNotifications()).length;
+  const perSchedule = weeklyRemindersBudget(alreadyScheduled, schedules.length - withSuspensions, withSuspensions);
+
   for (const schedule of schedules) {
-    await scheduleMassScheduleNotification(schedule, settings.reminderTime);
+    await scheduleMassScheduleNotification(schedule, settings.reminderTime, perSchedule);
   }
 };

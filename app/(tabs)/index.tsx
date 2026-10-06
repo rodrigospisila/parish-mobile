@@ -11,6 +11,7 @@ import {
   Pressable,
   Alert,
   Linking,
+  AppState,
 } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -33,6 +34,7 @@ import {
 import { CATECHESIS_CONSENT_TEXT } from '../../src/constants/catechesisConsent';
 import { useColors } from '../../src/context/ThemeContext';
 import { useNotifications } from '../../src/context/NotificationContext';
+import { isForegroundRescheduleDue, markNotificationsRescheduled } from '../../src/services/notificationService';
 import UserAvatar from '../../src/components/UserAvatar';
 import { getDisabledMobileFeatures } from '../../src/services/settingsService';
 import { FontAwesome5 } from '@expo/vector-icons';
@@ -112,16 +114,21 @@ function splitIntoVerses(text?: string): { num?: string; text: string }[] {
 
 
 /**
- * Evento de dia inteiro — mesmo critério do Calendário (B21): começa à
- * meia-noite local e não tem fim, ou termina também à meia-noite.
+ * Evento de dia inteiro — mesmo critério do backend (isAllDayEvent, R3#47):
+ * começa à meia-noite local e termina à meia-noite de OUTRO dia, ou dura 24 h
+ * ou mais; sem fim, só se não for Missa — Missa às 00:00 sem fim é a Missa do
+ * Galo, que tem hora ("00:00", não "Dia todo").
  */
-function isAllDayEvent(event: { startDate: string; endDate?: string | null }): boolean {
+function isAllDayEvent(event: { type?: string | null; startDate: string; endDate?: string | null }): boolean {
   const start = new Date(event.startDate);
   if (Number.isNaN(start.getTime())) return false;
+  const end = event.endDate ? new Date(event.endDate) : null;
+  if (end && Number.isNaN(end.getTime())) return false;
+  if (end && end.getTime() - start.getTime() >= 24 * 60 * 60 * 1000) return true;
   const startsMidnight = start.getHours() === 0 && start.getMinutes() === 0;
-  if (!event.endDate) return startsMidnight;
-  const end = new Date(event.endDate);
-  return startsMidnight && !Number.isNaN(end.getTime()) && end.getHours() === 0 && end.getMinutes() === 0;
+  if (!startsMidnight) return false;
+  if (!end) return event.type !== 'MASS';
+  return end.getHours() === 0 && end.getMinutes() === 0 && end.toDateString() !== start.toDateString();
 }
 
 /**
@@ -202,6 +209,20 @@ export default function HomeScreen() {
   const colors = useColors();
   const router = useRouter();
   const { rescheduleEventNotifications } = useNotifications();
+  // Lembretes dos favoritos ao voltar ao primeiro plano (R3#55): suspensões
+  // novas ("não haverá") e a janela de avisos avulsos se renovam sem precisar
+  // fechar o app — no máximo 1 vez a cada 6 h. A abertura já reagenda (contexto).
+  const rescheduleRef = useRef(rescheduleEventNotifications);
+  rescheduleRef.current = rescheduleEventNotifications;
+  useEffect(() => {
+    markNotificationsRescheduled();
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state !== 'active' || !isForegroundRescheduleDue()) return;
+      markNotificationsRescheduled();
+      rescheduleRef.current().catch(() => undefined);
+    });
+    return () => subscription.remove();
+  }, []);
   const [nextMass, setNextMass] = useState<Event | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [upcomingEvents, setUpcomingEvents] = useState<Event[]>([]);

@@ -77,7 +77,11 @@ function getEventDateMeta(event: Event): EventDateMeta {
 
   const startsMidnight = start.getHours() === 0 && start.getMinutes() === 0;
   const endsMidnight = end.getHours() === 0 && end.getMinutes() === 0;
-  const isAllDay = startsMidnight && (!event.endDate || endsMidnight);
+  // Mesmo critério do Início e do backend (R3#47): Missa às 00:00 sem fim é a
+  // Missa do Galo — tem hora, não é "Dia todo"
+  const isAllDay =
+    end.getTime() - start.getTime() >= 24 * 60 * 60 * 1000 ||
+    (startsMidnight && (!event.endDate ? event.type !== 'MASS' : endsMidnight && isMultiDay));
 
   const dayCount = differenceInCalendarDays(end, start) + 1;
   const sameMonth = format(start, 'yyyy-MM') === format(end, 'yyyy-MM');

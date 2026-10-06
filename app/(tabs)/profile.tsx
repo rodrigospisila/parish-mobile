@@ -84,38 +84,8 @@ export default function ProfileScreen() {
     );
   };
 
-  const confirmDeleteAccount = async () => {
-    try {
-      await authService.deleteAccount();
-      // Encerra a sessão local; o RootLayout redireciona para o login.
-      await signOut();
-    } catch {
-      Alert.alert(
-        'Erro',
-        'Não foi possível excluir a conta agora. Tente novamente ou fale com o suporte.',
-      );
-    }
-  };
-
-  const handleDeleteAccount = () => {
-    Alert.alert(
-      'Excluir minha conta',
-      'Esta ação é permanente. Sua conta e seus dados pessoais serão removidos e você não poderá mais acessar o app.',
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Continuar',
-          style: 'destructive',
-          onPress: () =>
-            Alert.alert('Confirmação final', 'Tem certeza? Esta ação não pode ser desfeita.', [
-              { text: 'Cancelar', style: 'cancel' },
-              { text: 'Excluir definitivamente', style: 'destructive', onPress: confirmDeleteAccount },
-            ]),
-        },
-      ],
-      { cancelable: true },
-    );
-  };
+  // Exclusão da conta mora na tela Privacidade (pede a senha atual — R2#25)
+  const handleDeleteAccount = () => router.push('/privacy' as never);
 
   const handleThemeChange = (value: boolean) => setTheme(value ? 'dark' : 'light');
 
