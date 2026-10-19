@@ -24,6 +24,8 @@ import { descreverRecorrencia, ehMensal } from '../../../src/utils/recorrencia';
 import { formatMassTime, isCancelled, isOnSearchedDay, typeLabel } from '../../../src/components/map/format';
 import { chaveDaquiA, diaMes, juntarLista, motivoCurto, suspensoesDe } from '../../../src/utils/suspensoes';
 import { openDirectionsTo } from '../../../src/components/map/directions';
+import { claimParishUrl } from '../../../src/config/links';
+import { track, useTrackScreen } from '../../../src/services/analytics';
 
 /** Ordem de exibição: domingo primeiro, como nos murais de paróquia. */
 const DAY_ORDER = [0, 1, 2, 3, 4, 5, 6];
@@ -107,6 +109,8 @@ export default function CommunityPublicScreen() {
   const { isAuthenticated } = useAuth();
   const router = useRouter();
   const styles = useMemo(() => createStyles(colors), [colors]);
+  // Telemetria: a visita à página pública conta para ESTA comunidade
+  useTrackScreen('screen_community', { communityId: id ? String(id) : null });
 
   const [data, setData] = useState<PublicCommunity | null>(null);
   const [loading, setLoading] = useState(true);
@@ -159,6 +163,13 @@ export default function CommunityPublicScreen() {
   const onSite = () => {
     if (!website) return;
     Linking.openURL(withScheme(website)).catch(() => Alert.alert('Site', 'Não foi possível abrir o site.'));
+  };
+  const onClaim = () => {
+    const parishId = data?.parish?.id;
+    if (!parishId) return;
+    const url = claimParishUrl(parishId);
+    track('claim_started', { communityId: data?.id ?? null });
+    Linking.openURL(url).catch(() => Alert.alert('Gerenciar no Parish', `Abra no navegador: ${url}`));
   };
   const onShare = () => {
     if (!data) return;
@@ -430,11 +441,28 @@ export default function CommunityPublicScreen() {
             </View>
           )}
 
-          {/* EM BREVE */}
-          <View style={styles.soon}>
-            <Text style={styles.soonTitle}>Em breve</Text>
-            <Text style={styles.soonText}>Agenda do pároco, secretaria e avisos da paróquia</Text>
-          </View>
+          {/* EQUIPE DA PARÓQUIA → reivindicar no painel web (saas-implantacao-02 / ux-acesso-24) */}
+          {!!data.parish?.id && (
+            <TouchableOpacity
+              style={styles.claim}
+              onPress={onClaim}
+              activeOpacity={0.85}
+              accessibilityRole="link"
+              accessibilityLabel="É da equipe desta paróquia? Gerencie no Parish"
+              accessibilityHint="Abre o painel do Parish no navegador"
+            >
+              <View style={styles.claimIcon}>
+                <FontAwesome5 name="user-shield" size={16} color={colors.primary} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.claimTitle}>É da equipe desta paróquia?</Text>
+                <Text style={styles.claimText}>
+                  Gerencie no Parish: horários, avisos, pastorais e escalas. Teste grátis por 30 dias.
+                </Text>
+              </View>
+              <FontAwesome5 name="external-link-alt" size={13} color={colors.textTertiary} />
+            </TouchableOpacity>
+          )}
 
           {/* SUGERIR CORREÇÃO */}
           <TouchableOpacity
@@ -566,9 +594,27 @@ function createStyles(colors: ThemeColors) {
     geoText: { flex: 1, fontSize: 12.5, fontWeight: '700' },
     infoLine: { fontSize: 14, color: colors.text, marginBottom: 4 },
     infoLabel: { fontWeight: '700', color: colors.textSecondary },
-    soon: { marginTop: 18, paddingHorizontal: 4 },
-    soonTitle: { fontSize: 12, fontWeight: '800', color: colors.textTertiary, textTransform: 'uppercase', letterSpacing: 0.6 },
-    soonText: { fontSize: 13, color: colors.textTertiary, marginTop: 2 },
+    claim: {
+      marginTop: 18,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+      padding: 14,
+      borderRadius: 14,
+      backgroundColor: colors.highlightLight,
+      borderWidth: 1,
+      borderColor: colors.borderLight,
+    },
+    claimIcon: {
+      width: 38,
+      height: 38,
+      borderRadius: 19,
+      backgroundColor: colors.card,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    claimTitle: { fontSize: 14.5, fontWeight: '800', color: colors.text },
+    claimText: { fontSize: 13, color: colors.textSecondary, marginTop: 2, lineHeight: 18 },
     suggestBtn: {
       marginTop: 22,
       flexDirection: 'row',

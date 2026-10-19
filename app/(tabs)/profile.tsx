@@ -27,6 +27,7 @@ import * as ImagePicker from 'expo-image-picker';
 import Constants from 'expo-constants';
 import * as Updates from 'expo-updates';
 import UserAvatar from '../../src/components/UserAvatar';
+import { SUPPORT_EMAIL, supportMailto } from '../../src/config/links';
 import { uploadMyAvatar, deleteMyAvatar } from '../../src/services/avatarService';
 
 /**
@@ -591,6 +592,23 @@ export default function ProfileScreen() {
 
         <View style={styles.versionContainer}>
           <Text style={styles.versionText}>{appVersionLabel()}</Text>
+          {/* Suporte do Parish (saas-implantacao-06): e-mail por env, com a versão no corpo */}
+          <TouchableOpacity
+            onPress={() =>
+              Linking.openURL(supportMailto('Suporte do app Parish', `
+
+—
+${appVersionLabel()}`)).catch(() =>
+                Alert.alert('Suporte do Parish', `Escreva para ${SUPPORT_EMAIL}`),
+              )
+            }
+            accessibilityRole="link"
+            hitSlop={8}
+          >
+            <Text style={[styles.versionText, { color: colors.primary, marginTop: 4 }]}>
+              Suporte: {SUPPORT_EMAIL}
+            </Text>
+          </TouchableOpacity>
         </View>
       </ScrollView>
     </SafeAreaView>

@@ -42,6 +42,7 @@ import { getDisabledMobileFeatures } from '../../src/services/settingsService';
 import { FontAwesome5 } from '@expo/vector-icons';
 import { getUpcomingEvents, Event, getEventTypeLabel, getEventTypeColor } from '../../src/services/eventService';
 import { getTodayLiturgy, LiturgyData, LiturgyReading } from '../../src/services/liturgyService';
+import { track, useTrackScreen } from '../../src/services/analytics';
 import {
   getMassSchedules,
   getFavoriteMassSchedules,
@@ -193,6 +194,7 @@ export default function HomeScreen() {
   );
   const { activeCommunityId, activeCommunityName, isSecondaryActive, links, setActiveCommunity } =
     useCommunity();
+  useTrackScreen('screen_home');
 
   const [overview, setOverview] = useState<CoordinatorOverview | null>(null);
   useEffect(() => {
@@ -233,6 +235,11 @@ export default function HomeScreen() {
   const [isLoadingLiturgy, setIsLoadingLiturgy] = useState(true);
   const [expandedReadings, setExpandedReadings] = useState<Record<string, boolean>>({});
   const [isLiturgyModalVisible, setIsLiturgyModalVisible] = useState(false);
+  // Telemetria: a liturgia completa abre num modal do Início
+  useEffect(() => {
+    if (isLiturgyModalVisible) track('screen_liturgy', { communityId: activeCommunityId ?? null });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLiturgyModalVisible]);
   const [showCommunityPicker, setShowCommunityPicker] = useState(false);
   const [catechesisClassCount, setCatechesisClassCount] = useState(0);
   // Matrículas da família com o termo da catequese ainda sem resposta (M8)

@@ -1,11 +1,11 @@
 import { Stack, useRouter, useSegments, type ErrorBoundaryProps } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { View, ActivityIndicator, StatusBar, AppState, Text, TouchableOpacity, useColorScheme } from 'react-native';
 import { useFonts } from 'expo-font';
 import { AuthProvider, useAuth } from '../src/context/AuthContext';
 import { ThemeProvider, useTheme } from '../src/context/ThemeContext';
 import { NotificationProvider } from '../src/context/NotificationContext';
-import { CommunityProvider } from '../src/context/CommunityContext';
+import { CommunityProvider, useCommunity } from '../src/context/CommunityContext';
 import { EntitlementsProvider } from '../src/context/EntitlementsContext';
 import { flushWriteQueue } from '../src/utils/offlineQueue';
 import { applyGlobalFont } from '../src/utils/globalFont';
@@ -15,6 +15,8 @@ import '../src/services/planService';
 import TermsAcceptanceGate from '../src/components/TermsAcceptanceGate';
 import NotificationPrimer from '../src/components/NotificationPrimer';
 import NotificationResponseRouter from '../src/components/NotificationResponseRouter';
+import AppVersionGate from '../src/components/AppVersionGate';
+import { track } from '../src/services/analytics';
 
 // Instala o mapeamento peso→Nunito Sans antes de qualquer render de texto.
 applyGlobalFont();
@@ -28,6 +30,9 @@ const PUBLIC_SEGMENTS = new Set(['nearby-masses', 'comunidade']);
 
 /** Telas em que um toque de notificação ainda não pode navegar (sessão incompleta). */
 const NOT_READY_SEGMENTS = new Set(['(auth)', 'select-community', 'change-password']);
+
+/** Volta ao app depois disto em segundo plano conta como nova abertura (app_open). */
+const NEW_SESSION_AFTER_MS = 30 * 60_000;
 
 /**
  * Tela de erro do app inteiro (eng-qualidade-03): uma exceção de render vira
@@ -72,6 +77,32 @@ function RootLayoutNav() {
   const router = useRouter();
   /** Aceite dos termos resolvido (sem aviso bloqueante na frente) */
   const [termsClear, setTermsClear] = useState(false);
+  const { activeCommunityId } = useCommunity();
+
+  // Telemetria (C4): app_open na abertura e na volta depois de 30 min fora,
+  // com a comunidade ativa (ou a principal, antes da hidratação dos vínculos)
+  const openCommunityRef = useRef<string | null>(null);
+  openCommunityRef.current = activeCommunityId ?? user?.communityId ?? null;
+  const openTrackedRef = useRef(false);
+  useEffect(() => {
+    if (isLoading || openTrackedRef.current) return;
+    openTrackedRef.current = true;
+    track('app_open', { communityId: openCommunityRef.current });
+  }, [isLoading]);
+  useEffect(() => {
+    let backgroundAt = 0;
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state === 'background') {
+        backgroundAt = Date.now();
+      } else if (state === 'active' && backgroundAt) {
+        if (Date.now() - backgroundAt > NEW_SESSION_AFTER_MS) {
+          track('app_open', { communityId: openCommunityRef.current });
+        }
+        backgroundAt = 0;
+      }
+    });
+    return () => subscription.remove();
+  }, []);
 
   // Fila de escritas offline (4.7): tenta sincronizar ao abrir o app e
   // sempre que ele volta ao primeiro plano (momento típico de reconexão).
@@ -197,13 +228,16 @@ export default function RootLayout() {
 
   return (
     <ThemeProvider>
-      <AuthProvider>
-        <CommunityProvider>
-          <EntitlementsProvider>
-            <RootLayoutWithNotifications />
-          </EntitlementsProvider>
-        </CommunityProvider>
-      </AuthProvider>
+      {/* Versão mínima (C4): bloqueia o app inteiro quando a versão não é mais suportada */}
+      <AppVersionGate>
+        <AuthProvider>
+          <CommunityProvider>
+            <EntitlementsProvider>
+              <RootLayoutWithNotifications />
+            </EntitlementsProvider>
+          </CommunityProvider>
+        </AuthProvider>
+      </AppVersionGate>
     </ThemeProvider>
   );
 }

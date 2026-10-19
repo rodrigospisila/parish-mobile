@@ -52,6 +52,7 @@ import {
 import { CATECHESIS_CONSENT_TEXT } from '../../src/constants/catechesisConsent';
 import { useAuth } from '../../src/context/AuthContext';
 import { useCommunity } from '../../src/context/CommunityContext';
+import { useTrackScreen } from '../../src/services/analytics';
 
 const WEEKDAYS = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
 const WEEKDAYS_SHORT = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
@@ -79,6 +80,7 @@ const stripAccents = (value: string) =>
 
 /** Minhas turmas de catequese (catequista/auxiliar). */
 export default function CatechesisClassesScreen() {
+  useTrackScreen('screen_catechesis');
   // Rotas "minhas" (my-classes, my-family): o servidor decide pela comunidade
   // da turma (a família da capela com a turma na Matriz paga passa). O estado
   // calmo só aparece quando TODAS as chamadas da tela voltam PLAN_REQUIRED

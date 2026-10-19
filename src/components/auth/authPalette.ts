@@ -1,12 +1,13 @@
 import { useColors, useTheme } from '../../context/ThemeContext';
+import { WEB_URL } from '../../config/links';
 
 export type AuthColors = ReturnType<typeof useColors>;
 
 /** Degradê da marca (mesmo azul-marinho do ícone e da splash) */
 export const HERO_GRADIENT = ['#0B1C2C', '#17324D', '#0B4A8A'] as const;
 
-/** Site público (termos de uso e política de privacidade) */
-export const AUTH_WEB_URL = 'https://parish-web-three.vercel.app';
+/** Site público (termos de uso e política de privacidade) — EXPO_PUBLIC_WEB_URL (src/config/links) */
+export const AUTH_WEB_URL = WEB_URL;
 
 /** Servidor pode demorar a acordar: depois disso o botão avisa que ainda está conectando */
 export const SLOW_REQUEST_MS = 8000;

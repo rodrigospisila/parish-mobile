@@ -23,6 +23,7 @@ import { useColors } from '../src/context/ThemeContext';
 import { authService } from '../src/services/authService';
 import { privacyService, ConsentRow, ConsentType } from '../src/services/privacyService';
 import { AUTH_WEB_URL } from '../src/components/auth/authPalette';
+import { SUPPORT_EMAIL } from '../src/config/links';
 
 const CONSENT_COPY: Record<ConsentType, { title: string; description: string }> = {
   COMMUNICATIONS: {
@@ -145,7 +146,7 @@ export default function PrivacyScreen() {
         'Não foi possível excluir',
         status === 400 || status === 401 || status === 409 || status === 429
           ? (Array.isArray(msg) ? msg.join(' ') : msg) || 'Confira a senha e tente de novo.'
-          : 'Não foi possível excluir a conta agora. Tente novamente ou fale com o suporte.',
+          : `Não foi possível excluir a conta agora. Tente novamente ou fale com o suporte: ${SUPPORT_EMAIL}.`,
       );
     }
   };

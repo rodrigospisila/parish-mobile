@@ -34,6 +34,7 @@ import {
 } from '../../src/services/swapService';
 import { getEventTypeColor } from '../../src/services/eventService';
 import { formatToBrazilianDate } from '../../src/utils/dateUtils';
+import { useTrackScreen } from '../../src/services/analytics';
 
 /**
  * Quando a escala tem startTime próprio (agenda fixa grava a data à meia-noite
@@ -52,6 +53,7 @@ const rosterWhenLabel = (roster: { eventDate: string; startTime?: string | null 
 };
 
 export default function ScheduleScreen() {
+  useTrackScreen('screen_schedule');
   const { user } = useAuth();
   const colors = useColors();
   // Rota "minhas" (my-assignments): o servidor decide pela comunidade das

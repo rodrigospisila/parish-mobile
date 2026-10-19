@@ -22,6 +22,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
+import { useTrackScreen } from '../src/services/analytics';
 import { useFocusEffect } from '@react-navigation/native';
 import { FontAwesome5 } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
@@ -171,6 +172,7 @@ const campaignPresets = (campaign: TitheCampaign | null) =>
  * cartão (página segura do provedor) ou boleto — confirmação automática nos três.
  */
 export default function TitheScreen() {
+  useTrackScreen('screen_tithe');
   const router = useRouter();
   // Deep link do push "balancete publicado" (finance-statement): ?statementId=… abre a sheet assim que a lista chegar
   const params = useLocalSearchParams();

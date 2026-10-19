@@ -61,6 +61,7 @@ import {
   timeRangeLong,
 } from '../src/components/map/format';
 import { openDirectionsTo } from '../src/components/map/directions';
+import { useTrackScreen } from '../src/services/analytics';
 
 /**
  * Mapa das igrejas ("Missas por perto").
@@ -156,6 +157,8 @@ const norm = (s: string) =>
     .toLowerCase();
 
 export default function NearbyMassesScreen() {
+  // Mapa: sem comunidade (a busca é do país inteiro)
+  useTrackScreen('screen_nearby', { communityId: null });
   const { colors, isDark } = useTheme();
   const { isAuthenticated } = useAuth();
   const router = useRouter();
