@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -15,9 +15,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import { useColors } from '../src/context/ThemeContext';
-import { useFeatureLocked } from '../src/context/EntitlementsContext';
+import { usePlanLock } from '../src/context/EntitlementsContext';
 import { PlanLockedScreen } from '../src/components/PlanLockedState';
-import { isPlanRequiredError } from '../src/utils/planErrors';
 import {
   MemberAvailabilityResponse,
   getMyAvailability,
@@ -89,8 +88,12 @@ const toExceptionForm = (data: MemberAvailabilityResponse): ExceptionForm[] =>
   });
 
 export default function MemberAvailabilityScreen() {
-  // Recurso fora do plano da comunidade: estado calmo em vez de erro/lista vazia
-  const planLocked = useFeatureLocked('schedules');
+  // /members/me/availability não exige plano no backend: só um 403
+  // PLAN_REQUIRED da própria chamada mostraria o estado calmo
+  const reloadOnRecheck = useRef<() => void>(() => undefined);
+  const { locked: planLocked, track: trackPlan } = usePlanLock('schedules', {
+    onRecheck: () => reloadOnRecheck.current(),
+  });
   const colors = useColors();
   const router = useRouter();
   const [availability, setAvailability] = useState<MemberAvailabilityResponse | null>(null);
@@ -107,14 +110,16 @@ export default function MemberAvailabilityScreen() {
       setAvailability(data);
       setRules(toRuleForm(data));
       setExceptions(toExceptionForm(data));
+      trackPlan(null);
     } catch (error) {
       console.error('Erro ao carregar disponibilidade:', error);
       // Fora do plano: a tela mostra o estado calmo
-      if (!isPlanRequiredError(error)) Alert.alert('Erro', 'Não foi possível carregar sua disponibilidade.');
+      if (!trackPlan(error)) Alert.alert('Erro', 'Não foi possível carregar sua disponibilidade.');
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [trackPlan]);
+  reloadOnRecheck.current = () => void loadAvailability();
 
   useFocusEffect(
     useCallback(() => {

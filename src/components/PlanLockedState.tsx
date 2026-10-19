@@ -1,10 +1,11 @@
-import React from 'react';
-import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import React, { useState } from 'react';
+import { RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Stack, useRouter } from 'expo-router';
 import { FontAwesome5, Ionicons } from '@expo/vector-icons';
 import { useColors } from '../context/ThemeContext';
 import { useAuth } from '../context/AuthContext';
+import { useEntitlements } from '../context/EntitlementsContext';
 import { canCoordinateSchedules } from '../utils/pastoralCoordination';
 
 /**
@@ -12,14 +13,20 @@ import { canCoordinateSchedules } from '../utils/pastoralCoordination';
  * erro ou lista vazia que parece "não há nada"). Sem preço, sem link de
  * compra e sem falar em pagamento: a contratação é da paróquia, pela web
  * (regras das lojas — o fiel nunca paga).
+ *
+ * `refreshable`: puxar para atualizar reconsulta o plano e a tela tenta de
+ * novo (plano ativado na paróquia aparece sem reiniciar o app). Não usar
+ * dentro de outra ScrollView.
  */
-export default function PlanLockedState({ title }: { title?: string }) {
+export default function PlanLockedState({ title, refreshable = false }: { title?: string; refreshable?: boolean }) {
   const colors = useColors();
   const styles = createStyles(colors);
   const { user } = useAuth();
+  const { refresh } = useEntitlements();
+  const [refreshing, setRefreshing] = useState(false);
   const manages = canCoordinateSchedules(user);
 
-  return (
+  const content = (
     <View style={styles.container} accessible accessibilityRole="summary">
       <View style={styles.iconWrap}>
         <Ionicons name="leaf-outline" size={30} color={colors.primary} />
@@ -32,6 +39,22 @@ export default function PlanLockedState({ title }: { title?: string }) {
           : 'Calendário, horários de missa, liturgia e avisos da paróquia continuam funcionando normalmente.'}
       </Text>
     </View>
+  );
+
+  if (!refreshable) return content;
+
+  const onRefresh = () => {
+    setRefreshing(true);
+    refresh().finally(() => setRefreshing(false));
+  };
+
+  return (
+    <ScrollView
+      contentContainerStyle={{ flexGrow: 1 }}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+    >
+      {content}
+    </ScrollView>
   );
 }
 
@@ -78,7 +101,7 @@ export function PlanLockedScreen({ title }: { title: string }) {
         </Text>
         <View style={styles.headerBtn} />
       </View>
-      <PlanLockedState />
+      <PlanLockedState refreshable />
     </SafeAreaView>
   );
 }

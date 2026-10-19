@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -18,7 +18,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import { useColors } from '../../src/context/ThemeContext';
-import { useFeatureLocked } from '../../src/context/EntitlementsContext';
+import { usePlanLock } from '../../src/context/EntitlementsContext';
 import { PlanLockedScreen } from '../../src/components/PlanLockedState';
 import {
   CandidateRecommendationLevel,
@@ -74,8 +74,11 @@ const confirmGlobalConflict = (error: unknown): Promise<boolean> =>
   });
 
 export default function CoordinationScheduleDetailScreen() {
-  // Recurso fora do plano da comunidade: estado calmo em vez de erro/lista vazia
-  const planLocked = useFeatureLocked('schedules');
+  // Fora do plano da comunidade DA ESCALA (403 da própria chamada): estado calmo
+  const reloadOnRecheck = useRef<() => void>(() => undefined);
+  const { locked: planLocked, track: trackPlan } = usePlanLock('schedules', {
+    onRecheck: () => reloadOnRecheck.current(),
+  });
   const colors = useColors();
   const router = useRouter();
   const params = useLocalSearchParams<{ scheduleId: string | string[] }>();
@@ -125,14 +128,16 @@ export default function CoordinationScheduleDetailScreen() {
     try {
       const data = await getCoordinatorScheduleDetail(scheduleId);
       setSchedule(data);
+      trackPlan(null);
     } catch (error) {
-      console.error('Erro ao carregar detalhe da escala:', error);
+      if (!trackPlan(error)) console.error('Erro ao carregar detalhe da escala:', error);
       setSchedule(null);
     } finally {
       setIsLoading(false);
       setIsRefreshing(false);
     }
-  }, [scheduleId]);
+  }, [scheduleId, trackPlan]);
+  reloadOnRecheck.current = () => void loadSchedule();
 
   useFocusEffect(
     useCallback(() => {

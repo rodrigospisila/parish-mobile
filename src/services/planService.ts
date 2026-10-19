@@ -20,7 +20,8 @@ export interface PlanEntitlements {
   plan: { status: string; trialEndsAt: string | null; currentPeriodEnd: string | null } | null;
 }
 
-type PlanListener = (code: PlanErrorCode, feature: string | null) => void;
+/** `communityId`: comunidade que o servidor avaliou e recusou (403 PLAN_REQUIRED) */
+type PlanListener = (code: PlanErrorCode, feature: string | null, communityId: string | null) => void;
 const listeners = new Set<PlanListener>();
 
 export function onPlanRequired(listener: PlanListener): () => void {
@@ -55,12 +56,13 @@ export function installPlanErrorHandler(): void {
     (error) => {
       const code = planErrorCode(error);
       if (code) {
-        const data = error.response.data as { message?: unknown; feature?: unknown };
+        const data = error.response.data as { message?: unknown; feature?: unknown; communityId?: unknown };
         data.message = PLAN_MESSAGES[code];
         const feature = typeof data.feature === 'string' ? data.feature : null;
+        const communityId = typeof data.communityId === 'string' ? data.communityId : null;
         listeners.forEach((listener) => {
           try {
-            listener(code, feature);
+            listener(code, feature, communityId);
           } catch {
             // ouvinte com erro não derruba a requisição
           }

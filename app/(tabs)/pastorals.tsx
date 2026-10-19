@@ -1,14 +1,13 @@
 import { useFocusEffect } from '@react-navigation/native';
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { View, Text, StyleSheet, ActivityIndicator, Alert, TouchableOpacity, Modal, ScrollView, FlatList, RefreshControl } from 'react-native';
 // SafeAreaView da safe-area-context: o do react-native só vale no iOS (no Android
 // com edge-to-edge o topo ficava sob o relógio/bateria)
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../../src/context/AuthContext';
 import { useCommunity } from '../../src/context/CommunityContext';
-import { useFeatureLocked } from '../../src/context/EntitlementsContext';
+import { useEntitlements, usePlanLock } from '../../src/context/EntitlementsContext';
 import PlanLockedState from '../../src/components/PlanLockedState';
-import { isPlanRequiredError } from '../../src/utils/planErrors';
 import { useColors } from '../../src/context/ThemeContext';
 import {
   Pastoral,
@@ -21,7 +20,7 @@ import {
 
 export default function PastoralsScreen() {
   const { user } = useAuth();
-  const pastoralsLocked = useFeatureLocked('pastorals');
+  const { refresh: refreshPlan } = useEntitlements();
 
   // "Quero participar" (Onda 4): estado dos meus pedidos e vínculos
   const [joinInfo, setJoinInfo] = useState<MyJoinRequests>({ requests: [], memberOfPastoralIds: [] });
@@ -71,6 +70,12 @@ export default function PastoralsScreen() {
 
   const { activeCommunityId } = useCommunity();
   const communityId = activeCommunityId ?? user?.communityId;
+  // Bloqueio só pela comunidade exibida (403 dela ou o plano da principal)
+  const reloadOnRecheck = useRef<() => void>(() => undefined);
+  const { locked: pastoralsLocked, track: trackPlan } = usePlanLock('pastorals', {
+    communityId,
+    onRecheck: () => reloadOnRecheck.current(),
+  });
 
   // Carregar Pastorais — ao focar a aba (pedido aprovado/recusado reflete na volta)
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -85,9 +90,10 @@ export default function PastoralsScreen() {
       try {
         const data = await getPastorals(communityId);
         setPastorals(data);
+        trackPlan(null);
       } catch (error) {
         // Fora do plano: a tela mostra o estado calmo, sem Alert de erro
-        if (isPlanRequiredError(error)) return;
+        if (trackPlan(error)) return;
         Alert.alert('Erro', 'Não foi possível carregar as pastorais.');
         console.error(error);
       } finally {
@@ -95,8 +101,9 @@ export default function PastoralsScreen() {
         setIsRefreshing(false);
       }
     },
-    [communityId],
+    [communityId, trackPlan],
   );
+  reloadOnRecheck.current = () => void loadPastorals();
   useFocusEffect(
     useCallback(() => {
       void loadPastorals();
@@ -221,7 +228,7 @@ export default function PastoralsScreen() {
   if (pastoralsLocked) {
     return (
       <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
-        <PlanLockedState title="Pastorais" />
+        <PlanLockedState title="Pastorais" refreshable />
       </SafeAreaView>
     );
   }
@@ -257,6 +264,7 @@ export default function PastoralsScreen() {
             <RefreshControl
               refreshing={isRefreshing}
               onRefresh={() => {
+                void refreshPlan();
                 void loadPastorals(true);
                 void loadJoinInfo();
               }}

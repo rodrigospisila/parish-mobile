@@ -162,3 +162,35 @@ export function resolveNotificationRoute(data: Data, context: NotificationRouteC
   // Comunicado/aviso urgente (newsId), reserva de sala e tipos novos: central de avisos
   return '/notifications' as Href;
 }
+
+/** Pedaço da resposta do expo-notifications que a dedupe usa (sem importar o módulo nativo). */
+export interface NotificationResponseLike {
+  actionIdentifier: string;
+  notification: { date?: number | null; request: { identifier: string } };
+}
+
+/**
+ * Chave de UM toque: id + data de entrega + ação. O lembrete semanal do
+ * horário favorito (CALENDAR com repeats) mantém o mesmo identifier em toda
+ * ocorrência — sem a data, o toque da semana seguinte parecia repetido e não
+ * navegava. O cold start e o ouvinte entregam o MESMO toque com a mesma data.
+ */
+export function notificationResponseKey(response: NotificationResponseLike): string {
+  const date = response.notification.date;
+  const delivered = typeof date === 'number' && Number.isFinite(date) && date > 0 ? String(Math.round(date)) : '-';
+  return `${response.notification.request.identifier}:${delivered}:${response.actionIdentifier}`;
+}
+
+/**
+ * Minha Escala recebe a marca do toque (`n`): com a aba já aberta, o
+ * expo-router só troca os parâmetros — a marca nova faz a tela recarregar
+ * mesmo quando o assignmentId/swapId é o mesmo de um toque anterior.
+ */
+export function withTapMark(target: Href, mark: string): Href {
+  if (target === '/(tabs)/schedule') return { pathname: '/(tabs)/schedule', params: { n: mark } } as Href;
+  if (typeof target === 'object' && target && (target as { pathname?: string }).pathname === '/(tabs)/schedule') {
+    const route = target as { pathname: string; params?: Record<string, unknown> };
+    return { ...route, params: { ...(route.params ?? {}), n: mark } } as Href;
+  }
+  return target;
+}

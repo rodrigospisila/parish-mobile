@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -19,7 +19,7 @@ import { FontAwesome5 } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import { useColors } from '../../src/context/ThemeContext';
-import { useFeatureLocked } from '../../src/context/EntitlementsContext';
+import { useEntitlements, usePlanLock } from '../../src/context/EntitlementsContext';
 import { PlanLockedScreen } from '../../src/components/PlanLockedState';
 import {
   CatechesisClassReport,
@@ -91,8 +91,12 @@ const dateLabel = (iso: string) => {
 
 /** Painel da turma: encontros, chamada e acompanhamento (app do catequista). */
 export default function CatechesisClassScreen() {
-  // Recurso fora do plano da comunidade: estado calmo em vez de erro/lista vazia
-  const planLocked = useFeatureLocked('catechesis');
+  // Fora do plano da comunidade DA TURMA (403 da própria chamada): estado calmo
+  const { refresh: refreshPlan } = useEntitlements();
+  const reloadOnRecheck = useRef<() => void>(() => undefined);
+  const { locked: planLocked, track: trackPlan } = usePlanLock('catechesis', {
+    onRecheck: () => reloadOnRecheck.current(),
+  });
   const { classId } = useLocalSearchParams<{ classId: string }>();
   const router = useRouter();
   const colors = useColors();
@@ -258,15 +262,17 @@ export default function CatechesisClassScreen() {
         ]);
         setReport(reportData);
         setSessions(sessionsData);
+        trackPlan(null);
       } catch (error) {
-        console.error('Erro ao carregar a turma:', error);
+        if (!trackPlan(error)) console.error('Erro ao carregar a turma:', error);
       } finally {
         setIsLoading(false);
         setIsRefreshing(false);
       }
     },
-    [classId],
+    [classId, trackPlan],
   );
+  reloadOnRecheck.current = () => void load();
 
   useFocusEffect(
     useCallback(() => {
@@ -802,7 +808,15 @@ export default function CatechesisClassScreen() {
 
       <ScrollView
         contentContainerStyle={styles.scroll}
-        refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={() => load(true)} />}
+        refreshControl={
+          <RefreshControl
+            refreshing={isRefreshing}
+            onRefresh={() => {
+              void refreshPlan();
+              void load(true);
+            }}
+          />
+        }
         showsVerticalScrollIndicator={false}
       >
         {isLoading ? (

@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -21,7 +21,8 @@ import { FontAwesome5 } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import { useColors } from '../../src/context/ThemeContext';
-import { useFeatureLocked } from '../../src/context/EntitlementsContext';
+import { useEntitlements, usePlanLock } from '../../src/context/EntitlementsContext';
+import { isPlanRequiredError } from '../../src/utils/planErrors';
 import { PlanLockedScreen } from '../../src/components/PlanLockedState';
 import {
   FamilyCatechesisItem,
@@ -78,8 +79,14 @@ const stripAccents = (value: string) =>
 
 /** Minhas turmas de catequese (catequista/auxiliar). */
 export default function CatechesisClassesScreen() {
-  // Recurso fora do plano da comunidade: estado calmo em vez de erro/lista vazia
-  const planLocked = useFeatureLocked('catechesis');
+  // Rotas "minhas" (my-classes, my-family): o servidor decide pela comunidade
+  // da turma (a família da capela com a turma na Matriz paga passa). O estado
+  // calmo só aparece quando TODAS as chamadas da tela voltam PLAN_REQUIRED
+  const { refresh: refreshPlan } = useEntitlements();
+  const reloadOnRecheck = useRef<() => void>(() => undefined);
+  const { locked: planLocked, track: trackPlan } = usePlanLock('catechesis', {
+    onRecheck: () => reloadOnRecheck.current(),
+  });
   const router = useRouter();
   const colors = useColors();
   const styles = createStyles(colors);
@@ -318,17 +325,38 @@ export default function CatechesisClassesScreen() {
   const load = useCallback(async (refresh = false) => {
     if (refresh) setIsRefreshing(true);
     try {
+      // 403 do plano numa das rotas vira lista vazia; só bloqueia se todas
+      // as chamadas da tela forem recusadas
+      let planError: unknown = null;
+      let allowedCalls = 0;
+      const planAware = <T,>(call: Promise<T>, fallback: T, swallowOther: boolean): Promise<T> =>
+        call.then(
+          (value) => {
+            allowedCalls += 1;
+            return value;
+          },
+          (error) => {
+            if (isPlanRequiredError(error)) {
+              planError = error;
+              return fallback;
+            }
+            allowedCalls += 1; // outro erro: não é o plano que barra
+            if (swallowOther) return fallback;
+            throw error;
+          },
+        );
       const [mine, familyItems] = await Promise.all([
-        getMyCatechesisClasses(),
-        getMyFamilyCatechesis().catch(() => [] as FamilyCatechesisItem[]),
+        planAware(getMyCatechesisClasses(), [] as MyCatechesisClass[], false),
+        planAware(getMyFamilyCatechesis(), [] as FamilyCatechesisItem[], true),
       ]);
       // Coordenação vê SEMPRE as turmas da comunidade (o backend já autoriza
       // aprovar/conversar por papel + escopo). Antes só carregava quando o
       // coordenador não tinha turma própria, e quem acumulava as duas funções
       // enxergava apenas a sua — ficava sem a visão do conjunto.
       const coordination = isCoordinatorRole
-        ? await getCommunityCatechesisClasses().catch(() => [] as MyCatechesisClass[])
+        ? await planAware(getCommunityCatechesisClasses(), [] as MyCatechesisClass[], true)
         : [];
+      trackPlan(allowedCalls === 0 ? planError : null);
       // A ficha da coordenação é a mais completa (vagas, mensalidades, documentos),
       // então ela é a base; da turma própria vem só o papel, para o card dizer
       // "Catequista" em vez de "Coordenação" onde o usuário dá aula.
@@ -370,7 +398,8 @@ export default function CatechesisClassesScreen() {
       setIsLoading(false);
       setIsRefreshing(false);
     }
-  }, [isCoordinatorRole]);
+  }, [isCoordinatorRole, trackPlan]);
+  reloadOnRecheck.current = () => void load();
 
   useFocusEffect(
     useCallback(() => {
@@ -466,7 +495,15 @@ export default function CatechesisClassesScreen() {
 
       <ScrollView
         contentContainerStyle={styles.scroll}
-        refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={() => load(true)} />}
+        refreshControl={
+          <RefreshControl
+            refreshing={isRefreshing}
+            onRefresh={() => {
+              void refreshPlan();
+              void load(true);
+            }}
+          />
+        }
         showsVerticalScrollIndicator={false}
       >
         {isLoading ? (

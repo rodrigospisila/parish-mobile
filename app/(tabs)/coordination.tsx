@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -15,7 +15,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '../../src/context/AuthContext';
-import { useFeatureLocked } from '../../src/context/EntitlementsContext';
+import { useEntitlements, usePlanLock } from '../../src/context/EntitlementsContext';
 import PlanLockedState from '../../src/components/PlanLockedState';
 import { useColors } from '../../src/context/ThemeContext';
 import {
@@ -66,7 +66,14 @@ export default function CoordinationScreen() {
   const router = useRouter();
   const { user } = useAuth();
   // Escalas fora do plano: atalhos grátis (horários, dízimo) continuam; o painel vira estado calmo
-  const schedulesLocked = useFeatureLocked('schedules');
+  // O painel (coordinator-overview) é decidido pelo usuário, sem comunidade na
+  // rota: vale a principal (403 dela ou o /me/entitlements) e o 403 da chamada
+  const { refresh: refreshPlan } = useEntitlements();
+  const reloadOnRecheck = useRef<() => void>(() => undefined);
+  const { locked: schedulesLocked, track: trackPlan } = usePlanLock('schedules', {
+    communityId: user?.communityId,
+    onRecheck: () => reloadOnRecheck.current(),
+  });
   const [schedules, setSchedules] = useState<CoordinatorScheduleSummary[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -133,16 +140,18 @@ export default function CoordinationScreen() {
         ]);
         setSchedules(data);
         setFixedPending(pending);
+        trackPlan(null);
       } catch (error) {
-        console.error('Erro ao carregar painel de coordenação:', error);
+        if (!trackPlan(error)) console.error('Erro ao carregar painel de coordenação:', error);
         setSchedules([]);
       } finally {
         setIsLoading(false);
         setIsRefreshing(false);
       }
     },
-    [isCoordinator, getDateRangeParams],
+    [isCoordinator, getDateRangeParams, trackPlan],
   );
+  reloadOnRecheck.current = () => void loadOverview();
 
   useFocusEffect(
     useCallback(() => {
@@ -344,7 +353,13 @@ export default function CoordinationScreen() {
       <ScrollView
         style={styles.scrollView}
         refreshControl={
-          <RefreshControl refreshing={isRefreshing} onRefresh={() => loadOverview(true)} />
+          <RefreshControl
+            refreshing={isRefreshing}
+            onRefresh={() => {
+              void refreshPlan();
+              void loadOverview(true);
+            }}
+          />
         }
         showsVerticalScrollIndicator={false}
       >

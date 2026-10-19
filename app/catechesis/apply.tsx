@@ -20,7 +20,7 @@ import { FontAwesome5, Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import { useColors } from '../../src/context/ThemeContext';
-import { useFeatureLocked } from '../../src/context/EntitlementsContext';
+import { usePlanLock } from '../../src/context/EntitlementsContext';
 import { PlanLockedScreen } from '../../src/components/PlanLockedState';
 import { useCommunity } from '../../src/context/CommunityContext';
 import {
@@ -65,11 +65,16 @@ type DocDraft =
 
 /** Inscrição online na catequese (responsável ou o próprio adulto). */
 export default function CatechesisApplyScreen() {
-  // Recurso fora do plano da comunidade: estado calmo em vez de erro/lista vazia
-  const planLocked = useFeatureLocked('catechesis');
   const router = useRouter();
   const colors = useColors();
   const { activeCommunityId } = useCommunity();
+  // Turmas abertas da comunidade em foco: bloqueia só se o plano DELA não
+  // tem a catequese (403 dela, da própria chamada ou o /me/entitlements)
+  const reloadOnRecheck = useRef<() => void>(() => undefined);
+  const { locked: planLocked, track: trackPlan } = usePlanLock('catechesis', {
+    communityId: activeCommunityId,
+    onRecheck: () => reloadOnRecheck.current(),
+  });
   // Reinscrição: chega com ?memberId= para já selecionar o catequizando
   const { memberId: presetMemberId } = useLocalSearchParams<{ memberId?: string }>();
   const styles = createStyles(colors);
@@ -179,14 +184,17 @@ export default function CatechesisApplyScreen() {
         const preset = myDependents.find((dependent) => dependent.id === presetMemberId);
         if (preset) setWho({ kind: 'dependent', id: preset.id, name: preset.fullName });
       }
+      trackPlan(null);
     } catch (error: any) {
+      if (trackPlan(error)) return;
       console.error('Erro ao carregar turmas abertas:', error);
       setClasses([]);
       setLoadError(error?.message ?? 'Não foi possível carregar as turmas.');
     } finally {
       setIsLoading(false);
     }
-  }, [activeCommunityId, presetMemberId]);
+  }, [activeCommunityId, presetMemberId, trackPlan]);
+  reloadOnRecheck.current = () => void load();
 
   useFocusEffect(
     useCallback(() => {

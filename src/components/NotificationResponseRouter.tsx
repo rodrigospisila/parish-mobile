@@ -4,7 +4,7 @@ import * as Notifications from 'expo-notifications';
 import { useRootNavigationState, useRouter } from 'expo-router';
 import { useAuth } from '../context/AuthContext';
 import { canCoordinateSchedules } from '../utils/pastoralCoordination';
-import { resolveNotificationRoute } from '../utils/notificationRoute';
+import { notificationResponseKey, resolveNotificationRoute, withTapMark } from '../utils/notificationRoute';
 
 /** Último toque já tratado (entre aberturas: o Android repete a "última resposta"). */
 const LAST_HANDLED_KEY = '@parish:notification:lastHandled';
@@ -16,17 +16,15 @@ const seen = new Set<string>();
 
 type Pending = { key: string; data: Record<string, unknown> | null; title: string | null; at: number };
 
-const keyOf = (response: Notifications.NotificationResponse) =>
-  `${response.notification.request.identifier}:${response.actionIdentifier}`;
-
 /**
  * Leva o toque na notificação à tela certa (ux-app-01/02/28, eng-qualidade-11).
  *
  * - App aberto ou em segundo plano: ouvinte de resposta;
  * - App fechado (cold start): `getLastNotificationResponse()` na montagem;
- * - Os dois podem entregar o MESMO toque: a chave (id + ação) garante uma
- *   navegação só, e a última chave tratada fica gravada para a próxima
- *   abertura não repetir;
+ * - Os dois podem entregar o MESMO toque: a chave (id + data de entrega +
+ *   ação) garante uma navegação só, e a última chave tratada fica gravada
+ *   para a próxima abertura não repetir. A data entra porque o lembrete
+ *   semanal (gatilho recorrente) repete o mesmo id a cada ocorrência;
  * - Só navega com a sessão pronta (`ready`: logado, com comunidade, fora do
  *   login/troca de senha) e o navegador raiz montado; antes disso o toque
  *   fica pendente.
@@ -40,7 +38,7 @@ export default function NotificationResponseRouter({ ready }: { ready: boolean }
 
   const enqueue = useCallback(async (response: Notifications.NotificationResponse | null) => {
     if (!response) return;
-    const key = keyOf(response);
+    const key = notificationResponseKey(response);
     if (seen.has(key)) return;
     seen.add(key);
     try {
@@ -88,7 +86,7 @@ export default function NotificationResponseRouter({ ready }: { ready: boolean }
       title: item.title,
       canCoordinate: canCoordinateSchedules(user),
     });
-    if (target) router.push(target);
+    if (target) router.push(withTapMark(target, item.at.toString(36)));
   }, [tick, ready, navigationState?.key, user, router]);
 
   return null;

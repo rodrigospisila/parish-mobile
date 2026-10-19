@@ -16,9 +16,8 @@ import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import { FontAwesome5 } from '@expo/vector-icons';
 import { useColors } from '../../../src/context/ThemeContext';
-import { useFeatureLocked } from '../../../src/context/EntitlementsContext';
+import { usePlanLock } from '../../../src/context/EntitlementsContext';
 import { PlanLockedScreen } from '../../../src/components/PlanLockedState';
-import { isPlanRequiredError } from '../../../src/utils/planErrors';
 import {
   CatechesisChatThread,
   getEnrollmentMessages,
@@ -30,8 +29,11 @@ import {
  * responsáveis e a equipe leem. Atualiza sozinha enquanto a tela está aberta.
  */
 export default function CatechesisChatScreen() {
-  // Recurso fora do plano da comunidade: estado calmo em vez de erro/lista vazia
-  const planLocked = useFeatureLocked('catechesis');
+  // Fora do plano da comunidade DA TURMA (403 da própria chamada): estado calmo
+  const reloadOnRecheck = useRef<() => void>(() => undefined);
+  const { locked: planLocked, track: trackPlan } = usePlanLock('catechesis', {
+    onRecheck: () => reloadOnRecheck.current(),
+  });
   const router = useRouter();
   const colors = useColors();
   const styles = createStyles(colors);
@@ -54,6 +56,7 @@ export default function CatechesisChatScreen() {
       try {
         const data = await getEnrollmentMessages(enrollmentId);
         if (seq !== loadSeq.current) return;
+        trackPlan(null);
         setThread((prev) => {
           if (!prev) return data;
           const known = new Set(data.messages.map((m) => m.id));
@@ -61,15 +64,16 @@ export default function CatechesisChatScreen() {
           return { ...data, messages: [...data.messages, ...extra] };
         });
       } catch (error: any) {
-        if (!silent && !isPlanRequiredError(error)) {
+        if (!trackPlan(error) && !silent) {
           Alert.alert('Conversa', error?.message ?? 'Não foi possível abrir a conversa.');
         }
       } finally {
         setIsLoading(false);
       }
     },
-    [enrollmentId],
+    [enrollmentId, trackPlan],
   );
+  reloadOnRecheck.current = () => void load();
 
   useFocusEffect(
     useCallback(() => {

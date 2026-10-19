@@ -18,7 +18,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { useLocalSearchParams } from 'expo-router';
 import { useAuth } from '../../src/context/AuthContext';
-import { useFeatureLocked } from '../../src/context/EntitlementsContext';
+import { useEntitlements, usePlanLock } from '../../src/context/EntitlementsContext';
 import PlanLockedState from '../../src/components/PlanLockedState';
 import { coordinatedPastoralIdsOf } from '../../src/utils/pastoralCoordination';
 import { useColors } from '../../src/context/ThemeContext';
@@ -54,13 +54,21 @@ const rosterWhenLabel = (roster: { eventDate: string; startTime?: string | null 
 export default function ScheduleScreen() {
   const { user } = useAuth();
   const colors = useColors();
-  const schedulesLocked = useFeatureLocked('schedules');
+  // Rota "minhas" (my-assignments): o servidor decide pela comunidade das
+  // escalas da pessoa — só o 403 da própria chamada bloqueia a tela
+  const { refresh: refreshPlan } = useEntitlements();
+  const reloadOnRecheck = useRef<() => void>(() => undefined);
+  const { locked: schedulesLocked, track: trackPlan } = usePlanLock('schedules', {
+    onRecheck: () => reloadOnRecheck.current(),
+  });
   // Push de escala (atribuição/lembrete/cobrança) chega com o assignmentId:
   // o card dele fica destacado e a tela rola até ele (ux-app-01)
   // Convite de troca (swap-requested) chega com o swapId: rola até as trocas
-  const { assignmentId: focusAssignmentId, swapId: focusSwapId } = useLocalSearchParams<{
+  // `n`: marca do toque (NotificationResponseRouter) — o mesmo push tocado de novo recarrega
+  const { assignmentId: focusAssignmentId, swapId: focusSwapId, n: focusNonce } = useLocalSearchParams<{
     assignmentId?: string;
     swapId?: string;
+    n?: string;
   }>();
   const swapsSectionY = useRef<number | null>(null);
   const scrolledForSwap = useRef<string | null>(null);
@@ -91,7 +99,8 @@ export default function ScheduleScreen() {
   }, []);
 
   const loadUserRosters = useCallback(
-    async (refresh = false) => {
+    /** `silent`: recarga por toque em push — mantém a lista na tela enquanto busca */
+    async (refresh = false, silent = false) => {
       if (!user?.id) {
         setIsLoadingRosters(false);
         return;
@@ -101,23 +110,25 @@ export default function ScheduleScreen() {
         setIsRefreshing(true);
         setHistoryLoaded(false);
         setHistoryRosters([]);
-      } else {
+      } else if (!silent) {
         setIsLoadingRosters(true);
       }
 
       try {
         const rosters = await getUserUpcomingRosters(user.id);
         setUserRosters(rosters);
+        trackPlan(null);
       } catch (error) {
-        console.error('Erro ao carregar escalas:', error);
+        if (!trackPlan(error)) console.error('Erro ao carregar escalas:', error);
       } finally {
         setIsLoadingRosters(false);
         setIsRefreshing(false);
       }
       loadSwaps();
     },
-    [user?.id, loadSwaps],
+    [user?.id, loadSwaps, trackPlan],
   );
+  reloadOnRecheck.current = () => void loadUserRosters();
 
   const loadHistory = useCallback(async () => {
     if (!user?.id || historyLoaded || isLoadingHistory) return;
@@ -138,6 +149,23 @@ export default function ScheduleScreen() {
       loadUserRosters();
     }, [loadUserRosters]),
   );
+
+  // Toque no push com a aba JÁ aberta: o expo-router só troca os parâmetros
+  // (a tela continua focada e o useFocusEffect não roda). Escala nova ou
+  // convite de troca ainda não estão na lista: recarrega sem o spinner da
+  // tela inteira; o card/convite fica destacado e a tela rola até ele quando
+  // aparecer. `n` (marca do toque) faz o mesmo id tocado de novo recarregar.
+  const lastFocusParams = useRef(`${focusAssignmentId ?? ''}|${focusSwapId ?? ''}|${focusNonce ?? ''}`);
+  useEffect(() => {
+    const key = `${focusAssignmentId ?? ''}|${focusSwapId ?? ''}|${focusNonce ?? ''}`;
+    if (key === lastFocusParams.current) return; // montagem: o foco já carrega
+    lastFocusParams.current = key;
+    if (!focusAssignmentId && !focusSwapId && !focusNonce) return;
+    // Mesmo id de antes (novo toque): libera a rolagem de novo
+    scrolledFor.current = null;
+    scrolledForSwap.current = null;
+    void loadUserRosters(false, true);
+  }, [focusAssignmentId, focusSwapId, focusNonce, loadUserRosters]);
 
   // Rola até o card destacado quando a lista (e o layout dele) estiver pronta
   const scrollToFocus = useCallback(() => {
@@ -632,7 +660,7 @@ export default function ScheduleScreen() {
   if (schedulesLocked) {
     return (
       <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
-        <PlanLockedState title="Minha Escala" />
+        <PlanLockedState title="Minha Escala" refreshable />
       </SafeAreaView>
     );
   }
@@ -644,7 +672,13 @@ export default function ScheduleScreen() {
         style={styles.scrollView}
         showsVerticalScrollIndicator={false}
         refreshControl={
-          <RefreshControl refreshing={isRefreshing} onRefresh={() => loadUserRosters(true)} />
+          <RefreshControl
+            refreshing={isRefreshing}
+            onRefresh={() => {
+              void refreshPlan();
+              void loadUserRosters(true);
+            }}
+          />
         }
       >
         <View style={styles.header}>

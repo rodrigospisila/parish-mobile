@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -13,9 +13,8 @@ import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import { FontAwesome5 } from '@expo/vector-icons';
 import { useColors } from '../../../src/context/ThemeContext';
-import { useFeatureLocked } from '../../../src/context/EntitlementsContext';
+import { usePlanLock } from '../../../src/context/EntitlementsContext';
 import { PlanLockedScreen } from '../../../src/components/PlanLockedState';
-import { isPlanRequiredError } from '../../../src/utils/planErrors';
 import {
   AttendanceGrid,
   AttendanceGridMark,
@@ -43,8 +42,11 @@ const NEXT_STATE: Record<CellState, CellState> = {
  * O atestado da falta é anexado pela chamada do encontro.
  */
 export default function AttendanceGridScreen() {
-  // Recurso fora do plano da comunidade: estado calmo em vez de erro/lista vazia
-  const planLocked = useFeatureLocked('catechesis');
+  // Fora do plano da comunidade DA TURMA (403 da própria chamada): estado calmo
+  const reloadOnRecheck = useRef<() => void>(() => undefined);
+  const { locked: planLocked, track: trackPlan } = usePlanLock('catechesis', {
+    onRecheck: () => reloadOnRecheck.current(),
+  });
   const router = useRouter();
   const colors = useColors();
   const styles = createStyles(colors);
@@ -62,12 +64,14 @@ export default function AttendanceGridScreen() {
     setIsLoading(true);
     try {
       setGrid(await getAttendanceGrid(classId));
+      trackPlan(null);
     } catch (error: any) {
-      if (!isPlanRequiredError(error)) Alert.alert('Folha de presença', error?.message ?? 'Não foi possível carregar.');
+      if (!trackPlan(error)) Alert.alert('Folha de presença', error?.message ?? 'Não foi possível carregar.');
     } finally {
       setIsLoading(false);
     }
-  }, [classId]);
+  }, [classId, trackPlan]);
+  reloadOnRecheck.current = () => void load();
 
   useFocusEffect(
     useCallback(() => {

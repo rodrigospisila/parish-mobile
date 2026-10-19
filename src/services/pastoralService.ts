@@ -3,6 +3,7 @@ import { EventType } from '../types';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { cachedFetch } from '../utils/offlineCache';
 import { enqueueWrite, isNetworkError } from '../utils/offlineQueue';
+import { isPlanRequiredError } from '../utils/planErrors';
 
 /**
  * Resultado de uma escrita que pode ser enfileirada offline (roadmap 4.7):
@@ -776,6 +777,9 @@ export const getUserUpcomingRosters = async (userId: string): Promise<UserRoster
 
     return result.data;
   } catch (error) {
+    // Fora do plano: a tela Minha Escala mostra o estado calmo (rota "minhas":
+    // quem decide é o servidor, pela comunidade das escalas da pessoa)
+    if (isPlanRequiredError(error)) throw error;
     console.error('Erro ao buscar escalas do usuário (sem cache disponível):', error);
     return [];
   }
