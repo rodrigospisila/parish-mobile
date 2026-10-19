@@ -4,7 +4,6 @@ import {
   Text,
   StyleSheet,
   ActivityIndicator,
-  SafeAreaView,
   TouchableOpacity,
   Modal,
   ScrollView,
@@ -13,6 +12,9 @@ import {
   Linking,
   AppState,
 } from 'react-native';
+// SafeAreaView da safe-area-context: o do react-native só vale no iOS (no Android
+// com edge-to-edge o topo ficava sob o relógio/bateria)
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { format } from 'date-fns';
@@ -1024,7 +1026,7 @@ export default function HomeScreen() {
   const liturgyDot = getLiturgicalColor(liturgy?.liturgicalColor);
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
       <ScrollView
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}

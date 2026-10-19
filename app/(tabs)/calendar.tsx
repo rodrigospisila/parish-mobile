@@ -103,15 +103,17 @@ type AgendaItem = {
 
 const DAY_KEY = (date: Date) => format(date, 'yyyy-MM-dd');
 
-// Cores/rótulos da agenda fixa (Missa/Confissão/Adoração/Terço)
+// Cores/rótulos da agenda fixa (Missa/Celebração da Palavra/Confissão/Adoração/Terço)
 const FIXED_COLORS: Record<string, string> = {
   MASS: '#7E57C2',
+  WORD_CELEBRATION: '#8D6E63',
   CONFESSION: '#F9A825',
   ADORATION: '#26A69A',
   ROSARY: '#78909C',
 };
 const FIXED_LABELS: Record<string, string> = {
   MASS: 'Missa',
+  WORD_CELEBRATION: 'Celebração da Palavra',
   CONFESSION: 'Confissão',
   ADORATION: 'Adoração',
   ROSARY: 'Terço',

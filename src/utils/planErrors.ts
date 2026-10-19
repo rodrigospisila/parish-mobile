@@ -25,3 +25,12 @@ export function planErrorCode(error: unknown): PlanErrorCode | null {
 
 /** 403 do plano: a resposta é definitiva (não é falta de rede) — não usar o cache offline. */
 export const isPlanError = (error: unknown): boolean => planErrorCode(error) !== null;
+
+/**
+ * Recurso fora do plano (PLAN_REQUIRED) — também quando o serviço já embrulhou
+ * o erro do axios num `Error` com a mensagem trocada pelo interceptor. A tela
+ * mostra o estado calmo (PlanLockedState) e não deve abrir Alert de erro.
+ */
+export const isPlanRequiredError = (error: unknown): boolean =>
+  planErrorCode(error) === 'PLAN_REQUIRED' ||
+  (error instanceof Error && error.message === PLAN_MESSAGES.PLAN_REQUIRED);

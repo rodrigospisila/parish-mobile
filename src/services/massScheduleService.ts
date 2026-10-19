@@ -5,6 +5,7 @@ const USE_MOCK = process.env.EXPO_PUBLIC_USE_MOCK === 'true';
 
 const massScheduleTypeLabels: Record<string, string> = {
   MASS: 'Missa',
+  WORD_CELEBRATION: 'Celebração da Palavra',
   CONFESSION: 'Confissão',
   ADORATION: 'Adoração',
   ROSARY: 'Terço',

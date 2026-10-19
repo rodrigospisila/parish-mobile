@@ -5,7 +5,6 @@ import {
   Linking,
   Modal,
   RefreshControl,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
@@ -13,9 +12,14 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+// SafeAreaView da safe-area-context: o do react-native só vale no iOS (no Android
+// com edge-to-edge o topo ficava sob o relógio/bateria)
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import { useColors } from '../../src/context/ThemeContext';
+import { useFeatureLocked } from '../../src/context/EntitlementsContext';
+import { PlanLockedScreen } from '../../src/components/PlanLockedState';
 import {
   CandidateRecommendationLevel,
   CoordinatorScheduleAssignment,
@@ -70,6 +74,8 @@ const confirmGlobalConflict = (error: unknown): Promise<boolean> =>
   });
 
 export default function CoordinationScheduleDetailScreen() {
+  // Recurso fora do plano da comunidade: estado calmo em vez de erro/lista vazia
+  const planLocked = useFeatureLocked('schedules');
   const colors = useColors();
   const router = useRouter();
   const params = useLocalSearchParams<{ scheduleId: string | string[] }>();
@@ -684,6 +690,10 @@ export default function CoordinationScheduleDetailScreen() {
 
     return 'Pendente';
   };
+
+  if (planLocked) {
+    return <PlanLockedScreen title="Operação da escala" />;
+  }
 
   if (isLoading) {
     return (

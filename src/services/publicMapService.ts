@@ -12,7 +12,7 @@ import type { ScheduleCancellationDay } from '../types';
 
 // ---------- Tipos ----------
 
-export type CelebrationType = 'MASS' | 'CONFESSION' | 'ADORATION' | 'ROSARY';
+export type CelebrationType = 'MASS' | 'WORD_CELEBRATION' | 'CONFESSION' | 'ADORATION' | 'ROSARY';
 
 export interface MapConfig {
   tileUrl: string;
@@ -37,6 +37,8 @@ export interface PublicMass {
   id: string;
   title: string;
   type: string;
+  /** Rótulo pronto do tipo ("Missa", "Celebração da Palavra"…) — ausente em servidor antigo */
+  typeLabel?: string;
   /** relógio de parede, sem fuso: YYYY-MM-DDTHH:MM:SS */
   start: string;
   end: string | null;
@@ -105,6 +107,8 @@ export const PINS_MIN_ZOOM = 11;
 export interface CommunitySchedule {
   id: string;
   type: string;
+  /** Rótulo pronto do tipo — ausente em servidor antigo */
+  typeLabel?: string;
   /** 0 = domingo */
   dayOfWeek: number | null;
   time: string;

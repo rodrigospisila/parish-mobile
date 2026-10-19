@@ -20,6 +20,8 @@ import { FontAwesome5, Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import { useColors } from '../../src/context/ThemeContext';
+import { useFeatureLocked } from '../../src/context/EntitlementsContext';
+import { PlanLockedScreen } from '../../src/components/PlanLockedState';
 import { useCommunity } from '../../src/context/CommunityContext';
 import {
   CatechesisDocRequirement,
@@ -63,6 +65,8 @@ type DocDraft =
 
 /** Inscrição online na catequese (responsável ou o próprio adulto). */
 export default function CatechesisApplyScreen() {
+  // Recurso fora do plano da comunidade: estado calmo em vez de erro/lista vazia
+  const planLocked = useFeatureLocked('catechesis');
   const router = useRouter();
   const colors = useColors();
   const { activeCommunityId } = useCommunity();
@@ -351,6 +355,10 @@ export default function CatechesisApplyScreen() {
     }
     void doSubmit();
   };
+
+  if (planLocked) {
+    return <PlanLockedScreen title="Inscrição na catequese" />;
+  }
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>

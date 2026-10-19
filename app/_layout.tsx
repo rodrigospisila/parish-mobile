@@ -1,17 +1,20 @@
-import { Stack, useRouter, useSegments } from 'expo-router';
-import { useEffect } from 'react';
-import { View, ActivityIndicator, StatusBar, AppState } from 'react-native';
+import { Stack, useRouter, useSegments, type ErrorBoundaryProps } from 'expo-router';
+import { useEffect, useState } from 'react';
+import { View, ActivityIndicator, StatusBar, AppState, Text, TouchableOpacity, useColorScheme } from 'react-native';
 import { useFonts } from 'expo-font';
 import { AuthProvider, useAuth } from '../src/context/AuthContext';
 import { ThemeProvider, useTheme } from '../src/context/ThemeContext';
 import { NotificationProvider } from '../src/context/NotificationContext';
 import { CommunityProvider } from '../src/context/CommunityContext';
+import { EntitlementsProvider } from '../src/context/EntitlementsContext';
 import { flushWriteQueue } from '../src/utils/offlineQueue';
 import { applyGlobalFont } from '../src/utils/globalFont';
 import { consumePostLoginRoute } from '../src/utils/postLoginRoute';
 // Plano da comunidade: aviso amigável no 403 PLAN_REQUIRED (interceptor)
 import '../src/services/planService';
 import TermsAcceptanceGate from '../src/components/TermsAcceptanceGate';
+import NotificationPrimer from '../src/components/NotificationPrimer';
+import NotificationResponseRouter from '../src/components/NotificationResponseRouter';
 
 // Instala o mapeamento peso→Nunito Sans antes de qualquer render de texto.
 applyGlobalFont();
@@ -23,12 +26,52 @@ applyGlobalFont();
  */
 const PUBLIC_SEGMENTS = new Set(['nearby-masses', 'comunidade']);
 
+/** Telas em que um toque de notificação ainda não pode navegar (sessão incompleta). */
+const NOT_READY_SEGMENTS = new Set(['(auth)', 'select-community', 'change-password']);
+
+/**
+ * Tela de erro do app inteiro (eng-qualidade-03): uma exceção de render vira
+ * esta tela com "Tentar de novo" em vez de app fechado/tela branca. Fica fora
+ * dos providers (tema/sessão podem ser a origem do erro): cores próprias.
+ *
+ * TODO(Sentry): quando entrar @sentry/react-native (exige build nativa), enviar
+ * `error` aqui (Sentry.captureException) e mostrar o id do evento ao usuário.
+ */
+export function ErrorBoundary({ error, retry }: ErrorBoundaryProps) {
+  const dark = useColorScheme() === 'dark';
+  const bg = dark ? '#090B0E' : '#F5F7FA';
+  const fg = dark ? '#F7F9FB' : '#151A20';
+  const muted = dark ? '#AEB6C1' : '#52606D';
+  return (
+    <View style={{ flex: 1, backgroundColor: bg, alignItems: 'center', justifyContent: 'center', padding: 28 }}>
+      <Text style={{ fontSize: 20, fontWeight: '800', color: fg, textAlign: 'center', marginBottom: 10 }}>
+        Algo deu errado
+      </Text>
+      <Text style={{ fontSize: 15, lineHeight: 21, color: muted, textAlign: 'center', marginBottom: 22 }}>
+        O Parish encontrou um problema nesta tela. Tente de novo; se continuar, feche e abra o app.
+      </Text>
+      {__DEV__ ? (
+        <Text style={{ fontSize: 12, color: muted, textAlign: 'center', marginBottom: 18 }}>{error?.message}</Text>
+      ) : null}
+      <TouchableOpacity
+        onPress={() => void retry()}
+        accessibilityRole="button"
+        style={{ backgroundColor: dark ? '#0A84FF' : '#075AA9', borderRadius: 12, paddingVertical: 14, paddingHorizontal: 28 }}
+      >
+        <Text style={{ color: '#FFFFFF', fontSize: 16, fontWeight: '800' }}>Tentar de novo</Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
+
 // Componente interno que gerencia a navegação baseada no estado de autenticação
 function RootLayoutNav() {
   const { user, isLoading, isAuthenticated, hasCommunity } = useAuth();
   const { colors, isDark } = useTheme();
   const segments = useSegments();
   const router = useRouter();
+  /** Aceite dos termos resolvido (sem aviso bloqueante na frente) */
+  const [termsClear, setTermsClear] = useState(false);
 
   // Fila de escritas offline (4.7): tenta sincronizar ao abrir o app e
   // sempre que ele volta ao primeiro plano (momento típico de reconexão).
@@ -88,6 +131,15 @@ function RootLayoutNav() {
     }
   }, [isAuthenticated, hasCommunity, isLoading, segments, user?.forcePasswordChange]);
 
+  // Sessão completa: logado, com comunidade e fora do login/assistente/troca de senha
+  const sessionReady =
+    isAuthenticated &&
+    hasCommunity &&
+    !user?.forcePasswordChange &&
+    !NOT_READY_SEGMENTS.has(segments[0] as string);
+  // Dentro das abas (a raiz "/" também é o Início)
+  const inTabs = segments[0] === '(tabs)' || (segments as string[]).length === 0;
+
   // Mostra loading enquanto carrega o estado de autenticação
   if (isLoading) {
     return (
@@ -107,7 +159,11 @@ function RootLayoutNav() {
         <Stack.Screen name="+not-found" />
       </Stack>
       {/* Aceite dos termos vigentes (M3/M4): bloqueia até aceitar */}
-      <TermsAcceptanceGate />
+      <TermsAcceptanceGate onClearChange={setTermsClear} />
+      {/* Toque em notificação (app aberto ou a frio) → tela certa */}
+      <NotificationResponseRouter ready={sessionReady} />
+      {/* Convite para os avisos: só dentro do app, depois dos termos */}
+      <NotificationPrimer enabled={sessionReady && termsClear && inTabs} />
     </>
   );
 }
@@ -143,7 +199,9 @@ export default function RootLayout() {
     <ThemeProvider>
       <AuthProvider>
         <CommunityProvider>
-          <RootLayoutWithNotifications />
+          <EntitlementsProvider>
+            <RootLayoutWithNotifications />
+          </EntitlementsProvider>
         </CommunityProvider>
       </AuthProvider>
     </ThemeProvider>

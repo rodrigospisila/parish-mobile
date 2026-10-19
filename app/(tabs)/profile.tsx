@@ -6,9 +6,11 @@ import {
   TouchableOpacity,
   Alert,
   Switch,
-  SafeAreaView,
   ScrollView,
 } from 'react-native';
+// SafeAreaView da safe-area-context: o do react-native só vale no iOS (no Android
+// com edge-to-edge o topo ficava sob o relógio/bateria)
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
@@ -22,8 +24,25 @@ import { getMyCatechesisClasses, getMyFamilyCatechesis } from '../../src/service
 import { getParishById } from '../../src/services/churchService';
 import { Linking } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
+import Constants from 'expo-constants';
+import * as Updates from 'expo-updates';
 import UserAvatar from '../../src/components/UserAvatar';
 import { uploadMyAvatar, deleteMyAvatar } from '../../src/services/avatarService';
+
+/**
+ * Versão real do app para o suporte: a do binário (app.json) e, quando o app
+ * roda uma atualização OTA, o começo do id dela ("v1.1.0 · atualização a1b2c3d4").
+ */
+const appVersionLabel = (): string => {
+  const version = Constants.expoConfig?.version ?? '?';
+  let update = '';
+  try {
+    if (Updates.updateId && !Updates.isEmbeddedLaunch) update = ` · atualização ${Updates.updateId.slice(0, 8)}`;
+  } catch {
+    // expo-updates indisponível (Expo Go/dev): mostra só a versão
+  }
+  return `Parish v${version}${update}`;
+};
 
 export default function ProfileScreen() {
   const { user, signOut, updateCommunity, refreshUser } = useAuth();
@@ -69,8 +88,17 @@ export default function ProfileScreen() {
   const router = useRouter();
   const colors = useColors();
   const { theme, setTheme, isDark } = useTheme();
-  const { settings, isPermissionGranted, scheduledCount, updateSettings, testNotification } =
-    useNotifications();
+  const {
+    settings,
+    isPermissionGranted,
+    permissionStatus,
+    canAskPermissionAgain,
+    requestPermission,
+    openSystemSettings,
+    scheduledCount,
+    updateSettings,
+    testNotification,
+  } = useNotifications();
 
   const handleSignOut = () => {
     Alert.alert(
@@ -91,10 +119,20 @@ export default function ProfileScreen() {
 
   const handleNotificationToggle = async (value: boolean) => {
     if (value && !isPermissionGranted) {
+      // Nunca perguntado (ou o sistema ainda deixa perguntar): o gesto de ligar
+      // é a autorização para abrir o diálogo do sistema
+      if (permissionStatus === 'undetermined' || canAskPermissionAgain) {
+        const granted = await requestPermission();
+        if (granted) await updateSettings({ enabled: true });
+        return;
+      }
       Alert.alert(
-        'Permissão Necessária',
-        'Para receber notificações, você precisa permitir nas configurações do dispositivo.',
-        [{ text: 'OK' }]
+        'Notificações desligadas no aparelho',
+        'Para receber avisos de escala, catequese e da paróquia, ative as notificações do Parish nos Ajustes do aparelho.',
+        [
+          { text: 'Agora não', style: 'cancel' },
+          { text: 'Abrir Ajustes', onPress: openSystemSettings },
+        ],
       );
       return;
     }
@@ -195,7 +233,7 @@ export default function ProfileScreen() {
   const styles = createStyles(colors);
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
       <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
         <View style={styles.header}>
           <TouchableOpacity accessibilityRole="button" accessibilityLabel="Trocar foto do perfil" activeOpacity={0.8} onPress={handleChangeAvatar}>
@@ -445,7 +483,9 @@ export default function ProfileScreen() {
                     ? settings.enabled
                       ? `${scheduledCount} notificações agendadas`
                       : 'Desativadas'
-                    : 'Permissão não concedida'}
+                    : permissionStatus === 'denied' && !canAskPermissionAgain
+                      ? 'Desligadas no aparelho — toque para abrir os Ajustes'
+                      : 'Toque para ativar os avisos'}
                 </Text>
               </View>
               <Switch
@@ -550,7 +590,7 @@ export default function ProfileScreen() {
         </Text>
 
         <View style={styles.versionContainer}>
-          <Text style={styles.versionText}>Parish App v1.0.0</Text>
+          <Text style={styles.versionText}>{appVersionLabel()}</Text>
         </View>
       </ScrollView>
     </SafeAreaView>

@@ -4,12 +4,18 @@ import type { MapCommunity, PublicMass } from '../../services/publicMapService';
 
 export const TYPE_LABELS: Record<string, string> = {
   MASS: 'Missa',
+  WORD_CELEBRATION: 'Celebração da Palavra',
   CONFESSION: 'Confissão',
   ADORATION: 'Adoração',
   ROSARY: 'Terço',
 };
 
-export const typeLabel = (type: string) => TYPE_LABELS[type] || type;
+/**
+ * Rótulo do tipo de celebração. O backend manda `typeLabel` em cada horário
+ * (mapa, nearby e página pública) — vale ele; servidor antigo cai no rótulo local.
+ */
+export const typeLabel = (type: string, serverLabel?: string | null) =>
+  (typeof serverLabel === 'string' && serverLabel.trim()) || TYPE_LABELS[type] || type;
 
 /** Dia pesquisado no mapa (mesmos valores do filtro de dia). */
 export type SearchedDay = 'all' | 'today' | 'sunday';

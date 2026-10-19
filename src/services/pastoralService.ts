@@ -35,7 +35,7 @@ export interface PastoralMember {
 }
 
 /**
- * Representa um membro simplificado (para exibiÃ§Ã£o)
+ * Representa um membro simplificado (para exibição)
  */
 export interface Member {
   id: string;
@@ -86,7 +86,7 @@ export interface PastoralGroup {
 }
 
 /**
- * Interface simplificada de Pastoral para exibiÃ§Ã£o no app
+ * Interface simplificada de Pastoral para exibição no app
  */
 export interface Pastoral {
   id: string;
@@ -99,7 +99,7 @@ export interface Pastoral {
 }
 
 /**
- * Representa uma escala de serviÃ§o para um evento especÃ­fico
+ * Representa uma escala de serviço para um evento específico
  */
 export interface ServiceRoster {
   id: string;
@@ -111,7 +111,7 @@ export interface ServiceRoster {
 }
 
 /**
- * Status de confirmaÃ§Ã£o de presenÃ§a na escala
+ * Status de confirmação de presença na escala
  */
 export type RosterConfirmationStatus = 'pending' | 'confirmed' | 'declined' | 'checked_in';
 
@@ -160,7 +160,7 @@ export interface CoordinatorScheduleQueryParams {
 }
 
 /**
- * Interface para escala do usuÃ¡rio com informaÃ§Ãµes do evento
+ * Interface para escala do usuário com informações do evento
  */
 export interface UserRoster {
   id: string;
@@ -203,14 +203,14 @@ export interface ScheduleTeamMember {
 
 const mockMembers: Member[] = [
   { id: 'm1', name: 'Maria Silva', phone: '(11) 99999-1111', role: 'Coordenadora' },
-  { id: 'm2', name: 'JoÃ£o Santos', phone: '(11) 99999-2222', role: 'Ministro' },
-  { id: 'm3', name: 'Ana Oliveira', phone: '(11) 99999-3333', role: 'VoluntÃ¡ria' },
+  { id: 'm2', name: 'João Santos', phone: '(11) 99999-2222', role: 'Ministro' },
+  { id: 'm3', name: 'Ana Oliveira', phone: '(11) 99999-3333', role: 'Voluntária' },
   { id: 'm4', name: 'Pedro Costa', phone: '(11) 99999-4444', role: 'Ministro' },
-  { id: 'm5', name: 'Carla Souza', phone: '(11) 99999-5555', role: 'VoluntÃ¡ria' },
+  { id: 'm5', name: 'Carla Souza', phone: '(11) 99999-5555', role: 'Voluntária' },
   { id: 'm6', name: 'Lucas Ferreira', phone: '(11) 99999-6666', role: 'Coordenador' },
-  { id: 'm7', name: 'Juliana Lima', phone: '(11) 99999-7777', role: 'VoluntÃ¡ria' },
+  { id: 'm7', name: 'Juliana Lima', phone: '(11) 99999-7777', role: 'Voluntária' },
   { id: 'm8', name: 'Roberto Alves', phone: '(11) 99999-8888', role: 'Ministro' },
-  { id: 'm9', name: 'Fernanda Rocha', phone: '(11) 99999-9999', role: 'VoluntÃ¡ria' },
+  { id: 'm9', name: 'Fernanda Rocha', phone: '(11) 99999-9999', role: 'Voluntária' },
   { id: 'm10', name: 'Marcos Pereira', phone: '(11) 99999-0000', role: 'Coordenador' },
 ];
 
@@ -218,7 +218,7 @@ const mockPastorals: Pastoral[] = [
   {
     id: 'p1',
     name: 'Pastoral da Liturgia',
-    description: 'ResponsÃ¡vel pela organizaÃ§Ã£o das celebraÃ§Ãµes litÃºrgicas',
+    description: 'Responsável pela organização das celebrações litúrgicas',
     communityId: '1001',
     coordinator: mockMembers[0],
     members: [mockMembers[0], mockMembers[1], mockMembers[2], mockMembers[3]],
@@ -226,7 +226,7 @@ const mockPastorals: Pastoral[] = [
   {
     id: 'p2',
     name: 'Pastoral do Canto',
-    description: 'AnimaÃ§Ã£o musical das celebraÃ§Ãµes',
+    description: 'Animação musical das celebrações',
     communityId: '1001',
     coordinator: mockMembers[5],
     members: [mockMembers[5], mockMembers[6], mockMembers[7]],
@@ -234,7 +234,7 @@ const mockPastorals: Pastoral[] = [
   {
     id: 'p3',
     name: 'Pastoral da Acolhida',
-    description: 'RecepÃ§Ã£o e acolhimento dos fiÃ©is',
+    description: 'Recepção e acolhimento dos fiéis',
     communityId: '1001',
     coordinator: mockMembers[9],
     members: [mockMembers[9], mockMembers[4], mockMembers[8]],
@@ -242,7 +242,7 @@ const mockPastorals: Pastoral[] = [
   {
     id: 'p4',
     name: 'Ministros da Eucaristia',
-    description: 'DistribuiÃ§Ã£o da Sagrada ComunhÃ£o',
+    description: 'Distribuição da Sagrada Comunhão',
     communityId: '1001',
     coordinator: mockMembers[1],
     members: [mockMembers[1], mockMembers[3], mockMembers[7]],
@@ -250,18 +250,18 @@ const mockPastorals: Pastoral[] = [
   {
     id: 'p5',
     name: 'Pastoral da Catequese',
-    description: 'FormaÃ§Ã£o catequÃ©tica de crianÃ§as e adultos',
+    description: 'Formação catequética de crianças e adultos',
     communityId: '1001',
     coordinator: mockMembers[2],
     members: [mockMembers[2], mockMembers[4], mockMembers[6], mockMembers[8]],
   },
 ];
 
-// Chave para armazenar confirmaÃ§Ãµes no AsyncStorage
+// Chave para armazenar confirmações no AsyncStorage
 const ROSTER_CONFIRMATIONS_KEY = '@parish:roster_confirmations';
 
 // ============================================
-// FUNÃ‡Ã•ES AUXILIARES
+// FUNÇÕES AUXILIARES
 // ============================================
 
 /**
@@ -296,24 +296,24 @@ const convertToPastoral = (cp: CommunityPastoral): Pastoral => {
 };
 
 // ============================================
-// FUNÃ‡Ã•ES DE CONFIRMAÃ‡ÃƒO (LOCAL)
+// FUNÇÕES DE CONFIRMAÇÃO (LOCAL)
 // ============================================
 
 /**
- * Carrega as confirmaÃ§Ãµes salvas do AsyncStorage
+ * Carrega as confirmações salvas do AsyncStorage
  */
 const loadConfirmations = async (): Promise<Record<string, { status: RosterConfirmationStatus; confirmedAt?: string }>> => {
   try {
     const data = await AsyncStorage.getItem(ROSTER_CONFIRMATIONS_KEY);
     return data ? JSON.parse(data) : {};
   } catch (error) {
-    console.error('Erro ao carregar confirmaÃ§Ãµes:', error);
+    console.error('Erro ao carregar confirmações:', error);
     return {};
   }
 };
 
 /**
- * Salva as confirmaÃ§Ãµes no AsyncStorage
+ * Salva as confirmações no AsyncStorage
  */
 const saveConfirmations = async (
   confirmations: Record<string, { status: RosterConfirmationStatus; confirmedAt?: string }>
@@ -321,17 +321,17 @@ const saveConfirmations = async (
   try {
     await AsyncStorage.setItem(ROSTER_CONFIRMATIONS_KEY, JSON.stringify(confirmations));
   } catch (error) {
-    console.error('Erro ao salvar confirmaÃ§Ãµes:', error);
+    console.error('Erro ao salvar confirmações:', error);
   }
 };
 
 /**
- * Confirma presenÃ§a em uma escala
+ * Confirma presença em uma escala
  */
 export const confirmRosterPresence = async (rosterId: string): Promise<WriteOutcome> => {
   try {
     if (!USE_MOCK) {
-      // API real - confirmar participaÃ§Ã£o na escala
+      // API real - confirmar participação na escala
       await api.patch(`/schedules/assignments/${rosterId}/confirm`);
       return 'ok';
     }
@@ -353,7 +353,7 @@ export const confirmRosterPresence = async (rosterId: string): Promise<WriteOutc
       });
       return 'queued';
     }
-    console.error('Erro ao confirmar presenÃ§a:', error);
+    console.error('Erro ao confirmar presença:', error);
     return 'error';
   }
 };
@@ -365,7 +365,7 @@ export const declineRosterPresence = async (
   const payload = reason || declineCouple ? { ...(reason ? { reason } : {}), ...(declineCouple ? { declineCouple: true } : {}) } : undefined;
   try {
     if (!USE_MOCK) {
-      // API real - recusar participaÃ§Ã£o na escala (com justificativa opcional, 4.6)
+      // API real - recusar participação na escala (com justificativa opcional, 4.6)
       await api.patch(`/schedules/assignments/${rosterId}/decline`, payload);
       return 'ok';
     }
@@ -388,7 +388,7 @@ export const declineRosterPresence = async (
       });
       return 'queued';
     }
-    console.error('Erro ao declinar presenÃ§a:', error);
+    console.error('Erro ao declinar presença:', error);
     return 'error';
   }
 };
@@ -429,7 +429,7 @@ export const getScheduleTeam = async (scheduleId: string): Promise<ScheduleTeamM
 };
 
 /**
- * Reseta o status de confirmaÃ§Ã£o de uma escala
+ * Reseta o status de confirmação de uma escala
  */
 export const resetRosterConfirmation = async (rosterId: string): Promise<boolean> => {
   try {
@@ -438,13 +438,13 @@ export const resetRosterConfirmation = async (rosterId: string): Promise<boolean
     await saveConfirmations(confirmations);
     return true;
   } catch (error) {
-    console.error('Erro ao resetar confirmaÃ§Ã£o:', error);
+    console.error('Erro ao resetar confirmação:', error);
     return false;
   }
 };
 
 // ============================================
-// FUNÃ‡Ã•ES DE PASTORAIS GLOBAIS
+// FUNÇÕES DE PASTORAIS GLOBAIS
 // ============================================
 
 /**
@@ -455,11 +455,11 @@ export const getGlobalPastorals = async (): Promise<GlobalPastoral[]> => {
     return new Promise((resolve) => {
       setTimeout(() => {
         resolve([
-          { id: 'gp1', name: 'Pastoral da Liturgia', description: 'OrganizaÃ§Ã£o das celebraÃ§Ãµes litÃºrgicas', isActive: true, createdAt: new Date().toISOString() },
-          { id: 'gp2', name: 'Pastoral do Canto', description: 'AnimaÃ§Ã£o musical das celebraÃ§Ãµes', isActive: true, createdAt: new Date().toISOString() },
-          { id: 'gp3', name: 'Pastoral da Acolhida', description: 'RecepÃ§Ã£o e acolhimento dos fiÃ©is', isActive: true, createdAt: new Date().toISOString() },
-          { id: 'gp4', name: 'Ministros da Eucaristia', description: 'DistribuiÃ§Ã£o da Sagrada ComunhÃ£o', isActive: true, createdAt: new Date().toISOString() },
-          { id: 'gp5', name: 'Pastoral da Catequese', description: 'FormaÃ§Ã£o catequÃ©tica', isActive: true, createdAt: new Date().toISOString() },
+          { id: 'gp1', name: 'Pastoral da Liturgia', description: 'Organização das celebrações litúrgicas', isActive: true, createdAt: new Date().toISOString() },
+          { id: 'gp2', name: 'Pastoral do Canto', description: 'Animação musical das celebrações', isActive: true, createdAt: new Date().toISOString() },
+          { id: 'gp3', name: 'Pastoral da Acolhida', description: 'Recepção e acolhimento dos fiéis', isActive: true, createdAt: new Date().toISOString() },
+          { id: 'gp4', name: 'Ministros da Eucaristia', description: 'Distribuição da Sagrada Comunhão', isActive: true, createdAt: new Date().toISOString() },
+          { id: 'gp5', name: 'Pastoral da Catequese', description: 'Formação catequética', isActive: true, createdAt: new Date().toISOString() },
         ]);
       }, 200);
     });
@@ -470,7 +470,7 @@ export const getGlobalPastorals = async (): Promise<GlobalPastoral[]> => {
 };
 
 // ============================================
-// FUNÃ‡Ã•ES DE PASTORAIS DA COMUNIDADE
+// FUNÇÕES DE PASTORAIS DA COMUNIDADE
 // ============================================
 
 /**
@@ -500,7 +500,7 @@ export const getPastorals = async (communityId: string): Promise<Pastoral[]> => 
 };
 
 /**
- * Busca uma pastoral especÃ­fica pelo ID
+ * Busca uma pastoral específica pelo ID
  */
 export const getPastoralById = async (pastoralId: string): Promise<Pastoral | null> => {
   if (USE_MOCK) {
@@ -522,7 +522,7 @@ export const getPastoralById = async (pastoralId: string): Promise<Pastoral | nu
 };
 
 // ============================================
-// FUNÃ‡Ã•ES DE MEMBROS
+// FUNÇÕES DE MEMBROS
 // ============================================
 
 /**
@@ -552,7 +552,7 @@ export const getPastoralMembers = async (pastoralId: string): Promise<Member[]> 
 };
 
 // ============================================
-// FUNÃ‡Ã•ES DE GRUPOS
+// FUNÇÕES DE GRUPOS
 // ============================================
 
 /**
@@ -579,11 +579,11 @@ export const getPastoralGroups = async (communityPastoralId: string): Promise<Pa
 };
 
 // ============================================
-// FUNÃ‡Ã•ES DE ESCALAS DE SERVIÃ‡O
+// FUNÇÕES DE ESCALAS DE SERVIÇO
 // ============================================
 
 /**
- * Busca as escalas de serviÃ§o para um evento especÃ­fico
+ * Busca as escalas de serviço para um evento específico
  */
 export const getServiceRostersByEventId = async (eventId: string): Promise<ServiceRoster[]> => {
   if (USE_MOCK) {
@@ -598,7 +598,7 @@ export const getServiceRostersByEventId = async (eventId: string): Promise<Servi
               eventId: '1',
               pastoralId: 'p1',
               pastoralName: 'Pastoral da Liturgia',
-              responsibilities: '1Âª Leitura, 2Âª Leitura, Salmo',
+              responsibilities: '1ª Leitura, 2ª Leitura, Salmo',
               membersOnDuty: [mockMembers[1], mockMembers[2]],
             },
             {
@@ -606,7 +606,7 @@ export const getServiceRostersByEventId = async (eventId: string): Promise<Servi
               eventId: '1',
               pastoralId: 'p2',
               pastoralName: 'Pastoral do Canto',
-              responsibilities: 'AnimaÃ§Ã£o musical',
+              responsibilities: 'Animação musical',
               membersOnDuty: [mockMembers[5], mockMembers[6]],
             },
             {
@@ -614,7 +614,7 @@ export const getServiceRostersByEventId = async (eventId: string): Promise<Servi
               eventId: '1',
               pastoralId: 'p3',
               pastoralName: 'Pastoral da Acolhida',
-              responsibilities: 'RecepÃ§Ã£o e entrega de folhetos',
+              responsibilities: 'Recepção e entrega de folhetos',
               membersOnDuty: [mockMembers[9], mockMembers[4]],
             },
             {
@@ -622,7 +622,7 @@ export const getServiceRostersByEventId = async (eventId: string): Promise<Servi
               eventId: '1',
               pastoralId: 'p4',
               pastoralName: 'Ministros da Eucaristia',
-              responsibilities: 'DistribuiÃ§Ã£o da ComunhÃ£o',
+              responsibilities: 'Distribuição da Comunhão',
               membersOnDuty: [mockMembers[1], mockMembers[3]],
             }
           );
@@ -634,7 +634,7 @@ export const getServiceRostersByEventId = async (eventId: string): Promise<Servi
             eventId: '2',
             pastoralId: 'p1',
             pastoralName: 'Pastoral da Liturgia',
-            responsibilities: 'OrganizaÃ§Ã£o da pauta',
+            responsibilities: 'Organização da pauta',
             membersOnDuty: [mockMembers[0]],
           });
         }
@@ -655,17 +655,17 @@ export const getServiceRostersByEventId = async (eventId: string): Promise<Servi
     });
   }
 
-  // API real - escalas vÃªm junto com o evento
-  // Por enquanto retorna vazio, pois o backend retorna as escalas no prÃ³prio evento
+  // API real - escalas vêm junto com o evento
+  // Por enquanto retorna vazio, pois o backend retorna as escalas no próprio evento
   return [];
 };
 
 // ============================================
-// FUNÃ‡Ã•ES DE ESCALAS DO USUÃRIO
+// FUNÇÕES DE ESCALAS DO USUÁRIO
 // ============================================
 
 /**
- * Busca as prÃ³ximas escalas do usuÃ¡rio logado
+ * Busca as próximas escalas do usuário logado
  */
 export const getUserUpcomingRosters = async (userId: string): Promise<UserRoster[]> => {
   if (USE_MOCK) {
@@ -684,7 +684,7 @@ export const getUserUpcomingRosters = async (userId: string): Promise<UserRoster
             eventLocation: 'Igreja Matriz',
             eventType: 'MASS',
             pastoralName: 'Pastoral da Liturgia',
-            responsibilities: '1Âª Leitura',
+            responsibilities: '1ª Leitura',
             confirmationStatus: confirmations['ur1']?.status || 'pending',
             confirmedAt: confirmations['ur1']?.confirmedAt,
           },
@@ -692,12 +692,12 @@ export const getUserUpcomingRosters = async (userId: string): Promise<UserRoster
             id: 'ur2',
             scheduleId: 'sched-2',
             eventId: '2',
-            eventTitle: 'ReuniÃ£o da Pastoral',
+            eventTitle: 'Reunião da Pastoral',
             eventDate: new Date(now.getTime() + 5 * 24 * 60 * 60 * 1000).toISOString(),
-            eventLocation: 'SalÃ£o Paroquial',
+            eventLocation: 'Salão Paroquial',
             eventType: 'PASTORAL_MEETING',
             pastoralName: 'Pastoral da Liturgia',
-            responsibilities: 'ParticipaÃ§Ã£o',
+            responsibilities: 'Participação',
             confirmationStatus: confirmations['ur2']?.status || 'pending',
             confirmedAt: confirmations['ur2']?.confirmedAt,
           },
@@ -710,7 +710,7 @@ export const getUserUpcomingRosters = async (userId: string): Promise<UserRoster
             eventLocation: 'Igreja Matriz',
             eventType: 'MASS',
             pastoralName: 'Ministros da Eucaristia',
-            responsibilities: 'DistribuiÃ§Ã£o da ComunhÃ£o',
+            responsibilities: 'Distribuição da Comunhão',
             confirmationStatus: confirmations['ur3']?.status || 'pending',
             confirmedAt: confirmations['ur3']?.confirmedAt,
           },
@@ -782,7 +782,7 @@ export const getUserUpcomingRosters = async (userId: string): Promise<UserRoster
 };
 
 /**
- * Busca o histÃ³rico de escalas do usuÃ¡rio
+ * Busca o histórico de escalas do usuário
  */
 export const getUserRosterHistory = async (userId: string): Promise<UserRoster[]> => {
   if (USE_MOCK) {
@@ -801,7 +801,7 @@ export const getUserRosterHistory = async (userId: string): Promise<UserRoster[]
             eventLocation: 'Igreja Matriz',
             eventType: 'MASS',
             pastoralName: 'Pastoral da Liturgia',
-            responsibilities: '2Âª Leitura',
+            responsibilities: '2ª Leitura',
             confirmationStatus: 'confirmed',
             confirmedAt: new Date(now.getTime() - 8 * 24 * 60 * 60 * 1000).toISOString(),
           },
@@ -809,12 +809,12 @@ export const getUserRosterHistory = async (userId: string): Promise<UserRoster[]
             id: 'urh2',
             scheduleId: 'sched-h2',
             eventId: '11',
-            eventTitle: 'ReuniÃ£o Mensal',
+            eventTitle: 'Reunião Mensal',
             eventDate: new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000).toISOString(),
-            eventLocation: 'SalÃ£o Paroquial',
+            eventLocation: 'Salão Paroquial',
             eventType: 'PASTORAL_MEETING',
             pastoralName: 'Pastoral da Liturgia',
-            responsibilities: 'ParticipaÃ§Ã£o',
+            responsibilities: 'Participação',
             confirmationStatus: 'confirmed',
             confirmedAt: new Date(now.getTime() - 15 * 24 * 60 * 60 * 1000).toISOString(),
           },
@@ -851,20 +851,20 @@ export const getUserRosterHistory = async (userId: string): Promise<UserRoster[]
         eventLocation: assignment.schedule?.event?.location || 'A definir',
         eventType: assignment.schedule?.event?.type || 'OTHER',
         pastoralName: assignment.schedule?.event?.community?.name || 'Pastoral',
-        responsibilities: assignment.role || 'ParticipaÃ§Ã£o',
+        responsibilities: assignment.role || 'Participação',
         confirmationStatus,
         checkedIn: !!assignment.checkedIn,
         confirmedAt: assignment.checkedInAt,
       };
     });
   } catch (error) {
-    console.error('Erro ao buscar histÃ³rico de escalas:', error);
+    console.error('Erro ao buscar histórico de escalas:', error);
     return [];
   }
 };
 
 // ============================================
-// FUNÃ‡Ã•ES DE VISÃO COORDENAÃÃƒO
+// FUNÇÕES DE VISÃO COORDENAÇÃO
 // ============================================
 
 export const getCoordinatorScheduleOverview = async (
@@ -909,7 +909,7 @@ export const getCoordinatorScheduleOverview = async (
       };
     });
   } catch (error) {
-    console.error('Erro ao buscar visÃ£o de coordenaÃ§Ã£o:', error);
+    console.error('Erro ao buscar visão de coordenação:', error);
     return [];
   }
 };

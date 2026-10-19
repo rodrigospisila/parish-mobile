@@ -506,7 +506,31 @@ export interface ApiError {
   message: string;
   statusCode: number;
   error?: string;
+  /** Id da requisição (corpo do erro e cabeçalho X-Request-Id) */
+  requestId?: string;
 }
+
+/** requestId do erro: corpo da resposta ou cabeçalho X-Request-Id. */
+export const requestIdOf = (error: unknown): string | null => {
+  if (!axios.isAxiosError(error) || !error.response) return null;
+  const fromBody = (error.response.data as { requestId?: unknown } | undefined)?.requestId;
+  if (typeof fromBody === 'string' && fromBody) return fromBody;
+  const headers: any = error.response.headers;
+  const fromHeader = typeof headers?.get === 'function' ? headers.get('x-request-id') : headers?.['x-request-id'];
+  return typeof fromHeader === 'string' && fromHeader ? fromHeader : null;
+};
+
+/**
+ * Anexa "(código abcd1234)" — os 8 primeiros caracteres do requestId. Se a
+ * mensagem do servidor já traz o id inteiro ("informe o código …"), encurta
+ * no lugar em vez de repetir.
+ */
+const withRequestCode = (message: string, requestId: string | null): string => {
+  if (!requestId) return message;
+  const short = requestId.slice(0, 8);
+  if (message.includes(requestId)) return message.split(requestId).join(short);
+  return `${message} (código ${short})`;
+};
 
 /**
  * Extrai a mensagem de erro de uma resposta da API
@@ -524,6 +548,17 @@ export const getErrorMessage = (error: any): string => {
 
     // Erro da API
     const apiError = axiosError.response.data;
+
+    // Falha do servidor (5xx): mensagem + código curto do requestId para o
+    // suporte achar a requisição no log
+    if (axiosError.response.status >= 500) {
+      const base =
+        typeof apiError?.message === 'string' && apiError.message
+          ? apiError.message
+          : 'Erro no servidor. Tente novamente em instantes.';
+      return withRequestCode(base, requestIdOf(axiosError));
+    }
+
     if (apiError?.message) {
       // Se for array de mensagens (validação)
       if (Array.isArray(apiError.message)) {
@@ -546,8 +581,6 @@ export const getErrorMessage = (error: any): string => {
         return 'Conflito de dados. Este registro já existe.';
       case 429:
         return 'Muitas requisições seguidas. Aguarde um pouco e tente de novo.';
-      case 500:
-        return 'Erro interno do servidor. Tente novamente.';
       default:
         return 'Ocorreu um erro. Tente novamente.';
     }

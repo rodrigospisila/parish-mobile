@@ -1,0 +1,68 @@
+# CI do app (achado eng-qualidade-08): antes, um erro de tipo ou de bundle só
+# aparecia no "eas build" (depois de fila e de minutos de build pagos) ou, pior,
+# num "eas update" já publicado. Este workflow NÃO gera build nem publica nada:
+# não usa token do Expo e não chama "eas".
+#
+# Gerenciador: pnpm. O repositório versiona só o pnpm-lock.yaml (sem
+# package-lock.json), e o EAS Build escolhe o gerenciador pelo lockfile — com
+# pnpm-lock.yaml ele roda "pnpm install". Usar o mesmo aqui garante que o CI
+# instala exatamente a árvore que vai para o build. Versão 9.15.9 = a que
+# instalou o node_modules local (node_modules/.modules.yaml) e lê o lockfile v9.
+# Ao trocar a versão do pnpm, fixar também "packageManager" no package.json.
+#
+# Node 20 = o da imagem do EAS para o SDK 54 e o do backend (o SDK 54 exige
+# Node >= 20.19.4).
+#
+# Lint: o app ainda NÃO tem ESLint (nem script "lint" no package.json). Quando
+# entrar ("npx expo lint" cria a configuração eslint-config-expo), acrescentar o
+# passo aqui, com continue-on-error até a contagem zerar.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  app:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      # O mesmo valor dos perfis preview/production do eas.json
+      EXPO_PUBLIC_API_URL: https://parish-backend-production.up.railway.app/api/v1
+      CI: 1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      # --frozen-lockfile: falha se o pnpm-lock.yaml divergir do package.json
+      - run: pnpm install --frozen-lockfile
+      # O tsconfig inclui expo-env.d.ts e .expo/types (rotas tipadas —
+      # experiments.typedRoutes no app.json), que são gerados pelo "expo start"
+      # e ficam fora do git. Este comando os gera sem alterar o tsconfig.json.
+      # Sem eles, o tsc acusa um falso erro (ExternalLink.tsx).
+      - name: Tipos gerados do Expo (expo-env.d.ts e rotas tipadas)
+        run: pnpm exec expo customize tsconfig.json
+      - name: Tipos (tsc --noEmit)
+        run: pnpm exec tsc --noEmit
+      # Pega erro de bundle (import quebrado, módulo inexistente, sintaxe que o
+      # Metro não aceita) sem precisar de build nativo
+      - name: Bundle iOS (expo export)
+        run: pnpm exec expo export --platform ios --output-dir "$RUNNER_TEMP/expo-export"
+      # Aviso, não bloqueio: o expo-doctor consulta a API do Expo (versões
+      # recomendadas do SDK) e pode acusar coisa que não depende do commit
+      - name: expo-doctor (aviso)
+        continue-on-error: true
+        run: npx --yes expo-doctor

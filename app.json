@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "parish-mobile",
+    "name": "Parish",
     "slug": "parish-mobile",
     "version": "1.1.0",
     "orientation": "portrait",
@@ -32,10 +32,6 @@
       "predictiveBackGestureEnabled": false,
       "package": "com.parish.mobile",
       "permissions": [
-        "android.permission.READ_CALENDAR",
-        "android.permission.WRITE_CALENDAR",
-        "android.permission.ACCESS_COARSE_LOCATION",
-        "android.permission.ACCESS_FINE_LOCATION",
         "android.permission.READ_CALENDAR",
         "android.permission.WRITE_CALENDAR",
         "android.permission.ACCESS_COARSE_LOCATION",

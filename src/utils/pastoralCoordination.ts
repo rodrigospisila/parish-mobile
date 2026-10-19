@@ -22,3 +22,13 @@ export const coordinatedPastoralIdsOf = (user: User | null | undefined): string[
 /** Coordena ao menos uma pastoral (aba/painel de Coordenação) */
 export const coordinatesAnyPastoral = (user: User | null | undefined): boolean =>
   coordinatedPastoralIdsOf(user).length > 0;
+
+/** Papéis de gestão que enxergam a Coordenação (escalas) no app */
+const MANAGEMENT_ROLES = ['SYSTEM_ADMIN', 'DIOCESAN_ADMIN', 'PARISH_ADMIN', 'COMMUNITY_COORDINATOR', 'PASTORAL_COORDINATOR'];
+
+/**
+ * Aba/painel de Coordenação: papel gestor OU coordenação de alguma pastoral
+ * (vice-coordenação não conta — o servidor recusaria as ações).
+ */
+export const canCoordinateSchedules = (user: User | null | undefined): boolean =>
+  (!!user?.role && MANAGEMENT_ROLES.includes(user.role)) || coordinatesAnyPastoral(user);

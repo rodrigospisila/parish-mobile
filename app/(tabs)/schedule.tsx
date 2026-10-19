@@ -1,11 +1,10 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
   Alert,
-  SafeAreaView,
   ScrollView,
   ActivityIndicator,
   RefreshControl,
@@ -13,8 +12,14 @@ import {
   FlatList,
   TextInput,
 } from 'react-native';
+// SafeAreaView da safe-area-context: o do react-native só vale no iOS (no Android
+// com edge-to-edge o topo ficava sob o relógio/bateria)
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
+import { useLocalSearchParams } from 'expo-router';
 import { useAuth } from '../../src/context/AuthContext';
+import { useFeatureLocked } from '../../src/context/EntitlementsContext';
+import PlanLockedState from '../../src/components/PlanLockedState';
 import { coordinatedPastoralIdsOf } from '../../src/utils/pastoralCoordination';
 import { useColors } from '../../src/context/ThemeContext';
 import { UserRoster, ScheduleTeamMember, getUserUpcomingRosters, getUserRosterHistory, confirmRosterPresence, declineRosterPresence, respondGroupPresence, getScheduleTeam, RosterConfirmationStatus, declineRosterPresenceWithCouple } from '../../src/services/pastoralService';
@@ -49,6 +54,20 @@ const rosterWhenLabel = (roster: { eventDate: string; startTime?: string | null 
 export default function ScheduleScreen() {
   const { user } = useAuth();
   const colors = useColors();
+  const schedulesLocked = useFeatureLocked('schedules');
+  // Push de escala (atribuição/lembrete/cobrança) chega com o assignmentId:
+  // o card dele fica destacado e a tela rola até ele (ux-app-01)
+  // Convite de troca (swap-requested) chega com o swapId: rola até as trocas
+  const { assignmentId: focusAssignmentId, swapId: focusSwapId } = useLocalSearchParams<{
+    assignmentId?: string;
+    swapId?: string;
+  }>();
+  const swapsSectionY = useRef<number | null>(null);
+  const scrolledForSwap = useRef<string | null>(null);
+  const scrollRef = useRef<ScrollView>(null);
+  const sectionY = useRef(0);
+  const cardY = useRef<Record<string, number>>({});
+  const scrolledFor = useRef<string | null>(null);
   const [userRosters, setUserRosters] = useState<UserRoster[]>([]);
   const [historyRosters, setHistoryRosters] = useState<UserRoster[]>([]);
   const [isLoadingRosters, setIsLoadingRosters] = useState(true);
@@ -119,6 +138,32 @@ export default function ScheduleScreen() {
       loadUserRosters();
     }, [loadUserRosters]),
   );
+
+  // Rola até o card destacado quando a lista (e o layout dele) estiver pronta
+  const scrollToFocus = useCallback(() => {
+    if (!focusAssignmentId || scrolledFor.current === focusAssignmentId) return;
+    const y = cardY.current[focusAssignmentId];
+    if (y === undefined) return;
+    scrolledFor.current = focusAssignmentId;
+    scrollRef.current?.scrollTo({ y: Math.max(0, sectionY.current + y - 12), animated: true });
+  }, [focusAssignmentId]);
+
+  const scrollToSwaps = useCallback(() => {
+    if (!focusSwapId || scrolledForSwap.current === focusSwapId || swapsSectionY.current === null) return;
+    scrolledForSwap.current = focusSwapId;
+    scrollRef.current?.scrollTo({ y: Math.max(0, swapsSectionY.current - 12), animated: true });
+  }, [focusSwapId]);
+
+  useEffect(() => {
+    if (focusSwapId !== scrolledForSwap.current) scrolledForSwap.current = null;
+    scrollToSwaps();
+  }, [focusSwapId, swaps, scrollToSwaps]);
+
+  useEffect(() => {
+    // Outro push (outro assignmentId): libera nova rolagem
+    if (focusAssignmentId !== scrolledFor.current) scrolledFor.current = null;
+    scrollToFocus();
+  }, [focusAssignmentId, userRosters, scrollToFocus]);
 
   const handleConfirmPresence = async (roster: UserRoster) => {
     setProcessingRosterId(roster.id);
@@ -357,13 +402,30 @@ export default function ScheduleScreen() {
   const renderRosterCard = (roster: UserRoster, isHistory = false) => {
     const isProcessing = processingRosterId === roster.id;
     const statusColor = getStatusColor(roster.confirmationStatus);
+    const isFocused = !isHistory && !!focusAssignmentId && roster.id === focusAssignmentId;
 
     return (
-      <View key={roster.id} style={styles.rosterCard}>
+      <View
+        key={roster.id}
+        style={[styles.rosterCard, isFocused && { borderWidth: 2, borderColor: colors.primary }]}
+        onLayout={
+          isHistory
+            ? undefined
+            : (event) => {
+                cardY.current[roster.id] = event.nativeEvent.layout.y;
+                if (isFocused) scrollToFocus();
+              }
+        }
+      >
         <View
           style={[styles.rosterTypeIndicator, { backgroundColor: getEventTypeColor(roster.eventType) }]}
         />
         <View style={styles.rosterContent}>
+          {isFocused && roster.confirmationStatus === 'pending' ? (
+            <Text style={{ fontSize: 12, fontWeight: '700', color: colors.primary, marginBottom: 4 }}>
+              Responda aqui: confirme ou recuse sua presença
+            </Text>
+          ) : null}
           <View style={styles.rosterHeader}>
             <Text style={styles.rosterEventTitle} numberOfLines={1}>
               {roster.coupleWith ? '💍 ' : ''}{roster.eventTitle}
@@ -515,7 +577,10 @@ export default function ScheduleScreen() {
     const isProcessing = processingSwapId === swap.id;
     const scheduleInfo = swap.assignment?.schedule;
     return (
-      <View key={swap.id} style={styles.swapCard}>
+      <View
+        key={swap.id}
+        style={[styles.swapCard, focusSwapId === swap.id && { borderWidth: 2, borderColor: colors.primary }]}
+      >
         <Text style={styles.swapCardTitle} numberOfLines={1}>
           {scheduleInfo?.title ?? 'Escala'}
           {swap.assignment?.role ? ` · ${swap.assignment.role}` : ''}
@@ -563,9 +628,19 @@ export default function ScheduleScreen() {
     );
   };
 
+  // Escalas fora do plano da comunidade: estado calmo (sem "não está escalado")
+  if (schedulesLocked) {
+    return (
+      <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
+        <PlanLockedState title="Minha Escala" />
+      </SafeAreaView>
+    );
+  }
+
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
       <ScrollView
+        ref={scrollRef}
         style={styles.scrollView}
         showsVerticalScrollIndicator={false}
         refreshControl={
@@ -578,7 +653,13 @@ export default function ScheduleScreen() {
         </View>
 
         {/* Próximas escalas */}
-        <View style={styles.section}>
+        <View
+          style={styles.section}
+          onLayout={(event) => {
+            sectionY.current = event.nativeEvent.layout.y;
+            scrollToFocus();
+          }}
+        >
           {isLoadingRosters ? (
             <View style={styles.loadingContainer}>
               <ActivityIndicator size="small" color={colors.primary} />
@@ -597,7 +678,13 @@ export default function ScheduleScreen() {
 
         {/* Trocas de escala (4.6) */}
         {(pendingInvites.length > 0 || myPendingRequests.length > 0) && (
-          <View style={styles.section}>
+          <View
+            style={styles.section}
+            onLayout={(event) => {
+              swapsSectionY.current = event.nativeEvent.layout.y;
+              scrollToSwaps();
+            }}
+          >
             <View style={styles.historySectionHeader}>
               <Text style={styles.historySectionTitle}>Trocas de escala</Text>
             </View>

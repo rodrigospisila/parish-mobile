@@ -97,9 +97,9 @@ export interface Event {
   _count?: {
     participants: number;
   };
-  // Agenda fixa (Missa/Confissão/Adoração/Terço) — ocorrência virtual, não editável
+  // Agenda fixa (Missa/Celebração da Palavra/Confissão/Adoração/Terço) — ocorrência virtual, não editável
   isFixed?: boolean;
-  fixedType?: 'MASS' | 'CONFESSION' | 'ADORATION' | 'ROSARY';
+  fixedType?: 'MASS' | 'WORD_CELEBRATION' | 'CONFESSION' | 'ADORATION' | 'ROSARY';
   /** Ocorrência fixa suspensa nesta data ("não haverá") */
   cancelled?: boolean;
   cancelReason?: string | null;

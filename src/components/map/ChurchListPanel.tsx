@@ -118,7 +118,7 @@ export default function ChurchListPanel({
                 {soon && <View style={[styles.dot, { backgroundColor: colors.success }]} />}
                 <Text style={[styles.rowMassText, soon && { color: colors.success, fontWeight: '800' }]} numberOfLines={1}>
                   {formatMassTime(next.start, now)}
-                  {next.type !== 'MASS' ? ` · ${typeLabel(next.type)}` : ''}
+                  {next.type !== 'MASS' ? ` · ${typeLabel(next.type, next.typeLabel)}` : ''}
                 </Text>
               </>
             ) : (
@@ -131,7 +131,7 @@ export default function ChurchListPanel({
               <Text style={styles.offTag}>Não haverá</Text>
               <Text style={styles.rowOffText} numberOfLines={1}>
                 {formatMassTime(skipped.start, now)}
-                {skipped.type !== 'MASS' ? ` · ${typeLabel(skipped.type)}` : ''}
+                {skipped.type !== 'MASS' ? ` · ${typeLabel(skipped.type, skipped.typeLabel)}` : ''}
               </Text>
             </View>
           )}

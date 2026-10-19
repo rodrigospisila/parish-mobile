@@ -86,6 +86,7 @@ interface ScheduledNotification {
 
 const massScheduleTypeLabels: Record<string, string> = {
   MASS: 'Missa',
+  WORD_CELEBRATION: 'Celebração da Palavra',
   CONFESSION: 'Confissão',
   ADORATION: 'Adoração',
   ROSARY: 'Terço',
@@ -139,8 +140,31 @@ const computeReminderTime = (
   return { reminderDay, reminderHour, reminderMinute };
 };
 
+/** Estado da permissão de notificação, SEM abrir o diálogo do sistema. */
+export type NotificationPermissionState = 'granted' | 'denied' | 'undetermined';
+
+export const getNotificationPermissionState = async (): Promise<{
+  status: NotificationPermissionState;
+  canAskAgain: boolean;
+}> => {
+  if (!Device.isDevice) {
+    return { status: 'denied', canAskAgain: false };
+  }
+  try {
+    const { status, canAskAgain } = await Notifications.getPermissionsAsync();
+    const normalized: NotificationPermissionState =
+      status === 'granted' ? 'granted' : status === 'denied' ? 'denied' : 'undetermined';
+    if (normalized === 'granted') await ensureNotificationChannels().catch(() => undefined);
+    return { status: normalized, canAskAgain: canAskAgain !== false };
+  } catch {
+    return { status: 'undetermined', canAskAgain: true };
+  }
+};
+
 /**
- * Solicita permissão para enviar notificações
+ * Solicita permissão para enviar notificações (abre o diálogo do sistema se
+ * ainda não foi respondido). Só deve ser chamada depois da explicação do app
+ * (NotificationPrimer) ou de um gesto do usuário no Perfil.
  */
 export const requestNotificationPermissions = async (): Promise<boolean> => {
   if (!Device.isDevice) {
@@ -161,7 +185,12 @@ export const requestNotificationPermissions = async (): Promise<boolean> => {
     return false;
   }
 
-  // Configuração específica para Android
+  await ensureNotificationChannels();
+  return true;
+};
+
+/** Canais do Android (idempotente: recriar só atualiza nome/descrição). */
+const ensureNotificationChannels = async (): Promise<void> => {
   if (Platform.OS === 'android') {
     await Notifications.setNotificationChannelAsync('default', {
       name: 'Padrão',
@@ -186,8 +215,6 @@ export const requestNotificationPermissions = async (): Promise<boolean> => {
       lightColor: '#FF9800',
     });
   }
-
-  return true;
 };
 
 /**

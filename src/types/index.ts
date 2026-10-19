@@ -386,7 +386,7 @@ export interface ScheduleAssignment {
 /**
  * Tipo de horário de missa
  */
-export type MassScheduleType = 'MASS' | 'CONFESSION' | 'ADORATION' | 'ROSARY';
+export type MassScheduleType = 'MASS' | 'WORD_CELEBRATION' | 'CONFESSION' | 'ADORATION' | 'ROSARY';
 
 /**
  * Horário de missa

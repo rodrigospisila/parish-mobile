@@ -2,7 +2,6 @@ import React, { useCallback, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
@@ -10,9 +9,15 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+// SafeAreaView da safe-area-context: o do react-native só vale no iOS (no Android
+// com edge-to-edge o topo ficava sob o relógio/bateria)
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import { useColors } from '../src/context/ThemeContext';
+import { useFeatureLocked } from '../src/context/EntitlementsContext';
+import { PlanLockedScreen } from '../src/components/PlanLockedState';
+import { isPlanRequiredError } from '../src/utils/planErrors';
 import {
   MemberAvailabilityResponse,
   getMyAvailability,
@@ -84,6 +89,8 @@ const toExceptionForm = (data: MemberAvailabilityResponse): ExceptionForm[] =>
   });
 
 export default function MemberAvailabilityScreen() {
+  // Recurso fora do plano da comunidade: estado calmo em vez de erro/lista vazia
+  const planLocked = useFeatureLocked('schedules');
   const colors = useColors();
   const router = useRouter();
   const [availability, setAvailability] = useState<MemberAvailabilityResponse | null>(null);
@@ -102,7 +109,8 @@ export default function MemberAvailabilityScreen() {
       setExceptions(toExceptionForm(data));
     } catch (error) {
       console.error('Erro ao carregar disponibilidade:', error);
-      Alert.alert('Erro', 'Não foi possível carregar sua disponibilidade.');
+      // Fora do plano: a tela mostra o estado calmo
+      if (!isPlanRequiredError(error)) Alert.alert('Erro', 'Não foi possível carregar sua disponibilidade.');
     } finally {
       setIsLoading(false);
     }
@@ -265,6 +273,10 @@ export default function MemberAvailabilityScreen() {
       setIsSaving(false);
     }
   };
+
+  if (planLocked) {
+    return <PlanLockedScreen title="Minha disponibilidade" />;
+  }
 
   if (isLoading) {
     return (

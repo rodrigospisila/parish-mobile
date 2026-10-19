@@ -7,6 +7,7 @@ export type DayFilter = 'all' | 'today' | 'sunday';
 
 export const TYPE_OPTIONS: { key: string; label: string }[] = [
   { key: 'MASS', label: 'Missa' },
+  { key: 'WORD_CELEBRATION', label: 'Celebração da Palavra' },
   { key: 'CONFESSION', label: 'Confissão' },
   { key: 'ADORATION', label: 'Adoração' },
 ];

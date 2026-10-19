@@ -28,7 +28,7 @@ import { openDirectionsTo } from '../../../src/components/map/directions';
 /** Ordem de exibição: domingo primeiro, como nos murais de paróquia. */
 const DAY_ORDER = [0, 1, 2, 3, 4, 5, 6];
 const DAY_NAMES = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
-const TYPE_ORDER = ['MASS', 'CONFESSION', 'ADORATION', 'ROSARY'];
+const TYPE_ORDER = ['MASS', 'WORD_CELEBRATION', 'CONFESSION', 'ADORATION', 'ROSARY'];
 const MONTHS = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
 
 const typeRank = (t: string) => {
@@ -83,7 +83,7 @@ function avisosProximos(schedules: CommunitySchedule[], now: Date = new Date()):
       out.push({
         key: `${s.id}-${c.date}`,
         ordem: `${c.date}T${s.time}`,
-        texto: `${quando} não haverá ${typeLabel(s.type)} às ${s.time}${motivo ? ` — ${motivo}` : ''}`,
+        texto: `${quando} não haverá ${typeLabel(s.type, s.typeLabel)} às ${s.time}${motivo ? ` — ${motivo}` : ''}`,
       });
     }
   }
@@ -301,7 +301,7 @@ export default function CommunityPublicScreen() {
                         {formatMassTime(m.start)}
                       </Text>
                       <Text style={[styles.nextType, off && styles.offText]}>
-                        {typeLabel(m.type)}
+                        {typeLabel(m.type, m.typeLabel)}
                         {m.source === 'event' ? ' · especial' : ''}
                       </Text>
                       {off && (
@@ -345,7 +345,7 @@ export default function CommunityPublicScreen() {
                     <Text style={styles.dayName}>{DAY_NAMES[g.day]}</Text>
                     {g.types.map((t) => (
                       <View key={t.type} style={styles.typeRow}>
-                        <Text style={styles.typeName}>{typeLabel(t.type)}</Text>
+                        <Text style={styles.typeName}>{typeLabel(t.type, t.items[0]?.typeLabel)}</Text>
                         <View style={{ flex: 1 }}>
                           <Text style={styles.times}>{t.items.map((s) => s.time).join('  ·  ')}</Text>
                           {t.items
@@ -374,7 +374,7 @@ export default function CommunityPublicScreen() {
                     <Text style={styles.dayName}>Mensais</Text>
                     {grouped.monthly.map((s) => (
                       <View key={s.id} style={styles.typeRow}>
-                        <Text style={styles.typeName}>{typeLabel(s.type)}</Text>
+                        <Text style={styles.typeName}>{typeLabel(s.type, s.typeLabel)}</Text>
                         <View style={{ flex: 1 }}>
                           <Text style={styles.times}>
                             {descreverRecorrencia(s)}, {s.time}

@@ -1,8 +1,10 @@
-import React, { createContext, useContext, useEffect, useState, useRef, ReactNode } from 'react';
+import React, { createContext, useContext, useEffect, useState, useRef, ReactNode, useCallback } from 'react';
+import { AppState, Linking } from 'react-native';
 import * as Notifications from 'expo-notifications';
-import { useRouter } from 'expo-router';
 import {
   NotificationSettings,
+  NotificationPermissionState,
+  getNotificationPermissionState,
   requestNotificationPermissions,
   loadNotificationSettings,
   saveNotificationSettings,
@@ -21,6 +23,16 @@ import { useAuth } from './AuthContext';
 interface NotificationContextData {
   settings: NotificationSettings;
   isPermissionGranted: boolean;
+  /** Estado real da permissão do sistema (undetermined = nunca perguntado) */
+  permissionStatus: NotificationPermissionState;
+  /** A primeira consulta ao sistema já respondeu (antes disso o estado é provisório) */
+  permissionChecked: boolean;
+  /** false quando o sistema não deixa perguntar de novo (só pelos Ajustes) */
+  canAskPermissionAgain: boolean;
+  /** Abre o diálogo do sistema — só depois da explicação do app ou de um gesto do usuário */
+  requestPermission: () => Promise<boolean>;
+  /** Ajustes do aparelho (permissão negada antes) */
+  openSystemSettings: () => void;
   scheduledCount: number;
   updateSettings: (newSettings: Partial<NotificationSettings>) => Promise<void>;
   refreshScheduledNotifications: () => Promise<void>;
@@ -36,18 +48,19 @@ interface NotificationProviderProps {
 
 export function NotificationProvider({ children }: NotificationProviderProps) {
   const { user } = useAuth();
-  const router = useRouter();
   const [settings, setSettings] = useState<NotificationSettings>({
     enabled: true,
     eventReminders: true,
     rosterReminders: true,
     reminderTime: 60,
   });
-  const [isPermissionGranted, setIsPermissionGranted] = useState(false);
+  const [permissionStatus, setPermissionStatus] = useState<NotificationPermissionState>('undetermined');
+  const [canAskPermissionAgain, setCanAskPermissionAgain] = useState(true);
+  const [permissionChecked, setPermissionChecked] = useState(false);
+  const isPermissionGranted = permissionStatus === 'granted';
   const [scheduledCount, setScheduledCount] = useState(0);
 
   const notificationListener = useRef<Notifications.EventSubscription | null>(null);
-  const responseListener = useRef<Notifications.EventSubscription | null>(null);
   const pushTokenListener = useRef<Notifications.EventSubscription | null>(null);
   /**
    * Conta logada para o ouvinte de token rotacionado: o efeito abaixo roda uma
@@ -63,9 +76,10 @@ export function NotificationProvider({ children }: NotificationProviderProps) {
       const savedSettings = await loadNotificationSettings();
       setSettings(savedSettings);
 
-      // Solicitar permissões
-      const granted = await requestNotificationPermissions();
-      setIsPermissionGranted(granted);
+      // Só CONSULTA a permissão: o pedido ao sistema fica para depois do
+      // login, com a explicação do app (NotificationPrimer) — no primeiro
+      // segundo, antes de entender o app, a pessoa negava e no iOS não há volta
+      await refreshPermission();
 
       // Contar notificações agendadas
       const scheduled = await getScheduledNotifications();
@@ -79,30 +93,8 @@ export function NotificationProvider({ children }: NotificationProviderProps) {
       console.log('Notificação recebida:', notification);
     });
 
-    // Listener para quando o usuário interage com a notificação
-    responseListener.current = Notifications.addNotificationResponseReceivedListener((response) => {
-      const data = response.notification.request.content.data;
-      const kind = typeof data?.kind === 'string' ? data.kind : '';
-
-      if (kind === 'finance-statement') {
-        // Balancete publicado: a tela do dízimo abre a seção Transparência e, com statementId, já mostra a sheet dele
-        const statementId = data?.statementId != null ? String(data.statementId) : '';
-        router.push(statementId ? { pathname: '/tithe', params: { statementId } } : '/tithe');
-      } else if (kind.startsWith('tithe')) {
-        // Dízimo e ofertas (tithe-campaign, tithe-confirmed, tithe-schedule, tithe-charge, tithe-reminder,
-        // tithe-declared…): a tela do dízimo já mostra campanhas, Pix e histórico — abre direto nela
-        router.push('/tithe');
-      } else if (data?.scheduleId) {
-        // Recusa/substituicao/cancelamento de escala: leva direto para a operacao da escala
-        router.push({
-          pathname: '/coordination/[scheduleId]',
-          params: { scheduleId: String(data.scheduleId) },
-        });
-      } else if (data?.eventId) {
-        // Navegar para o calendário quando clicar na notificação
-        router.push('/(tabs)/calendar');
-      }
-    });
+    // O toque na notificação (app aberto ou a frio) é tratado pelo
+    // NotificationResponseRouter, montado no layout depois da sessão pronta
 
     // Token de push pode rotacionar (reinstalacao, troca de credenciais do dispositivo etc.)
     pushTokenListener.current = Notifications.addPushTokenListener(() => {
@@ -111,9 +103,39 @@ export function NotificationProvider({ children }: NotificationProviderProps) {
 
     return () => {
       notificationListener.current?.remove();
-      responseListener.current?.remove();
       pushTokenListener.current?.remove();
     };
+  }, []);
+
+  const refreshPermission = useCallback(async () => {
+    const state = await getNotificationPermissionState();
+    setPermissionStatus(state.status);
+    setCanAskPermissionAgain(state.canAskAgain);
+    setPermissionChecked(true);
+    return state.status;
+  }, []);
+
+  // Permissão mudada nos Ajustes do aparelho: relê ao voltar para o app
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state === 'active') void refreshPermission();
+    });
+    return () => subscription.remove();
+  }, [refreshPermission]);
+
+  const requestPermission = useCallback(async (): Promise<boolean> => {
+    let granted = false;
+    try {
+      granted = await requestNotificationPermissions();
+    } catch {
+      granted = false;
+    }
+    await refreshPermission();
+    return granted;
+  }, [refreshPermission]);
+
+  const openSystemSettings = useCallback(() => {
+    Linking.openSettings().catch(() => undefined);
   }, []);
 
   // Envia o token de push atual do dispositivo para o backend (best-effort)
@@ -193,6 +215,11 @@ export function NotificationProvider({ children }: NotificationProviderProps) {
       value={{
         settings,
         isPermissionGranted,
+        permissionStatus,
+        permissionChecked,
+        canAskPermissionAgain,
+        requestPermission,
+        openSystemSettings,
         scheduledCount,
         updateSettings,
         refreshScheduledNotifications,

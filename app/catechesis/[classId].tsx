@@ -19,6 +19,8 @@ import { FontAwesome5 } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import { useColors } from '../../src/context/ThemeContext';
+import { useFeatureLocked } from '../../src/context/EntitlementsContext';
+import { PlanLockedScreen } from '../../src/components/PlanLockedState';
 import {
   CatechesisClassReport,
   CatechesisSessionSummary,
@@ -89,6 +91,8 @@ const dateLabel = (iso: string) => {
 
 /** Painel da turma: encontros, chamada e acompanhamento (app do catequista). */
 export default function CatechesisClassScreen() {
+  // Recurso fora do plano da comunidade: estado calmo em vez de erro/lista vazia
+  const planLocked = useFeatureLocked('catechesis');
   const { classId } = useLocalSearchParams<{ classId: string }>();
   const router = useRouter();
   const colors = useColors();
@@ -766,6 +770,10 @@ export default function CatechesisClassScreen() {
       setSavingAttendance(false);
     }
   };
+
+  if (planLocked) {
+    return <PlanLockedScreen title="Turma" />;
+  }
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>

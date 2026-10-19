@@ -51,6 +51,7 @@ type Preset = (typeof REASON_PRESETS)[number];
 
 const TYPE_ICONS: Record<string, string> = {
   MASS: 'church',
+  WORD_CELEBRATION: 'bible',
   CONFESSION: 'praying-hands',
   ADORATION: 'sun',
   ROSARY: 'pray',

@@ -21,6 +21,8 @@ import { FontAwesome5 } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import { useColors } from '../../src/context/ThemeContext';
+import { useFeatureLocked } from '../../src/context/EntitlementsContext';
+import { PlanLockedScreen } from '../../src/components/PlanLockedState';
 import {
   FamilyCatechesisItem,
   getMyCatechesisClasses,
@@ -76,6 +78,8 @@ const stripAccents = (value: string) =>
 
 /** Minhas turmas de catequese (catequista/auxiliar). */
 export default function CatechesisClassesScreen() {
+  // Recurso fora do plano da comunidade: estado calmo em vez de erro/lista vazia
+  const planLocked = useFeatureLocked('catechesis');
   const router = useRouter();
   const colors = useColors();
   const styles = createStyles(colors);
@@ -430,6 +434,10 @@ export default function CatechesisClassesScreen() {
   })();
   const filtrosAtivos = (query ? 1 : 0) + (stageFilter ? 1 : 0) + (pendFilter ? 1 : 0);
   const limparFiltros = () => { setSearch(''); setStageFilter(null); setPendFilter(null); };
+
+  if (planLocked) {
+    return <PlanLockedScreen title="Catequese" />;
+  }
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>

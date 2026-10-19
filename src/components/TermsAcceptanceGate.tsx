@@ -13,11 +13,18 @@ import { AUTH_WEB_URL } from './auth/authPalette';
  * de aceitar. Consulta o GET /users/me a cada usuário logado; servidor antigo,
  * sem o campo, não bloqueia ninguém.
  */
-export default function TermsAcceptanceGate() {
+export default function TermsAcceptanceGate({
+  onClearChange,
+}: {
+  /** true quando já se sabe que não há aceite pendente (outros avisos podem aparecer) */
+  onClearChange?: (clear: boolean) => void;
+} = {}) {
   const { user, isAuthenticated, signOut } = useAuth();
   const colors = useColors();
   const styles = createStyles(colors);
   const [status, setStatus] = useState<TermsStatus | null>(null);
+  /** A consulta do aceite terminou (com ou sem rede) para o usuário atual */
+  const [loaded, setLoaded] = useState(false);
   const [checked, setChecked] = useState(false);
   const [busy, setBusy] = useState(false);
 
@@ -29,16 +36,25 @@ export default function TermsAcceptanceGate() {
     } catch {
       // Sem rede ou sessão caindo: não bloqueia (tenta de novo no próximo login)
       setStatus(null);
+    } finally {
+      setLoaded(true);
     }
   }, []);
 
   useEffect(() => {
     setChecked(false);
+    setLoaded(false);
     if (isAuthenticated && userId) void load();
     else setStatus(null);
   }, [isAuthenticated, userId, load]);
 
   const visible = isAuthenticated && !!status?.termsAcceptanceRequired;
+
+  // Avisa o layout (convite de notificações não pode abrir por cima deste aviso)
+  const clear = isAuthenticated && loaded && !visible;
+  useEffect(() => {
+    onClearChange?.(clear);
+  }, [clear, onClearChange]);
 
   const accept = async () => {
     if (!checked || busy) return;

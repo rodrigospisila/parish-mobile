@@ -3,16 +3,20 @@ import {
   ActivityIndicator,
   Alert,
   RefreshControl,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from 'react-native';
+// SafeAreaView da safe-area-context: o do react-native só vale no iOS (no Android
+// com edge-to-edge o topo ficava sob o relógio/bateria)
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '../../src/context/AuthContext';
+import { useFeatureLocked } from '../../src/context/EntitlementsContext';
+import PlanLockedState from '../../src/components/PlanLockedState';
 import { useColors } from '../../src/context/ThemeContext';
 import {
   CoordinatorAssignmentSummary,
@@ -42,6 +46,7 @@ const coordinatorRoles = [
 
 const FIXED_TYPE_LABELS: Record<string, string> = {
   MASS: 'Missa',
+  WORD_CELEBRATION: 'Celebração da Palavra',
   CONFESSION: 'Confissão',
   ADORATION: 'Adoração',
   ROSARY: 'Terço',
@@ -60,6 +65,8 @@ export default function CoordinationScreen() {
   const colors = useColors();
   const router = useRouter();
   const { user } = useAuth();
+  // Escalas fora do plano: atalhos grátis (horários, dízimo) continuam; o painel vira estado calmo
+  const schedulesLocked = useFeatureLocked('schedules');
   const [schedules, setSchedules] = useState<CoordinatorScheduleSummary[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -321,7 +328,7 @@ export default function CoordinationScreen() {
 
   if (!isCoordinator) {
     return (
-      <SafeAreaView style={styles.safeArea}>
+      <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
         <View style={styles.centerState}>
           <Text style={styles.centerTitle}>Coordenação indisponível</Text>
           <Text style={styles.centerText}>
@@ -333,7 +340,7 @@ export default function CoordinationScreen() {
   }
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
       <ScrollView
         style={styles.scrollView}
         refreshControl={
@@ -380,6 +387,10 @@ export default function CoordinationScreen() {
           </TouchableOpacity>
         )}
 
+        {schedulesLocked ? (
+          <PlanLockedState title="Coordenação de escalas" />
+        ) : (
+        <>
         {/* Alternância Lista | Calendário */}
         <View style={styles.filterRow}>
           {([
@@ -889,6 +900,8 @@ export default function CoordinationScreen() {
             })}
           </View>
         ))}
+        </>
+        )}
       </ScrollView>
     </SafeAreaView>
   );

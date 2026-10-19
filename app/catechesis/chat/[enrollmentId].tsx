@@ -16,6 +16,9 @@ import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import { FontAwesome5 } from '@expo/vector-icons';
 import { useColors } from '../../../src/context/ThemeContext';
+import { useFeatureLocked } from '../../../src/context/EntitlementsContext';
+import { PlanLockedScreen } from '../../../src/components/PlanLockedState';
+import { isPlanRequiredError } from '../../../src/utils/planErrors';
 import {
   CatechesisChatThread,
   getEnrollmentMessages,
@@ -27,6 +30,8 @@ import {
  * responsáveis e a equipe leem. Atualiza sozinha enquanto a tela está aberta.
  */
 export default function CatechesisChatScreen() {
+  // Recurso fora do plano da comunidade: estado calmo em vez de erro/lista vazia
+  const planLocked = useFeatureLocked('catechesis');
   const router = useRouter();
   const colors = useColors();
   const styles = createStyles(colors);
@@ -56,7 +61,9 @@ export default function CatechesisChatScreen() {
           return { ...data, messages: [...data.messages, ...extra] };
         });
       } catch (error: any) {
-        if (!silent) Alert.alert('Conversa', error?.message ?? 'Não foi possível abrir a conversa.');
+        if (!silent && !isPlanRequiredError(error)) {
+          Alert.alert('Conversa', error?.message ?? 'Não foi possível abrir a conversa.');
+        }
       } finally {
         setIsLoading(false);
       }
@@ -99,6 +106,10 @@ export default function CatechesisChatScreen() {
   };
 
   const title = thread ? (thread.isTeam ? `💬 ${thread.student}` : `💬 ${thread.className}`) : '💬 Conversa';
+
+  if (planLocked) {
+    return <PlanLockedScreen title="Conversa" />;
+  }
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>

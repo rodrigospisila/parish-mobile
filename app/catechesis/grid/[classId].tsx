@@ -13,6 +13,9 @@ import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import { FontAwesome5 } from '@expo/vector-icons';
 import { useColors } from '../../../src/context/ThemeContext';
+import { useFeatureLocked } from '../../../src/context/EntitlementsContext';
+import { PlanLockedScreen } from '../../../src/components/PlanLockedState';
+import { isPlanRequiredError } from '../../../src/utils/planErrors';
 import {
   AttendanceGrid,
   AttendanceGridMark,
@@ -40,6 +43,8 @@ const NEXT_STATE: Record<CellState, CellState> = {
  * O atestado da falta é anexado pela chamada do encontro.
  */
 export default function AttendanceGridScreen() {
+  // Recurso fora do plano da comunidade: estado calmo em vez de erro/lista vazia
+  const planLocked = useFeatureLocked('catechesis');
   const router = useRouter();
   const colors = useColors();
   const styles = createStyles(colors);
@@ -58,7 +63,7 @@ export default function AttendanceGridScreen() {
     try {
       setGrid(await getAttendanceGrid(classId));
     } catch (error: any) {
-      Alert.alert('Folha de presença', error?.message ?? 'Não foi possível carregar.');
+      if (!isPlanRequiredError(error)) Alert.alert('Folha de presença', error?.message ?? 'Não foi possível carregar.');
     } finally {
       setIsLoading(false);
     }
@@ -163,6 +168,10 @@ export default function AttendanceGridScreen() {
     const date = new Date(iso);
     return `${String(date.getUTCDate()).padStart(2, '0')}/${String(date.getUTCMonth() + 1).padStart(2, '0')}`;
   };
+
+  if (planLocked) {
+    return <PlanLockedScreen title="Folha de presença" />;
+  }
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>

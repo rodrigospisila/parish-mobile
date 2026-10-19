@@ -53,6 +53,7 @@ const KIND_OPTIONS: { key: SuggestionKind; icon: string; title: string; sub: str
 
 const SCHEDULE_TYPES: { key: CelebrationType; label: string }[] = [
   { key: 'MASS', label: 'Missa' },
+  { key: 'WORD_CELEBRATION', label: 'Celebração da Palavra' },
   { key: 'CONFESSION', label: 'Confissão' },
   { key: 'ADORATION', label: 'Adoração' },
   { key: 'ROSARY', label: 'Terço' },

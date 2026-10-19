@@ -123,7 +123,7 @@ export default function CommunityCard({
                   >
                     {formatMassTime(m.start, now)}
                   </Text>
-                  {m.type !== 'MASS' && <Text style={[styles.tag, off && { opacity: 0.55 }]}>{typeLabel(m.type)}</Text>}
+                  {m.type !== 'MASS' && <Text style={[styles.tag, off && { opacity: 0.55 }]}>{typeLabel(m.type, m.typeLabel)}</Text>}
                   {m.source === 'event' && <Text style={styles.tag}>especial</Text>}
                   {off && (
                     <View style={styles.offBadge}>

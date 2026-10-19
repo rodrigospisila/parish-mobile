@@ -100,7 +100,10 @@ export default function RegisterScreen() {
         // Aceite dos termos/política (LGPD): o servidor grava acceptedTermsAt e a versão
         consentGiven: true,
       });
-      // Navegação é feita automaticamente pelo AuthContext
+      // Navegação é feita automaticamente pelo layout raiz: se o cadastro
+      // adotou o membro "Responsável" pelo telefone verificado, a resposta já
+      // vem com user.communityId e o app vai direto às abas (sem o assistente
+      // de comunidade); sem comunidade, abre o select-community
     } catch (error: any) {
       // Mostra a mensagem real do servidor (ex.: "Email já cadastrado");
       // a frase de conexão fica só para quando o servidor não respondeu
