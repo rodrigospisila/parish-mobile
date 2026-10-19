@@ -29,6 +29,7 @@ import * as Updates from 'expo-updates';
 import UserAvatar from '../../src/components/UserAvatar';
 import { SUPPORT_EMAIL, supportMailto } from '../../src/config/links';
 import { uploadMyAvatar, deleteMyAvatar } from '../../src/services/avatarService';
+import { displayEmail } from '../../src/utils/displayEmail';
 
 /**
  * Versão real do app para o suporte: a do binário (app.json) e, quando o app
@@ -250,7 +251,7 @@ export default function ProfileScreen() {
           </TouchableOpacity>
           <Text style={styles.avatarHint}>Toque para trocar a foto</Text>
           <Text style={styles.userName}>{user?.name || 'Usuário'}</Text>
-          <Text style={styles.userEmail}>{user?.email || ''}</Text>
+          <Text style={styles.userEmail}>{displayEmail(user?.email)}</Text>
           <TouchableOpacity style={styles.headerAction} onPress={() => router.push('/member-availability')}>
             <Text style={styles.headerActionText}>Minha disponibilidade</Text>
           </TouchableOpacity>
@@ -272,7 +273,7 @@ export default function ProfileScreen() {
             <View style={styles.divider} />
             <View style={styles.infoRow}>
               <Text style={styles.infoLabel}>E-mail</Text>
-              <Text style={styles.infoValue}>{user?.email || 'Não informado'}</Text>
+              <Text style={styles.infoValue}>{displayEmail(user?.email) || 'Não informado'}</Text>
             </View>
             <View style={styles.divider} />
             <View style={styles.infoRow}>
