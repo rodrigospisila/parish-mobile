@@ -3,7 +3,7 @@ import { AppState } from 'react-native';
 import { useAuth } from './AuthContext';
 import { useCommunity } from './CommunityContext';
 import { getEntitlements, isFeatureLocked, onPlanRequired, type PlanEntitlements } from '../services/planService';
-import { isPlanRequiredError } from '../utils/planErrors';
+import { isPlanRequiredError, isPlanScopeError } from '../utils/planErrors';
 import { readCache, writeCache } from '../utils/offlineCache';
 
 /**
@@ -64,6 +64,18 @@ export type PaidFeature = (typeof PAID_FEATURES)[number];
 
 /** Sempre liberados (referência; o que não é pago continua grátis). */
 export const FREE_FEATURES = ['members', 'mass-schedules', 'masses', 'map', 'location', 'liturgy', 'saints'] as const;
+
+/**
+ * Recursos de nível PARÓQUIA: o backend libera quando QUALQUER comunidade da
+ * paróquia tem acesso, então nem o /me/entitlements (tudo-ou-nada da
+ * comunidade) nem um 403 guardado de outra chamada servem para esconder o
+ * recurso antes da hora. Para estes, só o 403 da PRÓPRIA chamada da tela
+ * bloqueia (`usePlanLock().track`) e uma carga bem-sucedida desbloqueia.
+ */
+export const PARISH_LEVEL_FEATURES: readonly PaidFeature[] = ['tithe', 'planning', 'formation'];
+
+export const isParishLevelFeature = (feature: string): boolean =>
+  (PARISH_LEVEL_FEATURES as readonly string[]).includes(feature);
 
 /** Cache dos entitlements e validade de um 403 guardado */
 const STALE_MS = 10 * 60 * 1000;
@@ -161,7 +173,9 @@ export function EntitlementsProvider({ children }: { children: React.ReactNode }
   useEffect(
     () =>
       onPlanRequired((code, feature, communityId) => {
-        if (code !== 'PLAN_REQUIRED' || !feature || !communityId) return;
+        // PLAN_SCOPE (comunidade fora do escopo) não marca nada: não fala do plano.
+        // Recurso de nível paróquia também não: só a própria tela decide.
+        if (code !== 'PLAN_REQUIRED' || !feature || !communityId || isParishLevelFeature(feature)) return;
         setServerBlocked((previous) => {
           const next = new Map(previous);
           next.set(blockKey(feature, communityId), Date.now());
@@ -181,7 +195,8 @@ export function EntitlementsProvider({ children }: { children: React.ReactNode }
     () => ({
       entitlements,
       isLockedFor: (feature, communityId) => {
-        if (!communityId) return false;
+        // Nível paróquia: nunca esconde antecipadamente (ver PARISH_LEVEL_FEATURES)
+        if (!communityId || isParishLevelFeature(feature)) return false;
         const at = serverBlocked.get(blockKey(feature, communityId));
         if (at !== undefined && Date.now() - at < STALE_MS) return true;
         // Sem communityId o /me/entitlements avalia a comunidade principal e os
@@ -206,19 +221,24 @@ export function useEntitlements(): EntitlementsContextData {
  *
  * - `track(error)`: a tela passa o resultado da sua chamada principal — `null`
  *   no sucesso (desbloqueia), o erro na falha (403 PLAN_REQUIRED bloqueia;
- *   outro erro mantém o estado). Devolve true quando foi PLAN_REQUIRED;
+ *   403 PLAN_SCOPE — comunidade em foco fora do escopo do usuário — também
+ *   vira estado calmo, só desta tela, sem marcar a comunidade principal;
+ *   outro erro mantém o estado). Devolve true quando foi PLAN_REQUIRED ou
+ *   PLAN_SCOPE;
+ * - `scope`: o estado calmo veio de PLAN_SCOPE (texto "nesta comunidade");
  * - `communityId`: comunidade que a rota da tela usa (communityId explícito ou
  *   a principal, nas rotas decididas pelo usuário) — some o bloqueio guardado
- *   dela e o do /me/entitlements;
+ *   dela e o do /me/entitlements. Ignorado nos recursos de nível paróquia
+ *   (dízimo, planejamento, formação): neles só a própria chamada decide;
  * - `onRecheck`: na reconsulta (volta ao app / pull-to-refresh), tela
  *   bloqueada pela própria chamada carrega de novo; sem ele, desbloqueia.
  */
 export function usePlanLock(
   feature: PaidFeature,
   options: { communityId?: string | null; onRecheck?: () => void } = {},
-): { locked: boolean; track: (error: unknown) => boolean } {
+): { locked: boolean; scope: boolean; track: (error: unknown) => boolean } {
   const { isLockedFor, generation } = useEntitlements();
-  const [ownLocked, setOwnLocked] = useState(false);
+  const [ownLocked, setOwnLocked] = useState<false | 'plan' | 'scope'>(false);
   const ownLockedRef = useRef(ownLocked);
   ownLockedRef.current = ownLocked;
   const recheckRef = useRef(options.onRecheck);
@@ -238,10 +258,19 @@ export function usePlanLock(
       setOwnLocked(false);
       return false;
     }
+    if (isPlanScopeError(error)) {
+      setOwnLocked('scope');
+      return true;
+    }
     if (!isPlanRequiredError(error)) return false;
-    setOwnLocked(true);
+    setOwnLocked('plan');
     return true;
   }, []);
 
-  return { locked: ownLocked || isLockedFor(feature, options.communityId), track };
+  const lockedByCommunity = isLockedFor(feature, options.communityId);
+  return {
+    locked: ownLocked !== false || lockedByCommunity,
+    scope: ownLocked === 'scope' && !lockedByCommunity,
+    track,
+  };
 }

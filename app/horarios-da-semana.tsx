@@ -295,8 +295,12 @@ export default function WeeklySchedulesScreen() {
 
   const renderRow = (o: FixedOccurrence) => {
     const off = o.cancelled === true;
+    // "Já passou" só depois do FIM: enquanto a celebração/atendimento não
+    // terminou (em andamento segundo o servidor, ou antes do `end`), ainda dá
+    // para avisar "não haverá" — o padre que precisou sair no meio da confissão.
     const start = parseLocal(o.start);
-    const past = !!start && start.getTime() < Date.now();
+    const end = parseLocal(o.end) ?? start;
+    const past = !aoVivo(o) && !!end && end.getTime() <= Date.now();
     const saving = savingId === o.id;
     const reason = (o.cancelReason || '').trim();
     const who = off ? createdLine(details[`${o.massScheduleId}|${dayKeyOf(o)}`]) : null;

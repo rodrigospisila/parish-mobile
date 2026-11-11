@@ -37,7 +37,12 @@ import { CATECHESIS_CONSENT_TEXT } from '../../src/constants/catechesisConsent';
 import { useColors } from '../../src/context/ThemeContext';
 import { useNotifications } from '../../src/context/NotificationContext';
 import { useEntitlements, usePlanLock } from '../../src/context/EntitlementsContext';
-import { isForegroundRescheduleDue, markNotificationsRescheduled } from '../../src/services/notificationService';
+import {
+  haveMassSuspensionsChanged,
+  isForegroundRescheduleDue,
+  markNotificationsRescheduled,
+} from '../../src/services/notificationService';
+import { useFocusedInterval } from '../../src/hooks/useFocusedInterval';
 import UserAvatar from '../../src/components/UserAvatar';
 import { getDisabledMobileFeatures } from '../../src/services/settingsService';
 import { FontAwesome5 } from '@expo/vector-icons';
@@ -232,6 +237,14 @@ export default function HomeScreen() {
     });
     return () => subscription.remove();
   }, []);
+  // "Não haverá" marcado (ou desfeito) no dia: se as suspensões dos favoritos
+  // mudaram desde o último agendamento, refaz os lembretes NA HORA — as 6 h
+  // acima deixariam o aviso de uma missa suspensa hoje disparar.
+  const rescheduleIfSuspensionsChanged = useCallback((favorites: MassSchedule[]) => {
+    if (!haveMassSuspensionsChanged(favorites)) return;
+    markNotificationsRescheduled();
+    rescheduleRef.current().catch(() => undefined);
+  }, []);
   const [nextMass, setNextMass] = useState<Event | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [upcomingEvents, setUpcomingEvents] = useState<Event[]>([]);
@@ -270,6 +283,10 @@ export default function HomeScreen() {
   const [fixedTab, setFixedTab] = useState<'MASS' | 'CONFESSION'>('MASS');
   // Ocorrências de HOJE em andamento (servidor novo: `happeningNow`), por horário
   const [liveToday, setLiveToday] = useState<Record<string, FixedOccurrence>>({});
+  // A consulta do "agora" já respondeu para a comunidade em foco: passa a ser
+  // ela (renovada a cada 60 s) quem diz o que está em andamento — o campo
+  // `happeningNow` da lista de horários fica velho com a tela aberta
+  const [liveLoaded, setLiveLoaded] = useState(false);
   const [massReloadKey, setMassReloadKey] = useState(0);
 
   /**
@@ -287,6 +304,9 @@ export default function HomeScreen() {
     communityId: activeCommunityId,
     onRecheck: () => setClergyReloadKey((key) => key + 1),
   });
+  // Dízimo é de nível PARÓQUIA (libera se qualquer comunidade da paróquia tem
+  // plano): isLockedFor nunca o esconde antes da hora — quem decide é o 403 da
+  // própria tela do dízimo (estado calmo lá)
   const titheLocked = isLockedFor('tithe', activeCommunityId);
   const prayerLocked = isLockedFor('prayer-requests', activeCommunityId);
   const catechesisLocked = isLockedFor('catechesis', activeCommunityId);
@@ -362,14 +382,18 @@ export default function HomeScreen() {
 
   const loadLiveToday = useCallback(async (communityId: string) => {
     try {
-      const hoje = chaveDoDia(new Date());
-      const occurrences = await getFixedOccurrencesBetween(communityId, hoje, hoje);
+      // O backend exige `to` DEPOIS de `from` (from = to dava 400 "Período
+      // inválido" a cada carga): pede hoje→amanhã e fica só com o que está em
+      // andamento — `happeningNow` (decidido no fuso da comunidade) só vale
+      // para a ocorrência de hoje.
+      const occurrences = await getFixedOccurrencesBetween(communityId, chaveDaquiA(0), chaveDaquiA(1));
       if (fixedCommunityRef.current !== communityId) return;
       const live: Record<string, FixedOccurrence> = {};
       occurrences.filter(aoVivo).forEach((occurrence) => {
         live[occurrence.massScheduleId] = occurrence;
       });
       setLiveToday(live);
+      setLiveLoaded(true);
     } catch {
       // sem a consulta, só não aparece o selo "Acontecendo agora"
     }
@@ -394,6 +418,7 @@ export default function HomeScreen() {
           if (fixedCommunityRef.current === communityId) {
             setFavoriteMassScheduleIds(favorites.map((favorite) => favorite.id));
           }
+          rescheduleIfSuspensionsChanged(favorites);
         } catch (error) {
           console.error('Erro ao carregar favoritos dos horários fixos:', error);
         }
@@ -405,11 +430,12 @@ export default function HomeScreen() {
         if (!silent && fixedCommunityRef.current === communityId) setIsLoadingMassSchedules(false);
       }
     },
-    [loadLiveToday],
+    [loadLiveToday, rescheduleIfSuspensionsChanged],
   );
 
   useEffect(() => {
     setLiveToday({});
+    setLiveLoaded(false);
     if (!activeCommunityId) {
       return;
     }
@@ -419,10 +445,17 @@ export default function HomeScreen() {
   // De volta ao Início (ou ao app): renova o "Acontecendo agora" e as
   // suspensões sem piscar a tela — no máximo 1 vez por minuto
   const refreshFixedIfStale = useCallback(() => {
+    if (Date.now() - fixedLoadedAt.current < 60_000) return;
     const communityId = fixedCommunityRef.current;
-    if (!communityId || Date.now() - fixedLoadedAt.current < 60_000) return;
+    if (!communityId) {
+      // Sem comunidade (favoritos vindos do mapa): só confere se alguma
+      // suspensão dos favoritos mudou, para refazer os lembretes
+      fixedLoadedAt.current = Date.now();
+      getFavoriteMassSchedules().then(rescheduleIfSuspensionsChanged).catch(() => undefined);
+      return;
+    }
     void loadMassSchedules(communityId, true);
-  }, [loadMassSchedules]);
+  }, [loadMassSchedules, rescheduleIfSuspensionsChanged]);
   useFocusEffect(
     useCallback(() => {
       refreshFixedIfStale();
@@ -434,6 +467,13 @@ export default function HomeScreen() {
     });
     return () => subscription.remove();
   }, [refreshFixedIfStale]);
+  // Com o Início aberto: a cada 60 s refaz só a consulta leve do "agora" (a
+  // confissão que começou ou terminou aparece sem sair da tela). Para ao
+  // perder o foco e em segundo plano.
+  useFocusedInterval(() => {
+    const communityId = fixedCommunityRef.current;
+    if (communityId) void loadLiveToday(communityId);
+  }, 60_000);
 
   useEffect(() => {
     const loadLiturgy = async () => {
@@ -502,7 +542,8 @@ export default function HomeScreen() {
     visibleFixedSchedules.every((schedule) => favoriteMassScheduleSet.has(schedule.id));
 
   /** Acontecendo agora? O servidor decide (campo do horário ou da ocorrência de hoje). */
-  const isLiveNow = (schedule: MassSchedule) => schedule.happeningNow === true || !!liveToday[schedule.id];
+  const isLiveNow = (schedule: MassSchedule) =>
+    liveLoaded ? !!liveToday[schedule.id] : schedule.happeningNow === true;
   /** Fim conhecido do horário: o informado pela equipe ou, em andamento, o da ocorrência. */
   const liveEndOf = (schedule: MassSchedule) =>
     intervalo(schedule.time, schedule.endTime) !== schedule.time

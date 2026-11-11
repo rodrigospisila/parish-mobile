@@ -245,7 +245,14 @@ export const getMapConfig = async (): Promise<MapConfig> => {
 
 // ---------- Buscas ----------
 
+/**
+ * `live=1`: este app entende `happeningNow`, então pede que a celebração em andamento fique na lista até o fim.
+ * Sem o parâmetro (app antigo), o servidor tira o item 30 min depois do início.
+ */
+const LIVE_PARAM = { live: 1 } as const;
+
 const filterParams = (f: MapQueryFilters) => ({
+  ...LIVE_PARAM,
   ...(f.days != null ? { days: f.days } : {}),
   ...(f.types?.length ? { types: f.types.join(',') } : {}),
   approx: f.approx ? 1 : 0,
@@ -317,7 +324,9 @@ export const getMapArea = async (
 
 export const getPublicCommunity = async (id: string): Promise<PublicCommunity> => {
   try {
-    const { data } = await api.get<PublicCommunity>(`/public/communities/${encodeURIComponent(id)}`);
+    const { data } = await api.get<PublicCommunity>(`/public/communities/${encodeURIComponent(id)}`, {
+      params: LIVE_PARAM,
+    });
     return data;
   } catch (error) {
     throw new Error(getErrorMessage(error));

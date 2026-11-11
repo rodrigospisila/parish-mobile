@@ -34,3 +34,14 @@ export const isPlanError = (error: unknown): boolean => planErrorCode(error) !==
 export const isPlanRequiredError = (error: unknown): boolean =>
   planErrorCode(error) === 'PLAN_REQUIRED' ||
   (error instanceof Error && error.message === PLAN_MESSAGES.PLAN_REQUIRED);
+
+/**
+ * Comunidade fora do escopo do usuário para um recurso pago (PLAN_SCOPE) — ex.:
+ * coordenador com outra comunidade em foco no app. Também é resposta
+ * definitiva do servidor: a tela mostra o estado calmo ("não está ativo nesta
+ * comunidade"), não "não foi possível carregar". Não diz nada sobre o plano da
+ * comunidade principal.
+ */
+export const isPlanScopeError = (error: unknown): boolean =>
+  planErrorCode(error) === 'PLAN_SCOPE' ||
+  (error instanceof Error && error.message === PLAN_MESSAGES.PLAN_SCOPE);

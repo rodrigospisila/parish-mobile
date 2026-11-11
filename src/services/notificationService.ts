@@ -46,6 +46,32 @@ export const markNotificationsRescheduled = (now: number = Date.now()): void => 
 export const isForegroundRescheduleDue = (now: number = Date.now()): boolean =>
   now - lastRescheduleAt >= FOREGROUND_RESCHEDULE_INTERVAL_MS;
 
+/**
+ * Assinatura das suspensões ("não haverá") dos horários favoritos: horário +
+ * datas suspensas, em ordem. Mudou em relação ao último agendamento = alguém
+ * marcou (ou desfez) um "não haverá" e os lembretes locais precisam ser
+ * refeitos NA HORA, sem esperar as 6 h — senão o aviso de uma missa suspensa
+ * hoje ainda dispara.
+ */
+export const massSuspensionsSignature = (schedules: MassSchedule[]): string =>
+  schedules
+    .map((schedule) => ({ id: schedule.id, dates: suspensoesDe(schedule).map((c) => c.date) }))
+    .filter((entry) => entry.dates.length > 0)
+    .sort((a, b) => a.id.localeCompare(b.id))
+    .map((entry) => `${entry.id}:${entry.dates.join(',')}`)
+    .join('|');
+
+/** Assinatura usada no último agendamento dos horários fixos (null = ainda não agendou nesta sessão). */
+let lastSuspensionsSignature: string | null = null;
+
+/**
+ * As suspensões dos favoritos mudaram desde o último agendamento? Antes do
+ * primeiro agendamento da sessão responde false: a abertura do app já
+ * reagenda com dados novos (NotificationContext).
+ */
+export const haveMassSuspensionsChanged = (schedules: MassSchedule[]): boolean =>
+  lastSuspensionsSignature !== null && lastSuspensionsSignature !== massSuspensionsSignature(schedules);
+
 // Chaves para AsyncStorage
 const NOTIFICATION_SETTINGS_KEY = '@parish_notification_settings';
 const SCHEDULED_NOTIFICATIONS_KEY = '@parish_scheduled_notifications';
@@ -632,26 +658,37 @@ const removeScheduledNotification = async (notificationId: string): Promise<void
 };
 
 /**
- * Agenda notificações para uma lista de eventos
+ * Agenda notificações para uma lista de eventos.
+ * `shouldContinue` é conferido a cada item: saiu da conta no meio, para.
  */
-export const scheduleNotificationsForEvents = async (events: Event[]): Promise<void> => {
+export const scheduleNotificationsForEvents = async (
+  events: Event[],
+  shouldContinue: () => boolean = () => true,
+): Promise<void> => {
   const settings = await loadNotificationSettings();
-  
+
   if (!settings.enabled || !settings.eventReminders) {
     return;
   }
 
   for (const event of events) {
+    if (!shouldContinue()) return;
     await scheduleEventNotification(event, settings.reminderTime);
   }
 };
 
 /**
- * Agenda notificacoes para horarios fixos favoritados
+ * Agenda notificacoes para horarios fixos favoritados.
+ * `shouldContinue` é conferido a cada item: saiu da conta no meio, para.
  */
 export const scheduleNotificationsForMassSchedules = async (
-  schedules: MassSchedule[]
+  schedules: MassSchedule[],
+  shouldContinue: () => boolean = () => true,
 ): Promise<void> => {
+  // Suspensões consideradas neste agendamento (os lembretes antigos já foram
+  // cancelados por quem chamou): base da comparação na próxima recarga
+  lastSuspensionsSignature = massSuspensionsSignature(schedules);
+
   const settings = await loadNotificationSettings();
 
   if (!settings.enabled || !settings.eventReminders) {
@@ -666,6 +703,7 @@ export const scheduleNotificationsForMassSchedules = async (
   const perSchedule = weeklyRemindersBudget(alreadyScheduled, schedules.length - withSuspensions, withSuspensions);
 
   for (const schedule of schedules) {
+    if (!shouldContinue()) return;
     await scheduleMassScheduleNotification(schedule, settings.reminderTime, perSchedule);
   }
 };

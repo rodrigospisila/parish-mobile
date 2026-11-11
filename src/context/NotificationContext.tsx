@@ -4,6 +4,7 @@ import * as Notifications from 'expo-notifications';
 import {
   NotificationSettings,
   NotificationPermissionState,
+  LocalReminderType,
   getNotificationPermissionState,
   requestNotificationPermissions,
   loadNotificationSettings,
@@ -19,6 +20,7 @@ import {
 import { getFavoriteEvents } from '../services/eventService';
 import { getFavoriteMassSchedules } from '../services/massScheduleService';
 import { authService } from '../services/authService';
+import { isPlanRequiredError } from '../utils/planErrors';
 import { useAuth } from './AuthContext';
 
 interface NotificationContextData {
@@ -163,9 +165,11 @@ export function NotificationProvider({ children }: NotificationProviderProps) {
    *
    * Ordem que importa: PRIMEIRO busca (cada consulta por conta própria), só
    * DEPOIS cancela e reagenda — e só o grupo cuja consulta deu certo:
-   * - eventos favoritos falharam ou não estão ativos na comunidade (403 do
-   *   plano): os lembretes de horário fixo (missa, confissão…) são refeitos
-   *   normalmente e os de evento que já existiam ficam como estavam;
+   * - eventos favoritos falharam (rede/servidor): os lembretes de horário fixo
+   *   (missa, confissão…) são refeitos normalmente e os de evento que já
+   *   existiam ficam como estavam;
+   * - eventos não estão ativos na comunidade (403 PLAN_REQUIRED): os lembretes
+   *   de evento já agendados são cancelados (não ficam órfãos);
    * - horários favoritos falharam: os lembretes de horário fixo ficam intactos;
    * - as duas falharam (sem internet): nada é cancelado.
    * Antes cancelava tudo e depois buscava com Promise.all — qualquer erro nos
@@ -176,31 +180,59 @@ export function NotificationProvider({ children }: NotificationProviderProps) {
    * lembrete semanal repetido — ver scheduleMassScheduleNotification).
    */
   const runReschedule = async () => {
+    // Conta para a qual esta execução agenda: se mudar no meio (logout, troca
+    // de conta, avisos desligados), para a cada item e desfaz o que criou
+    const startedFor = userIdRef.current;
+    const stillValid = () => rescheduleAllowed.current && userIdRef.current === startedFor;
+
     const [eventsResult, massResult] = await Promise.allSettled([
       getFavoriteEvents(),
       getFavoriteMassSchedules(),
     ]);
-    if (eventsResult.status === 'rejected' && massResult.status === 'rejected') {
+    // Eventos fora do plano da comunidade (voltou ao grátis): resposta
+    // definitiva do servidor, não falha de rede — os lembretes de evento já
+    // agendados ficariam órfãos, avisando de eventos que o app diz não estarem
+    // ativos. Falha de rede (ou outro erro) continua sem apagar nada.
+    const eventsOffPlan = eventsResult.status === 'rejected' && isPlanRequiredError(eventsResult.reason);
+    if (eventsResult.status === 'rejected' && massResult.status === 'rejected' && !eventsOffPlan) {
       return; // sem dados novos: os lembretes atuais continuam valendo
     }
     // Saiu da conta (ou desligou os avisos) enquanto buscava: não reagenda nada
-    if (!rescheduleAllowed.current) return;
+    if (!stillValid()) return;
 
+    const touched: LocalReminderType[] = [];
     try {
       // Horários fixos primeiro: são o que o plano grátis garante ao fiel
       if (massResult.status === 'fulfilled') {
         const cleared = await cancelNotificationsByType(['mass_schedule_reminder']);
-        if (cleared) await scheduleNotificationsForMassSchedules(massResult.value);
+        if (cleared && stillValid()) {
+          touched.push('mass_schedule_reminder');
+          await scheduleNotificationsForMassSchedules(massResult.value, stillValid);
+        }
       }
       if (eventsResult.status === 'fulfilled') {
         const cleared = await cancelNotificationsByType(['event_reminder']);
-        if (cleared) {
+        if (cleared && stillValid()) {
+          touched.push('event_reminder');
           const now = new Date();
-          await scheduleNotificationsForEvents(eventsResult.value.filter((event) => new Date(event.startDate) > now));
+          await scheduleNotificationsForEvents(
+            eventsResult.value.filter((event) => new Date(event.startDate) > now),
+            stillValid,
+          );
         }
+      } else if (eventsOffPlan) {
+        await cancelNotificationsByType(['event_reminder']);
       }
     } catch (error) {
       console.error('Erro ao agendar notificações:', error);
+    }
+
+    // A conta mudou no meio: o que esta execução criou era da conta anterior
+    // (o logout cancela tudo, mas um item pode ter sido agendado logo depois)
+    if (!stillValid() && touched.length > 0) {
+      await cancelNotificationsByType(touched);
+      // Já há outra conta logada: refaz para ela ao final desta execução
+      if (rescheduleAllowed.current) rescheduleQueued.current = true;
     }
 
     const scheduled = await getScheduledNotifications();

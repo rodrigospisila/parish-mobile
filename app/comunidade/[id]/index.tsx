@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -20,6 +20,7 @@ import { useAuth } from '../../../src/context/AuthContext';
 import type { ThemeColors } from '../../../src/constants/Colors';
 import { CommunitySchedule, PublicCommunity, getPublicCommunity } from '../../../src/services/publicMapService';
 import { cachedFetch } from '../../../src/utils/offlineCache';
+import { useFocusedInterval } from '../../../src/hooks/useFocusedInterval';
 import { descreverRecorrencia, ehMensal } from '../../../src/utils/recorrencia';
 import {
   formatMassRange,
@@ -143,6 +144,23 @@ export default function CommunityPublicScreen() {
   useEffect(() => {
     load();
   }, [load]);
+
+  // "Acontecendo agora" com a página aberta: a cada 60 s, em foco, refaz a
+  // consulta pública da comunidade em silêncio (sem "carregando" nem erro na
+  // tela; falhou, fica o que já estava). Para ao sair da tela e em segundo plano.
+  const refreshSeq = useRef(0);
+  useFocusedInterval(() => {
+    if (!id || !data) return;
+    const seq = ++refreshSeq.current;
+    const communityId = String(id);
+    getPublicCommunity(communityId)
+      .then((fresh) => {
+        if (seq !== refreshSeq.current || !fresh || fresh.id !== communityId) return;
+        setData(fresh);
+        setCachedAt(null);
+      })
+      .catch(() => undefined);
+  }, 60_000);
 
   const goBack = () => {
     if (router.canGoBack()) router.back();

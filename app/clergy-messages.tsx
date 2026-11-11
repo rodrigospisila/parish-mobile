@@ -35,7 +35,7 @@ export default function ClergyMessagesScreen() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   // Palavra Pastoral fora do plano da comunidade: estado calmo, não lista vazia
   const reloadOnRecheck = React.useRef<() => void>(() => undefined);
-  const { locked: planLocked, track: trackPlan } = usePlanLock('clergy-messages', {
+  const { locked: planLocked, scope: planScope, track: trackPlan } = usePlanLock('clergy-messages', {
     communityId: activeCommunityId,
     onRecheck: () => reloadOnRecheck.current(),
   });
@@ -65,7 +65,7 @@ export default function ClergyMessagesScreen() {
     }, [load]),
   );
 
-  if (planLocked) return <PlanLockedScreen title="Palavra Pastoral" />;
+  if (planLocked) return <PlanLockedScreen title="Palavra Pastoral" scope={planScope} />;
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>

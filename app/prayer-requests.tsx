@@ -56,7 +56,7 @@ export default function PrayerRequestsScreen() {
   const [submitting, setSubmitting] = useState(false);
   // Mural fora do plano da comunidade: estado calmo, não lista vazia nem Alert
   const reloadOnRecheck = React.useRef<() => void>(() => undefined);
-  const { locked: planLocked, track: trackPlan } = usePlanLock('prayer-requests', {
+  const { locked: planLocked, scope: planScope, track: trackPlan } = usePlanLock('prayer-requests', {
     communityId: activeCommunityId,
     onRecheck: () => reloadOnRecheck.current(),
   });
@@ -158,7 +158,7 @@ export default function PrayerRequestsScreen() {
     }
   };
 
-  if (planLocked) return <PlanLockedScreen title="Mural de oração" />;
+  if (planLocked) return <PlanLockedScreen title="Mural de oração" scope={planScope} />;
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>

@@ -18,7 +18,16 @@ import { canCoordinateSchedules } from '../utils/pastoralCoordination';
  * novo (plano ativado na paróquia aparece sem reiniciar o app). Não usar
  * dentro de outra ScrollView.
  */
-export default function PlanLockedState({ title, refreshable = false }: { title?: string; refreshable?: boolean }) {
+export default function PlanLockedState({
+  title,
+  refreshable = false,
+  scope = false,
+}: {
+  title?: string;
+  refreshable?: boolean;
+  /** 403 PLAN_SCOPE: a comunidade em foco não é a do usuário — fala "nesta comunidade", não "na sua" */
+  scope?: boolean;
+}) {
   const colors = useColors();
   const styles = createStyles(colors);
   const { user } = useAuth();
@@ -32,9 +41,13 @@ export default function PlanLockedState({ title, refreshable = false }: { title?
         <Ionicons name="leaf-outline" size={30} color={colors.primary} />
       </View>
       {title ? <Text style={styles.kicker}>{title}</Text> : null}
-      <Text style={styles.title}>Este recurso não está ativo na sua comunidade</Text>
+      <Text style={styles.title}>
+        {scope ? 'Este recurso não está ativo nesta comunidade' : 'Este recurso não está ativo na sua comunidade'}
+      </Text>
       <Text style={styles.body}>
-        {manages
+        {scope
+          ? 'Para a comunidade que está em foco no app, ele não está disponível para você. Horários de missa e de confissão, mapa e liturgia continuam funcionando normalmente.'
+          : manages
           ? 'A administração da paróquia pode ativá-lo pelo painel do Parish. Horários de missa e de confissão, mapa e liturgia continuam funcionando normalmente.'
           : 'Horários de missa e de confissão, mapa e liturgia continuam funcionando normalmente.'}
       </Text>
@@ -79,7 +92,7 @@ const createStyles = (colors: ReturnType<typeof useColors>) =>
  * Tela inteira de recurso fora do plano (telas empilhadas, sem tab bar):
  * cabeçalho com "Voltar" + o estado calmo.
  */
-export function PlanLockedScreen({ title }: { title: string }) {
+export function PlanLockedScreen({ title, scope = false }: { title: string; scope?: boolean }) {
   const colors = useColors();
   const styles = createScreenStyles(colors);
   const router = useRouter();
@@ -101,7 +114,7 @@ export function PlanLockedScreen({ title }: { title: string }) {
         </Text>
         <View style={styles.headerBtn} />
       </View>
-      <PlanLockedState refreshable />
+      <PlanLockedState refreshable scope={scope} />
     </SafeAreaView>
   );
 }
