@@ -29,6 +29,8 @@ import * as Clipboard from 'expo-clipboard';
 import * as WebBrowser from 'expo-web-browser';
 import { useColors } from '../src/context/ThemeContext';
 import { useAuth } from '../src/context/AuthContext';
+import { usePlanLock } from '../src/context/EntitlementsContext';
+import { PlanLockedScreen } from '../src/components/PlanLockedState';
 import {
   MyTithe,
   TitheIntent,
@@ -186,6 +188,13 @@ export default function TitheScreen() {
   const [data, setData] = useState<MyTithe | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  // Dízimo fora do plano da paróquia: estado calmo no lugar do Alert de erro.
+  // (O acompanhamento de uma contribuição já criada continua aberto no servidor.)
+  const reloadOnRecheck = useRef<() => void>(() => undefined);
+  const { locked: planLocked, track: trackPlan } = usePlanLock('tithe', {
+    communityId: user?.communityId,
+    onRecheck: () => reloadOnRecheck.current(),
+  });
 
   const [kind, setKind] = useState<TitheIntentKind>('TITHE');
   const [referenceMonth, setReferenceMonth] = useState<string | null>(null);
@@ -248,6 +257,7 @@ export default function TitheScreen() {
         ),
       ]);
       setData(result);
+      trackPlan(null);
       if (statementList) setStatements(statementList);
       if (campaignList) {
         setCampaigns(campaignList);
@@ -264,12 +274,13 @@ export default function TitheScreen() {
         setAmountText(String(result.suggestedAmount.toFixed(2)).replace('.', ','));
       }
     } catch (error: any) {
-      Alert.alert('Dízimo', error?.message ?? 'Não foi possível carregar.');
+      if (!trackPlan(error)) Alert.alert('Dízimo', error?.message ?? 'Não foi possível carregar.');
     } finally {
       setIsLoading(false);
       setIsRefreshing(false);
     }
-  }, []);
+  }, [trackPlan]);
+  reloadOnRecheck.current = () => void load();
 
   useFocusEffect(
     useCallback(() => {
@@ -948,6 +959,9 @@ export default function TitheScreen() {
   const presets = targetPresets.length > 0 ? targetPresets : PRESETS;
   const showAnonymous = effectiveKind === 'OFFERING' && (campaignTarget ? campaignTarget.allowAnonymous : true);
   const registeredText = campaignTarget ? 'sua contribuição é registrada' : 'seu dízimo é registrado';
+
+  // Com um pagamento em andamento na tela, o fiel termina de acompanhá-lo
+  if (planLocked && !active) return <PlanLockedScreen title="Dízimo e ofertas" />;
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>

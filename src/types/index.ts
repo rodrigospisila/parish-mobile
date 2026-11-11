@@ -399,6 +399,16 @@ export interface MassSchedule {
   weeksOfMonth?: number[];
   dayOfMonth?: number | null;
   time: string;
+  /**
+   * Fim do horário (HH:MM), quando a equipe informou — ex.: Confissão das
+   * 19:00 às 20:00. Servidor antigo não manda; nulo = duração padrão do tipo.
+   */
+  endTime?: string | null;
+  /**
+   * A ocorrência de HOJE deste horário está acontecendo agora (decidido pelo
+   * servidor, no fuso da comunidade). Ausente em servidor antigo.
+   */
+  happeningNow?: boolean;
   type: MassScheduleType;
   notes?: string;
   isSpecial: boolean;

@@ -89,6 +89,10 @@ export interface FixedOccurrence {
   /** Servidor antigo não manda: tratar como false. */
   cancelled?: boolean;
   cancelReason?: string | null;
+  /** início ≤ agora < fim, no fuso da comunidade (ausente em servidor antigo). */
+  happeningNow?: boolean;
+  /** Fim informado pela equipe (HH:MM); nulo/ausente = `end` é a duração padrão do tipo. */
+  endTime?: string | null;
 }
 
 /** Papéis que podem suspender/reativar um horário fixo. */

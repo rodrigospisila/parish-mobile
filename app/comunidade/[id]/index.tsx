@@ -21,7 +21,15 @@ import type { ThemeColors } from '../../../src/constants/Colors';
 import { CommunitySchedule, PublicCommunity, getPublicCommunity } from '../../../src/services/publicMapService';
 import { cachedFetch } from '../../../src/utils/offlineCache';
 import { descreverRecorrencia, ehMensal } from '../../../src/utils/recorrencia';
-import { formatMassTime, isCancelled, isOnSearchedDay, typeLabel } from '../../../src/components/map/format';
+import {
+  formatMassRange,
+  happeningNowLabel,
+  isCancelled,
+  isHappeningNow,
+  isOnSearchedDay,
+  typeLabel,
+} from '../../../src/components/map/format';
+import { aoVivo, intervalo } from '../../../src/utils/aoVivo';
 import { chaveDaquiA, diaMes, juntarLista, motivoCurto, suspensoesDe } from '../../../src/utils/suspensoes';
 import { openDirectionsTo } from '../../../src/components/map/directions';
 import { claimParishUrl } from '../../../src/config/links';
@@ -297,6 +305,7 @@ export default function CommunityPublicScreen() {
               {data.nextMasses.slice(0, 6).map((m) => {
                 const off = isCancelled(m);
                 const soon = !off && isOnSearchedDay(m);
+                const live = isHappeningNow(m);
                 const motivo = motivoCurto(m.cancelReason);
                 return (
                   <View key={m.id} style={styles.nextItem}>
@@ -309,12 +318,17 @@ export default function CommunityPublicScreen() {
                           off && styles.offText,
                         ]}
                       >
-                        {formatMassTime(m.start)}
+                        {formatMassRange(m)}
                       </Text>
                       <Text style={[styles.nextType, off && styles.offText]}>
                         {typeLabel(m.type, m.typeLabel)}
                         {m.source === 'event' ? ' · especial' : ''}
                       </Text>
+                      {live && (
+                        <View style={styles.liveBadge} accessible accessibilityLabel={happeningNowLabel(m)}>
+                          <Text style={styles.liveBadgeText}>Acontecendo agora</Text>
+                        </View>
+                      )}
                       {off && (
                         <View style={styles.offBadge}>
                           <Text style={styles.offBadgeText}>Não haverá</Text>
@@ -358,7 +372,17 @@ export default function CommunityPublicScreen() {
                       <View key={t.type} style={styles.typeRow}>
                         <Text style={styles.typeName}>{typeLabel(t.type, t.items[0]?.typeLabel)}</Text>
                         <View style={{ flex: 1 }}>
-                          <Text style={styles.times}>{t.items.map((s) => s.time).join('  ·  ')}</Text>
+                          <Text style={styles.times}>
+                            {t.items.map((s) => intervalo(s.time, s.endTime)).join('  ·  ')}
+                          </Text>
+                          {t.items.filter((s) => aoVivo(s)).map((s) => (
+                            <View key={`live-${s.id}`} style={[styles.liveBadge, styles.liveBadgeLine]}>
+                              <Text style={styles.liveBadgeText}>
+                                {t.items.length > 1 ? `${s.time} — ` : ''}Acontecendo agora
+                                {intervalo(s.time, s.endTime) !== s.time ? ` · até ${String(s.endTime).slice(0, 5)}` : ''}
+                              </Text>
+                            </View>
+                          ))}
                           {t.items
                             .filter((s) => s.notes)
                             .map((s) => (
@@ -388,8 +412,13 @@ export default function CommunityPublicScreen() {
                         <Text style={styles.typeName}>{typeLabel(s.type, s.typeLabel)}</Text>
                         <View style={{ flex: 1 }}>
                           <Text style={styles.times}>
-                            {descreverRecorrencia(s)}, {s.time}
+                            {descreverRecorrencia(s)}, {intervalo(s.time, s.endTime)}
                           </Text>
+                          {aoVivo(s) && (
+                            <View style={[styles.liveBadge, styles.liveBadgeLine]}>
+                              <Text style={styles.liveBadgeText}>Acontecendo agora</Text>
+                            </View>
+                          )}
                           {!!s.notes && <Text style={styles.note}>{s.notes}</Text>}
                           {!!linhaSuspensas(s) && <Text style={styles.suspLine}>{linhaSuspensas(s)}</Text>}
                         </View>
@@ -457,7 +486,7 @@ export default function CommunityPublicScreen() {
               <View style={{ flex: 1 }}>
                 <Text style={styles.claimTitle}>É da equipe desta paróquia?</Text>
                 <Text style={styles.claimText}>
-                  Gerencie no Parish: horários, avisos, pastorais e escalas. Teste grátis por 30 dias.
+                  Cuide dos horários, da confissão e da localização de graça.
                 </Text>
               </View>
               <FontAwesome5 name="external-link-alt" size={13} color={colors.textTertiary} />
@@ -554,6 +583,15 @@ function createStyles(colors: ThemeColors) {
       borderRadius: 6,
     },
     offBadgeText: { fontSize: 11.5, fontWeight: '800', color: colors.error },
+    // "Acontecendo agora": verde + texto (nunca só a cor)
+    liveBadge: {
+      paddingHorizontal: 7,
+      paddingVertical: 2,
+      borderRadius: 6,
+      backgroundColor: colors.success + '1F',
+    },
+    liveBadgeLine: { alignSelf: 'flex-start', marginTop: 4 },
+    liveBadgeText: { fontSize: 11.5, fontWeight: '800', color: colors.success },
     offReason: { fontSize: 13, color: colors.textSecondary, marginLeft: 16, marginTop: 2 },
     alertBox: {
       flexDirection: 'row',

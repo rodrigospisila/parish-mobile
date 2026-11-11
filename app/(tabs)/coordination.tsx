@@ -65,10 +65,11 @@ export default function CoordinationScreen() {
   const colors = useColors();
   const router = useRouter();
   const { user } = useAuth();
-  // Escalas fora do plano: atalhos grátis (horários, dízimo) continuam; o painel vira estado calmo
+  // Escalas fora do plano: o atalho grátis ("Horários da semana") continua; o
+  // do dízimo some se o dízimo também não estiver ativo; o painel vira estado calmo
   // O painel (coordinator-overview) é decidido pelo usuário, sem comunidade na
   // rota: vale a principal (403 dela ou o /me/entitlements) e o 403 da chamada
-  const { refresh: refreshPlan } = useEntitlements();
+  const { refresh: refreshPlan, isLockedFor } = useEntitlements();
   const reloadOnRecheck = useRef<() => void>(() => undefined);
   const { locked: schedulesLocked, track: trackPlan } = usePlanLock('schedules', {
     communityId: user?.communityId,
@@ -383,14 +384,14 @@ export default function CoordinationScreen() {
             </View>
             <View style={{ flex: 1, gap: 2 }}>
               <Text style={styles.weekTitle}>Horários da semana</Text>
-              <Text style={styles.weekHint}>Avise quando um horário não vai acontecer</Text>
+              <Text style={styles.weekHint}>Avise quando uma missa ou um atendimento não vai acontecer</Text>
             </View>
             <FontAwesome5 name="chevron-right" size={14} color={colors.textTertiary} />
           </TouchableOpacity>
         )}
 
         {/* Modo agente do Dízimo (papéis financeiros) */}
-        {isFinancial && (
+        {isFinancial && !isLockedFor('tithe', user?.communityId) && (
           <TouchableOpacity style={styles.agentCard} activeOpacity={0.85} onPress={() => router.push('/tithe-agent' as never)}>
             <View style={{ flex: 1, gap: 2 }}>
               <Text style={styles.agentTitle}>🧾 Modo agente — registrar contribuição presencial</Text>

@@ -20,6 +20,8 @@ import { useFocusEffect } from '@react-navigation/native';
 import { FontAwesome5 } from '@expo/vector-icons';
 import { useColors } from '../src/context/ThemeContext';
 import { useAuth } from '../src/context/AuthContext';
+import { usePlanLock } from '../src/context/EntitlementsContext';
+import { PlanLockedScreen } from '../src/components/PlanLockedState';
 import {
   AgentContribution,
   AgentMember,
@@ -162,6 +164,13 @@ export default function TitheAgentScreen() {
   const now = Date.now();
   const visibleCampaigns = member ? campaigns.filter((c) => campaignEligible(c, member, now)) : [];
 
+  // Dízimo fora do plano da paróquia: estado calmo no lugar do Alert de erro
+  const reloadOnRecheck = useRef<() => void>(() => undefined);
+  const { locked: planLocked, track: trackPlan } = usePlanLock('tithe', {
+    communityId: user?.communityId,
+    onRecheck: () => reloadOnRecheck.current(),
+  });
+
   const load = useCallback(
     async (refresh = false) => {
       if (!allowed) {
@@ -179,20 +188,22 @@ export default function TitheAgentScreen() {
           ),
         ]);
         setRecent(list);
+        trackPlan(null);
         if (campaignList) {
           setCampaigns(campaignList);
           // Some se deixou de estar ativa
           setCampaignTarget((current) => (current && campaignList.some((c) => c.id === current.id) ? current : null));
         }
       } catch (error: any) {
-        Alert.alert('Modo agente', error?.message ?? 'Não foi possível carregar.');
+        if (!trackPlan(error)) Alert.alert('Modo agente', error?.message ?? 'Não foi possível carregar.');
       } finally {
         setRecentLoading(false);
         setIsRefreshing(false);
       }
     },
-    [allowed],
+    [allowed, trackPlan],
   );
+  reloadOnRecheck.current = () => void load();
 
   useFocusEffect(
     useCallback(() => {
@@ -383,6 +394,8 @@ export default function TitheAgentScreen() {
       <View style={styles.headerBtn} />
     </View>
   );
+
+  if (allowed && planLocked) return <PlanLockedScreen title="Modo agente" />;
 
   if (!allowed) {
     return (

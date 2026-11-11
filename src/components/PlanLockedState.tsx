@@ -35,8 +35,8 @@ export default function PlanLockedState({ title, refreshable = false }: { title?
       <Text style={styles.title}>Este recurso não está ativo na sua comunidade</Text>
       <Text style={styles.body}>
         {manages
-          ? 'A administração da paróquia pode ativá-lo pelo painel do Parish. Calendário, horários, liturgia e avisos continuam funcionando normalmente.'
-          : 'Calendário, horários de missa, liturgia e avisos da paróquia continuam funcionando normalmente.'}
+          ? 'A administração da paróquia pode ativá-lo pelo painel do Parish. Horários de missa e de confissão, mapa e liturgia continuam funcionando normalmente.'
+          : 'Horários de missa e de confissão, mapa e liturgia continuam funcionando normalmente.'}
       </Text>
     </View>
   );

@@ -3,7 +3,17 @@ import { LayoutChangeEvent, StyleSheet, Text, TouchableOpacity, View } from 'rea
 import { FontAwesome5 } from '@expo/vector-icons';
 import type { ThemeColors } from '../../constants/Colors';
 import type { MapCommunity } from '../../services/publicMapService';
-import { cityLine, formatDistance, formatMassTime, isCancelled, isOnSearchedDay, SearchedDay, typeLabel } from './format';
+import {
+  cityLine,
+  formatDistance,
+  formatMassRange,
+  happeningNowLabel,
+  isCancelled,
+  isHappeningNow,
+  isOnSearchedDay,
+  SearchedDay,
+  typeLabel,
+} from './format';
 
 interface Props {
   community: MapCommunity;
@@ -109,6 +119,7 @@ export default function CommunityCard({
           masses.map((m) => {
             const off = isCancelled(m);
             const soon = !off && isOnSearchedDay(m, day, now);
+            const live = isHappeningNow(m);
             const reason = (m.cancelReason || '').trim();
             return (
               <View key={m.id}>
@@ -121,9 +132,14 @@ export default function CommunityCard({
                       off && styles.massTextOff,
                     ]}
                   >
-                    {formatMassTime(m.start, now)}
+                    {formatMassRange(m, now)}
                   </Text>
                   {m.type !== 'MASS' && <Text style={[styles.tag, off && { opacity: 0.55 }]}>{typeLabel(m.type, m.typeLabel)}</Text>}
+                  {live && (
+                    <View style={styles.liveBadge} accessible accessibilityLabel={happeningNowLabel(m)}>
+                      <Text style={styles.liveBadgeText}>Acontecendo agora</Text>
+                    </View>
+                  )}
                   {m.source === 'event' && <Text style={styles.tag}>especial</Text>}
                   {off && (
                     <View style={styles.offBadge}>
@@ -221,6 +237,14 @@ function createStyles(colors: ThemeColors) {
       borderRadius: 6,
     },
     offBadgeText: { fontSize: 11, fontWeight: '800', color: colors.error },
+    // "Acontecendo agora": verde + texto (nunca só a cor)
+    liveBadge: {
+      paddingHorizontal: 7,
+      paddingVertical: 2,
+      borderRadius: 6,
+      backgroundColor: colors.success + '1F',
+    },
+    liveBadgeText: { fontSize: 11, fontWeight: '800', color: colors.success },
     offReason: { fontSize: 12.5, color: colors.textSecondary, marginLeft: 16, marginTop: 1 },
     tag: {
       fontSize: 11,

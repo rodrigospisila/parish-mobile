@@ -20,6 +20,8 @@ import { useFocusEffect } from '@react-navigation/native';
 import { FontAwesome5 } from '@expo/vector-icons';
 import { useColors } from '../src/context/ThemeContext';
 import { useCommunity } from '../src/context/CommunityContext';
+import { usePlanLock } from '../src/context/EntitlementsContext';
+import { PlanLockedScreen } from '../src/components/PlanLockedState';
 import {
   PrayerRequest,
   PrayerCategory,
@@ -52,6 +54,12 @@ export default function PrayerRequestsScreen() {
     isAnonymous: false,
   });
   const [submitting, setSubmitting] = useState(false);
+  // Mural fora do plano da comunidade: estado calmo, não lista vazia nem Alert
+  const reloadOnRecheck = React.useRef<() => void>(() => undefined);
+  const { locked: planLocked, track: trackPlan } = usePlanLock('prayer-requests', {
+    communityId: activeCommunityId,
+    onRecheck: () => reloadOnRecheck.current(),
+  });
 
   const load = useCallback(
     async (refresh = false) => {
@@ -59,15 +67,18 @@ export default function PrayerRequestsScreen() {
       try {
         const items = await getApprovedPrayerRequests(activeCommunityId);
         setRequests(items);
+        trackPlan(null);
       } catch (error) {
-        console.error('Erro ao carregar pedidos de oração:', error);
+        if (trackPlan(error)) setRequests([]);
+        else console.error('Erro ao carregar pedidos de oração:', error);
       } finally {
         setIsLoading(false);
         setIsRefreshing(false);
       }
     },
-    [activeCommunityId],
+    [activeCommunityId, trackPlan],
   );
+  reloadOnRecheck.current = () => void load();
 
   useFocusEffect(
     useCallback(() => {
@@ -102,6 +113,8 @@ export default function PrayerRequestsScreen() {
           item.id === request.id ? { ...item, prayerCount: Math.max(0, item.prayerCount - 1) } : item,
         ),
       );
+      // Recurso desativado no meio da visita: a tela vira o estado calmo, sem Alert
+      if (trackPlan(error)) return;
       Alert.alert('Oração', error?.message ?? 'Não foi possível registrar agora. Tente novamente.');
     }
   };
@@ -135,11 +148,17 @@ export default function PrayerRequestsScreen() {
         'A coordenação vai aprovar e seu pedido aparece no mural para a comunidade rezar junto.',
       );
     } catch (error: any) {
+      if (trackPlan(error)) {
+        setShowForm(false);
+        return;
+      }
       Alert.alert('Não foi possível enviar', error?.message ?? 'Tente novamente.');
     } finally {
       setSubmitting(false);
     }
   };
+
+  if (planLocked) return <PlanLockedScreen title="Mural de oração" />;
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>

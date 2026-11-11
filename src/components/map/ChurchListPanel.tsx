@@ -17,6 +17,9 @@ import {
   firstActiveMass,
   formatDistance,
   formatMassTime,
+  formatMassRange,
+  happeningNowLabel,
+  isHappeningNow,
   isCancelled,
   isOnSearchedDay,
   SearchedDay,
@@ -89,7 +92,9 @@ export default function ChurchListPanel({
   const renderItem = ({ item }: { item: ListItem }) => {
     const c = item.community;
     // Próximo horário que vai mesmo acontecer; uma suspensão antes dele vira aviso
-    const next = firstActiveMass(c.nextMasses);
+    // Em andamento agora (servidor novo) vem na frente da próxima
+    const live = c.nextMasses.find((m) => isHappeningNow(m));
+    const next = live ?? firstActiveMass(c.nextMasses);
     const soon = next ? isOnSearchedDay(next, day, now) : false;
     const skipped = c.nextMasses.find((m) => isCancelled(m) && (!next || m.start < next.start));
     const dist = formatDistance(item.distanceKm);
@@ -117,8 +122,8 @@ export default function ChurchListPanel({
               <>
                 {soon && <View style={[styles.dot, { backgroundColor: colors.success }]} />}
                 <Text style={[styles.rowMassText, soon && { color: colors.success, fontWeight: '800' }]} numberOfLines={1}>
-                  {formatMassTime(next.start, now)}
-                  {next.type !== 'MASS' ? ` · ${typeLabel(next.type, next.typeLabel)}` : ''}
+                  {live ? `${happeningNowLabel(live)} · ${typeLabel(live.type, live.typeLabel)}` : formatMassRange(next, now)}
+                  {!live && next.type !== 'MASS' ? ` · ${typeLabel(next.type, next.typeLabel)}` : ''}
                 </Text>
               </>
             ) : (

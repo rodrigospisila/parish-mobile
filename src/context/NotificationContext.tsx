@@ -11,6 +11,7 @@ import {
   scheduleNotificationsForEvents,
   scheduleNotificationsForMassSchedules,
   cancelAllNotifications,
+  cancelNotificationsByType,
   getScheduledNotifications,
   sendTestNotification,
   getPushToken,
@@ -157,29 +158,84 @@ export function NotificationProvider({ children }: NotificationProviderProps) {
     }
   }, [isPermissionGranted, user?.id]);
 
-  // Reagendar notificações quando o usuário ou configurações mudam
-  const rescheduleEventNotifications = async () => {
-    if (!user?.communityId || !settings.enabled || !isPermissionGranted) {
-      return;
+  /**
+   * Refaz os lembretes locais dos favoritos.
+   *
+   * Ordem que importa: PRIMEIRO busca (cada consulta por conta própria), só
+   * DEPOIS cancela e reagenda — e só o grupo cuja consulta deu certo:
+   * - eventos favoritos falharam ou não estão ativos na comunidade (403 do
+   *   plano): os lembretes de horário fixo (missa, confissão…) são refeitos
+   *   normalmente e os de evento que já existiam ficam como estavam;
+   * - horários favoritos falharam: os lembretes de horário fixo ficam intactos;
+   * - as duas falharam (sem internet): nada é cancelado.
+   * Antes cancelava tudo e depois buscava com Promise.all — qualquer erro nos
+   * eventos apagava os lembretes de missa.
+   *
+   * "Não haverá": /mass-schedules/favorites traz `upcomingCancellations`
+   * (hoje a +60 dias) e o agendamento pula essas datas (avulsos no lugar do
+   * lembrete semanal repetido — ver scheduleMassScheduleNotification).
+   */
+  const runReschedule = async () => {
+    const [eventsResult, massResult] = await Promise.allSettled([
+      getFavoriteEvents(),
+      getFavoriteMassSchedules(),
+    ]);
+    if (eventsResult.status === 'rejected' && massResult.status === 'rejected') {
+      return; // sem dados novos: os lembretes atuais continuam valendo
     }
+    // Saiu da conta (ou desligou os avisos) enquanto buscava: não reagenda nada
+    if (!rescheduleAllowed.current) return;
 
     try {
-      await cancelAllNotifications();
-
-      const [favorites, favoriteMassSchedules] = await Promise.all([
-        getFavoriteEvents(),
-        getFavoriteMassSchedules(),
-      ]);
-      const futureEvents = favorites.filter((event) => new Date(event.startDate) > new Date());
-
-      await scheduleNotificationsForEvents(futureEvents);
-      await scheduleNotificationsForMassSchedules(favoriteMassSchedules);
-
-      const scheduled = await getScheduledNotifications();
-      setScheduledCount(scheduled.length);
+      // Horários fixos primeiro: são o que o plano grátis garante ao fiel
+      if (massResult.status === 'fulfilled') {
+        const cleared = await cancelNotificationsByType(['mass_schedule_reminder']);
+        if (cleared) await scheduleNotificationsForMassSchedules(massResult.value);
+      }
+      if (eventsResult.status === 'fulfilled') {
+        const cleared = await cancelNotificationsByType(['event_reminder']);
+        if (cleared) {
+          const now = new Date();
+          await scheduleNotificationsForEvents(eventsResult.value.filter((event) => new Date(event.startDate) > now));
+        }
+      }
     } catch (error) {
       console.error('Erro ao agendar notificações:', error);
     }
+
+    const scheduled = await getScheduledNotifications();
+    setScheduledCount(scheduled.length);
+  };
+
+  /** Uma execução por vez: duas ao mesmo tempo agendariam lembretes em dobro. */
+  const rescheduleRunning = useRef<Promise<void> | null>(null);
+  const rescheduleQueued = useRef(false);
+  const rescheduleAllowed = useRef(false);
+  // Favorito de horário fixo vale também para quem ainda não tem comunidade (mapa)
+  rescheduleAllowed.current = !!user?.id && settings.enabled && isPermissionGranted;
+  const runRescheduleRef = useRef(runReschedule);
+  runRescheduleRef.current = runReschedule;
+
+  // Reagendar notificações quando o usuário ou configurações mudam
+  const rescheduleEventNotifications = async (): Promise<void> => {
+    if (!rescheduleAllowed.current) return;
+    if (rescheduleRunning.current) {
+      // Pedido novo durante uma execução (favoritou outro horário): roda mais uma vez ao final
+      rescheduleQueued.current = true;
+      return rescheduleRunning.current;
+    }
+    const loop = (async () => {
+      try {
+        do {
+          rescheduleQueued.current = false;
+          await runRescheduleRef.current().catch((error) => console.error('Erro ao agendar notificações:', error));
+        } while (rescheduleQueued.current && rescheduleAllowed.current);
+      } finally {
+        rescheduleRunning.current = null;
+      }
+    })();
+    rescheduleRunning.current = loop;
+    return loop;
   };
 
   useEffect(() => {

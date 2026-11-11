@@ -47,6 +47,13 @@ export interface PublicMass {
   cancelled?: boolean;
   /** Motivo curto da suspensão, para mostrar ao fiel. */
   cancelReason?: string | null;
+  /**
+   * Acontecendo agora (início ≤ agora < fim, no fuso da comunidade; nunca numa
+   * data suspensa). Servidor antigo não manda: tratar como false.
+   */
+  happeningNow?: boolean;
+  /** Fim informado pela equipe (HH:MM), quando o servidor repassa; `end` pode ser só a duração padrão. */
+  endTime?: string | null;
 }
 
 export interface MapCommunity {
@@ -112,6 +119,10 @@ export interface CommunitySchedule {
   /** 0 = domingo */
   dayOfWeek: number | null;
   time: string;
+  /** Fim (HH:MM) informado pela equipe — ausente em servidor antigo, nulo = sem fim definido */
+  endTime?: string | null;
+  /** A ocorrência de HOJE deste horário está acontecendo agora (ausente em servidor antigo) */
+  happeningNow?: boolean;
   recurrence: 'WEEKLY' | 'MONTHLY_NTH' | 'MONTHLY_DAY' | null;
   weeksOfMonth: number[] | null;
   dayOfMonth: number | null;

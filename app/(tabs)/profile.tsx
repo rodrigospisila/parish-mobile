@@ -30,6 +30,8 @@ import UserAvatar from '../../src/components/UserAvatar';
 import { SUPPORT_EMAIL, supportMailto } from '../../src/config/links';
 import { uploadMyAvatar, deleteMyAvatar } from '../../src/services/avatarService';
 import { displayEmail } from '../../src/utils/displayEmail';
+import { useEntitlements } from '../../src/context/EntitlementsContext';
+import { canManageScheduleCancellations } from '../../src/services/massScheduleService';
 
 /**
  * Versão real do app para o suporte: a do binário (app.json) e, quando o app
@@ -51,6 +53,14 @@ export default function ProfileScreen() {
   const { links, activeCommunityId, setActiveCommunity, refreshLinks } = useCommunity();
 
   const [catechesisClassCount, setCatechesisClassCount] = React.useState(0);
+
+  // Atalhos de recurso fora do plano da comunidade somem (a tela em si mostra o estado calmo)
+  const { isLockedFor } = useEntitlements();
+  const titheLocked = isLockedFor('tithe', user?.communityId);
+  const availabilityLocked = isLockedFor('schedules', user?.communityId);
+  const catechesisLocked = isLockedFor('catechesis', user?.communityId) && catechesisClassCount === 0;
+  // Grátis: a equipe avisa que um horário fixo (missa, confissão) não vai acontecer
+  const canSuspendSchedules = canManageScheduleCancellations(user?.role);
 
   // Revalida os vínculos ao abrir o perfil (cobre revogações feitas pela web)
   useFocusEffect(
@@ -252,15 +262,29 @@ export default function ProfileScreen() {
           <Text style={styles.avatarHint}>Toque para trocar a foto</Text>
           <Text style={styles.userName}>{user?.name || 'Usuário'}</Text>
           <Text style={styles.userEmail}>{displayEmail(user?.email)}</Text>
-          <TouchableOpacity style={styles.headerAction} onPress={() => router.push('/member-availability')}>
-            <Text style={styles.headerActionText}>Minha disponibilidade</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.headerAction, { marginTop: 8 }]}
-            onPress={() => router.push('/catechesis' as never)}
-          >
-            <Text style={styles.headerActionText}>Catequese</Text>
-          </TouchableOpacity>
+          {!availabilityLocked && (
+            <TouchableOpacity style={styles.headerAction} onPress={() => router.push('/member-availability')}>
+              <Text style={styles.headerActionText}>Minha disponibilidade</Text>
+            </TouchableOpacity>
+          )}
+          {!catechesisLocked && (
+            <TouchableOpacity
+              style={[styles.headerAction, { marginTop: 8 }]}
+              onPress={() => router.push('/catechesis' as never)}
+            >
+              <Text style={styles.headerActionText}>Catequese</Text>
+            </TouchableOpacity>
+          )}
+          {canSuspendSchedules && (
+            <TouchableOpacity
+              style={[styles.headerAction, { marginTop: 8 }]}
+              onPress={() => router.push('/horarios-da-semana' as never)}
+              accessibilityRole="button"
+              accessibilityLabel="Horários da semana. Avise quando uma missa ou um atendimento não vai acontecer"
+            >
+              <Text style={styles.headerActionText}>Horários da semana</Text>
+            </TouchableOpacity>
+          )}
         </View>
 
         <View style={styles.section}>
@@ -320,14 +344,18 @@ export default function ProfileScreen() {
                 </TouchableOpacity>
               </>
             ) : null}
-            <View style={styles.divider} />
-            <TouchableOpacity style={styles.infoRow} onPress={() => router.push('/tithe' as never)}>
-              <Text style={styles.infoLabel}>Dízimo</Text>
-              <View style={styles.infoValueLink}>
-                <Text style={[styles.infoValue, { color: colors.primary }]}>Dízimo e ofertas pelo Pix</Text>
-                <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />
-              </View>
-            </TouchableOpacity>
+            {!titheLocked && (
+              <>
+                <View style={styles.divider} />
+                <TouchableOpacity style={styles.infoRow} onPress={() => router.push('/tithe' as never)}>
+                  <Text style={styles.infoLabel}>Dízimo</Text>
+                  <View style={styles.infoValueLink}>
+                    <Text style={[styles.infoValue, { color: colors.primary }]}>Dízimo e ofertas pelo Pix</Text>
+                    <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />
+                  </View>
+                </TouchableOpacity>
+              </>
+            )}
             <View style={styles.divider} />
             {/* Governança de acesso (D4.7): 2FA e dispositivos conhecidos */}
             <TouchableOpacity style={styles.infoRow} onPress={() => router.push('/security' as never)}>

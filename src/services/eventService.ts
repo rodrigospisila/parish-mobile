@@ -103,6 +103,8 @@ export interface Event {
   /** Ocorrência fixa suspensa nesta data ("não haverá") */
   cancelled?: boolean;
   cancelReason?: string | null;
+  /** Ocorrência fixa acontecendo agora (servidor novo; ausente = false) */
+  happeningNow?: boolean;
 }
 
 /**
@@ -273,6 +275,7 @@ export const getFixedOccurrences = async (
       fixedType: occ.type,
       cancelled: occ.cancelled === true,
       cancelReason: occ.cancelReason ?? null,
+      happeningNow: occ.happeningNow === true && occ.cancelled !== true,
     }));
   } catch (error) {
     console.error('Erro ao carregar agenda fixa:', error);

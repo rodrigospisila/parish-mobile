@@ -12,7 +12,7 @@ export type PlanErrorCode = 'PLAN_REQUIRED' | 'PLAN_SCOPE' | 'PLAN_MEMBER_LIMIT'
 
 export const PLAN_MESSAGES: Record<PlanErrorCode, string> = {
   PLAN_REQUIRED:
-    'Este recurso não faz parte do plano da comunidade. Calendário, mapa e liturgia continuam liberados; para ativar, fale com a coordenação da paróquia.',
+    'Este recurso não está ativo nesta comunidade. Horários de missa e de confissão, mapa e liturgia continuam liberados; para ativar, fale com a coordenação da paróquia.',
   PLAN_SCOPE: 'Esta comunidade está fora do seu acesso.',
   PLAN_MEMBER_LIMIT: 'A comunidade atingiu o limite de membros do plano. Fale com a coordenação da paróquia.',
 };

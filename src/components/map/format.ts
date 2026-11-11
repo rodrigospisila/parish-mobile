@@ -1,6 +1,7 @@
 import { format, parseISO } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import type { MapCommunity, PublicMass } from '../../services/publicMapService';
+import { aoVivo, ehAtendimento, horaCurta, horaDe } from '../../utils/aoVivo';
 
 export const TYPE_LABELS: Record<string, string> = {
   MASS: 'Missa',
@@ -55,19 +56,58 @@ export function formatMassTime(start: string, now: Date = new Date()): string {
 /** Ocorrência suspensa ("não haverá") — campo ausente em servidor antigo. */
 export const isCancelled = (m: { cancelled?: boolean | null }) => m.cancelled === true;
 
+/**
+ * Acontecendo agora — decidido pelo servidor (`happeningNow`, no fuso da
+ * comunidade). Servidor antigo não manda o campo: sempre false, e a tela fica
+ * como era.
+ */
+export const isHappeningNow = (m: { happeningNow?: boolean | null; cancelled?: boolean | null }) => aoVivo(m);
+
+/**
+ * Hora do fim para mostrar ao fiel ("19:00–20:00"), ou null. Aparece quando a
+ * equipe informou o fim (`endTime`), quando é um atendimento com janela
+ * (confissão, adoração) ou quando está acontecendo agora. Missa comum sem fim
+ * informado segue só com o início — o `end` dela é apenas a duração padrão.
+ */
+export function massEndTime(m: PublicMass): string | null {
+  const inicio = horaDe(m.start);
+  const informado = horaCurta(m.endTime);
+  if (informado && informado > inicio) return informado;
+  if (!m.end || m.source === 'event') return null;
+  if (!ehAtendimento(m.type) && !isHappeningNow(m)) return null;
+  // Só no mesmo dia (fim depois da meia-noite não vira "23:30–00:15")
+  if (m.end.slice(0, 10) !== m.start.slice(0, 10)) return null;
+  const fim = horaDe(m.end);
+  return fim && fim > inicio ? fim : null;
+}
+
+/** "Hoje, 19:00" ou, com fim conhecido, "Hoje, 19:00–20:00". */
+export function formatMassRange(m: PublicMass, now: Date = new Date()): string {
+  const fim = massEndTime(m);
+  return fim ? `${formatMassTime(m.start, now)}–${fim}` : formatMassTime(m.start, now);
+}
+
+/** Texto do selo: "Acontecendo agora" + " · até 20:00" quando há fim. */
+export function happeningNowLabel(m: PublicMass): string {
+  const fim = massEndTime(m);
+  return fim ? `Acontecendo agora · até ${fim}` : 'Acontecendo agora';
+}
+
 /** Próxima ocorrência que vai mesmo acontecer (pula as suspensas). */
 export const firstActiveMass = (list: PublicMass[]): PublicMass | undefined => list.find((m) => !isCancelled(m));
 
 /**
  * Celebração do dia pesquisado (círculo verde): no filtro "Domingo", o domingo;
  * em "Hoje" e "Próximos dias", hoje — desde que ainda não tenha passado
- * (começou há até 30 min ainda conta). Suspensa nunca conta.
+ * (começou há até 30 min ainda conta; em andamento, segundo o servidor, conta
+ * até o fim). Suspensa nunca conta.
  */
 export function isOnSearchedDay(m: PublicMass, day: SearchedDay = 'all', now: Date = new Date()): boolean {
   if (isCancelled(m)) return false;
   const d = parseLocal(m.start);
   if (!d) return false;
   if (day === 'sunday') return d.getDay() === 0;
+  if (isHappeningNow(m)) return true;
   if (m.start.slice(0, 10) !== format(now, 'yyyy-MM-dd')) return false;
   return d.getTime() >= now.getTime() - STARTED_TOLERANCE_MS;
 }

@@ -14,6 +14,8 @@ import { useFocusEffect } from '@react-navigation/native';
 import { FontAwesome5 } from '@expo/vector-icons';
 import { useColors } from '../src/context/ThemeContext';
 import { useCommunity } from '../src/context/CommunityContext';
+import { usePlanLock } from '../src/context/EntitlementsContext';
+import { PlanLockedScreen } from '../src/components/PlanLockedState';
 import {
   ClergyMessage,
   getClergyMessages,
@@ -31,6 +33,12 @@ export default function ClergyMessagesScreen() {
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  // Palavra Pastoral fora do plano da comunidade: estado calmo, não lista vazia
+  const reloadOnRecheck = React.useRef<() => void>(() => undefined);
+  const { locked: planLocked, track: trackPlan } = usePlanLock('clergy-messages', {
+    communityId: activeCommunityId,
+    onRecheck: () => reloadOnRecheck.current(),
+  });
 
   const load = useCallback(
     async (refresh = false) => {
@@ -38,21 +46,26 @@ export default function ClergyMessagesScreen() {
       try {
         const { messages: items } = await getClergyMessages(50, activeCommunityId);
         setMessages(items);
+        trackPlan(null);
       } catch (error) {
-        console.error('Erro ao carregar a Palavra Pastoral:', error);
+        if (trackPlan(error)) setMessages([]);
+        else console.error('Erro ao carregar a Palavra Pastoral:', error);
       } finally {
         setIsLoading(false);
         setIsRefreshing(false);
       }
     },
-    [activeCommunityId],
+    [activeCommunityId, trackPlan],
   );
+  reloadOnRecheck.current = () => void load();
 
   useFocusEffect(
     useCallback(() => {
       void load();
     }, [load]),
   );
+
+  if (planLocked) return <PlanLockedScreen title="Palavra Pastoral" />;
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>

@@ -33,16 +33,37 @@ import { readCache, writeCache } from '../utils/offlineCache';
  * decide é o backend). O app nunca mostra preço nem cobrança (regra das lojas).
  */
 
-/** Chaves dos recursos pagos (parish-backend src/modules/plans/plan-rules.ts) */
-export type PaidFeature =
-  | 'pastorals'
-  | 'schedules'
-  | 'swaps'
-  | 'catechesis'
-  | 'formation'
-  | 'rooms'
-  | 'visitation'
-  | 'documents';
+/**
+ * Chaves dos recursos pagos, na ordem do backend (parish-backend
+ * src/modules/plans/plan-rules.ts, PAID_FEATURES). No plano grátis ficam só
+ * FREE_FEATURES: horários fixos (missa, confissão…), "não haverá", mapa,
+ * localização, liturgia, santos e o cadastro de membros.
+ */
+export const PAID_FEATURES = [
+  'pastorals',
+  'schedules',
+  'swaps',
+  'catechesis',
+  'formation',
+  'rooms',
+  'visitation',
+  'documents',
+  'events',
+  'news',
+  'prayer-requests',
+  'clergy-messages',
+  'planning',
+  'sacraments',
+  'sacrament-processes',
+  'finance',
+  'tithe',
+  'dashboard',
+] as const;
+
+export type PaidFeature = (typeof PAID_FEATURES)[number];
+
+/** Sempre liberados (referência; o que não é pago continua grátis). */
+export const FREE_FEATURES = ['members', 'mass-schedules', 'masses', 'map', 'location', 'liturgy', 'saints'] as const;
 
 /** Cache dos entitlements e validade de um 403 guardado */
 const STALE_MS = 10 * 60 * 1000;

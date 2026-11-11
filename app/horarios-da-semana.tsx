@@ -35,6 +35,7 @@ import {
 } from '../src/services/massScheduleService';
 import { parseLocal, typeLabel } from '../src/components/map/format';
 import { chaveDaquiA } from '../src/utils/suspensoes';
+import { aoVivo, intervalo } from '../src/utils/aoVivo';
 
 /**
  * Horários da semana (gestão pelo celular).
@@ -58,7 +59,8 @@ const TYPE_ICONS: Record<string, string> = {
 };
 
 const dayKeyOf = (o: FixedOccurrence) => o.start.slice(0, 10);
-const hourOf = (o: FixedOccurrence) => o.start.slice(11, 16);
+/** "19:00" ou, quando a equipe informou o fim (ex.: atendimento de confissão), "19:00–20:00". */
+const hourOf = (o: FixedOccurrence) => intervalo(o.start.slice(11, 16), o.endTime);
 
 /** "Hoje", "Amanhã", "Quinta-feira, 26/09". */
 function dayTitle(key: string): string {
@@ -321,6 +323,8 @@ export default function WeeklySchedulesScreen() {
               </Text>
               {!!who && <Text style={styles.whoText}>{who}</Text>}
             </>
+          ) : aoVivo(o) ? (
+            <Text style={[styles.pastText, { color: colors.success, fontWeight: '700' }]}>Acontecendo agora</Text>
           ) : past ? (
             <Text style={styles.pastText}>Já passou</Text>
           ) : null}

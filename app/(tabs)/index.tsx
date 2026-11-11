@@ -36,6 +36,7 @@ import {
 import { CATECHESIS_CONSENT_TEXT } from '../../src/constants/catechesisConsent';
 import { useColors } from '../../src/context/ThemeContext';
 import { useNotifications } from '../../src/context/NotificationContext';
+import { useEntitlements, usePlanLock } from '../../src/context/EntitlementsContext';
 import { isForegroundRescheduleDue, markNotificationsRescheduled } from '../../src/services/notificationService';
 import UserAvatar from '../../src/components/UserAvatar';
 import { getDisabledMobileFeatures } from '../../src/services/settingsService';
@@ -48,7 +49,11 @@ import {
   getFavoriteMassSchedules,
   addFavoriteMassSchedule,
   removeFavoriteMassSchedule,
+  getFixedOccurrencesBetween,
+  canManageScheduleCancellations,
+  FixedOccurrence,
 } from '../../src/services/massScheduleService';
+import { aoVivo, horaDe, intervalo } from '../../src/utils/aoVivo';
 import { MassSchedule } from '../../src/types';
 import {
   chaveDaquiA,
@@ -260,6 +265,33 @@ export default function HomeScreen() {
   const [clergyError, setClergyError] = useState(false);
   const [clergyReloadKey, setClergyReloadKey] = useState(0);
 
+  // Confissão (horário fixo, grátis): ao lado das missas, com filtro próprio
+  const [confessionSchedules, setConfessionSchedules] = useState<MassSchedule[]>([]);
+  const [fixedTab, setFixedTab] = useState<'MASS' | 'CONFESSION'>('MASS');
+  // Ocorrências de HOJE em andamento (servidor novo: `happeningNow`), por horário
+  const [liveToday, setLiveToday] = useState<Record<string, FixedOccurrence>>({});
+  const [massReloadKey, setMassReloadKey] = useState(0);
+
+  /**
+   * Recursos que dependem do plano da comunidade. Bloqueado = o bloco SOME do
+   * Início (ou vira estado calmo) — nunca "verifique sua conexão". Horários
+   * fixos (missa, confissão), mapa e liturgia não passam por aqui: são grátis.
+   * Servidor atual (sem bloqueio) nunca responde PLAN_REQUIRED: nada muda.
+   */
+  const { isLockedFor } = useEntitlements();
+  const { locked: eventsLocked, track: trackEventsPlan } = usePlanLock('events', {
+    communityId: activeCommunityId,
+    onRecheck: () => setUpcomingReloadKey((key) => key + 1),
+  });
+  const { locked: clergyLocked, track: trackClergyPlan } = usePlanLock('clergy-messages', {
+    communityId: activeCommunityId,
+    onRecheck: () => setClergyReloadKey((key) => key + 1),
+  });
+  const titheLocked = isLockedFor('tithe', activeCommunityId);
+  const prayerLocked = isLockedFor('prayer-requests', activeCommunityId);
+  const catechesisLocked = isLockedFor('catechesis', activeCommunityId);
+  const dashboardLocked = isLockedFor('dashboard', activeCommunityId);
+
   useEffect(() => {
     const loadClergyMessages = async () => {
       setIsLoadingClergy(true);
@@ -268,10 +300,14 @@ export default function HomeScreen() {
         const { messages, fromCache } = await getClergyMessages(5, activeCommunityId);
         setClergyMessages(messages.slice(0, 3));
         setClergyFromCache(fromCache);
+        trackClergyPlan(null);
       } catch (error) {
-        console.error('Erro ao carregar Palavra do Pastor:', error);
         setClergyMessages([]);
-        setClergyError(true);
+        // Palavra Pastoral fora do plano da comunidade: o bloco some, sem erro
+        if (!trackClergyPlan(error)) {
+          console.error('Erro ao carregar Palavra do Pastor:', error);
+          setClergyError(true);
+        }
       } finally {
         setIsLoadingClergy(false);
       }
@@ -279,7 +315,7 @@ export default function HomeScreen() {
     loadClergyMessages();
     // Recarrega ao logar (user.id) E ao trocar de comunidade (communityId),
     // senão a Palavra Pastoral fica presa na comunidade anterior.
-  }, [user?.id, user?.communityId, clergyReloadKey]);
+  }, [user?.id, user?.communityId, activeCommunityId, clergyReloadKey]);
 
   useEffect(() => {
     if (!activeCommunityId) {
@@ -297,9 +333,17 @@ export default function HomeScreen() {
         const events = await getUpcomingEvents(activeCommunityId, 10);
         setUpcomingEvents(events.slice(0, 3));
         setNextMass(events.find((event) => event.type === 'MASS') || null);
+        trackEventsPlan(null);
       } catch (error) {
-        console.error('Erro ao carregar próximos eventos:', error);
-        setUpcomingEventsError(true);
+        // Sem dados novos, nada de evento antigo (de outra comunidade) na tela
+        setUpcomingEvents([]);
+        setNextMass(null);
+        // Eventos fora do plano da comunidade: "Próxima celebração" segue só
+        // com os horários fixos e o bloco "Próximos eventos" some — sem erro
+        if (!trackEventsPlan(error)) {
+          console.error('Erro ao carregar próximos eventos:', error);
+          setUpcomingEventsError(true);
+        }
       } finally {
         setIsLoading(false);
         setIsLoadingUpcoming(false);
@@ -309,34 +353,88 @@ export default function HomeScreen() {
     loadUpcomingEvents();
   }, [activeCommunityId, upcomingReloadKey]);
 
-  useEffect(() => {
-    if (!activeCommunityId) {
-      return;
-    }
+  // Horários fixos (grátis): missas + confissões, favoritos e o que está
+  // acontecendo agora. Cada consulta por conta própria — favoritos ou "agora"
+  // com erro não derrubam a lista.
+  const fixedCommunityRef = useRef<string | null>(null);
+  fixedCommunityRef.current = activeCommunityId ?? null;
+  const fixedLoadedAt = useRef(0);
 
-    const loadMassSchedules = async () => {
-      setIsLoadingMassSchedules(true);
-      setMassSchedulesError(false);
+  const loadLiveToday = useCallback(async (communityId: string) => {
+    try {
+      const hoje = chaveDoDia(new Date());
+      const occurrences = await getFixedOccurrencesBetween(communityId, hoje, hoje);
+      if (fixedCommunityRef.current !== communityId) return;
+      const live: Record<string, FixedOccurrence> = {};
+      occurrences.filter(aoVivo).forEach((occurrence) => {
+        live[occurrence.massScheduleId] = occurrence;
+      });
+      setLiveToday(live);
+    } catch {
+      // sem a consulta, só não aparece o selo "Acontecendo agora"
+    }
+  }, []);
+
+  const loadMassSchedules = useCallback(
+    async (communityId: string, silent = false) => {
+      fixedLoadedAt.current = Date.now();
+      if (!silent) {
+        setIsLoadingMassSchedules(true);
+        setMassSchedulesError(false);
+      }
+      void loadLiveToday(communityId);
       try {
-        const schedules = await getMassSchedules(activeCommunityId);
-        const massOnly = schedules.filter((schedule) => schedule.type === 'MASS');
-        setMassSchedules(massOnly);
+        const schedules = await getMassSchedules(communityId);
+        if (fixedCommunityRef.current !== communityId) return;
+        setMassSchedules(schedules.filter((schedule) => schedule.type === 'MASS'));
+        setConfessionSchedules(schedules.filter((schedule) => schedule.type === 'CONFESSION'));
+        setMassSchedulesError(false);
         try {
           const favorites = await getFavoriteMassSchedules();
-          setFavoriteMassScheduleIds(favorites.map((favorite) => favorite.id));
+          if (fixedCommunityRef.current === communityId) {
+            setFavoriteMassScheduleIds(favorites.map((favorite) => favorite.id));
+          }
         } catch (error) {
-          console.error('Erro ao carregar favoritos das missas fixas:', error);
+          console.error('Erro ao carregar favoritos dos horários fixos:', error);
         }
       } catch (error) {
         console.error('Erro ao carregar horários fixos:', error);
-        setMassSchedulesError(true);
+        // Atualização silenciosa com erro: fica o que já estava na tela
+        if (!silent && fixedCommunityRef.current === communityId) setMassSchedulesError(true);
       } finally {
-        setIsLoadingMassSchedules(false);
+        if (!silent && fixedCommunityRef.current === communityId) setIsLoadingMassSchedules(false);
       }
-    };
+    },
+    [loadLiveToday],
+  );
 
-    loadMassSchedules();
-  }, [activeCommunityId]);
+  useEffect(() => {
+    setLiveToday({});
+    if (!activeCommunityId) {
+      return;
+    }
+    void loadMassSchedules(activeCommunityId);
+  }, [activeCommunityId, massReloadKey, loadMassSchedules]);
+
+  // De volta ao Início (ou ao app): renova o "Acontecendo agora" e as
+  // suspensões sem piscar a tela — no máximo 1 vez por minuto
+  const refreshFixedIfStale = useCallback(() => {
+    const communityId = fixedCommunityRef.current;
+    if (!communityId || Date.now() - fixedLoadedAt.current < 60_000) return;
+    void loadMassSchedules(communityId, true);
+  }, [loadMassSchedules]);
+  useFocusEffect(
+    useCallback(() => {
+      refreshFixedIfStale();
+    }, [refreshFixedIfStale]),
+  );
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state === 'active') refreshFixedIfStale();
+    });
+    return () => subscription.remove();
+  }, [refreshFixedIfStale]);
+
   useEffect(() => {
     const loadLiturgy = async () => {
       setIsLoadingLiturgy(true);
@@ -395,8 +493,23 @@ export default function HomeScreen() {
   };
 
   const favoriteMassScheduleSet = new Set(favoriteMassScheduleIds);
+  // Aba em uso: sem missa cadastrada, a comunidade que só tem confissão abre nela
+  const activeFixedTab: 'MASS' | 'CONFESSION' =
+    confessionSchedules.length === 0 ? 'MASS' : massSchedules.length === 0 ? 'CONFESSION' : fixedTab;
+  const visibleFixedSchedules = activeFixedTab === 'CONFESSION' ? confessionSchedules : massSchedules;
   const allMassSchedulesFavorited =
-    massSchedules.length > 0 && massSchedules.every((schedule) => favoriteMassScheduleSet.has(schedule.id));
+    visibleFixedSchedules.length > 0 &&
+    visibleFixedSchedules.every((schedule) => favoriteMassScheduleSet.has(schedule.id));
+
+  /** Acontecendo agora? O servidor decide (campo do horário ou da ocorrência de hoje). */
+  const isLiveNow = (schedule: MassSchedule) => schedule.happeningNow === true || !!liveToday[schedule.id];
+  /** Fim conhecido do horário: o informado pela equipe ou, em andamento, o da ocorrência. */
+  const liveEndOf = (schedule: MassSchedule) =>
+    intervalo(schedule.time, schedule.endTime) !== schedule.time
+      ? String(schedule.endTime).slice(0, 5)
+      : horaDe(liveToday[schedule.id]?.end);
+  const fixedTitleOf = (schedule: MassSchedule) =>
+    schedule.notes || (schedule.type === 'CONFESSION' ? 'Confissão' : 'Santa Missa');
 
   const handleToggleMassScheduleFavorite = async (schedule: MassSchedule) => {
     const isFavorite = favoriteMassScheduleSet.has(schedule.id);
@@ -420,14 +533,14 @@ export default function HomeScreen() {
   };
 
   const handleToggleAllMassSchedules = async () => {
-    if (massSchedules.length === 0) {
+    if (visibleFixedSchedules.length === 0) {
       return;
     }
 
     const previousFavorites = favoriteMassScheduleIds;
 
     if (allMassSchedulesFavorited) {
-      const idsToRemove = new Set(massSchedules.map((schedule) => schedule.id));
+      const idsToRemove = new Set(visibleFixedSchedules.map((schedule) => schedule.id));
       setFavoriteMassScheduleIds(previousFavorites.filter((id) => !idsToRemove.has(id)));
 
       try {
@@ -442,7 +555,7 @@ export default function HomeScreen() {
       return;
     }
 
-    const idsToAdd = massSchedules
+    const idsToAdd = visibleFixedSchedules
       .filter((schedule) => !favoriteMassScheduleSet.has(schedule.id))
       .map((schedule) => schedule.id);
 
@@ -453,7 +566,7 @@ export default function HomeScreen() {
       await rescheduleEventNotifications();
     } catch (error) {
       setFavoriteMassScheduleIds(previousFavorites);
-      Alert.alert('Erro', 'Não foi possível favoritar todas as missas.');
+      Alert.alert('Erro', 'Não foi possível favoritar todos os horários.');
     }
   };
 
@@ -490,7 +603,34 @@ export default function HomeScreen() {
   })();
 
   // Missa fixa de hoje suspensa ("não haverá"): aviso bem visível na Próxima celebração
-  const todaySuspended = suspensasDeHoje(massSchedules, favoriteMassScheduleSet, new Date());
+  const todaySuspended = suspensasDeHoje(
+    [...massSchedules, ...confessionSchedules],
+    favoriteMassScheduleSet,
+    new Date(),
+  );
+
+  // Missa/confissão em andamento agora (servidor novo): destaque no topo
+  const liveNow = [...massSchedules, ...confessionSchedules].filter(isLiveNow);
+
+  const renderLiveNow = () => {
+    if (liveNow.length === 0) return null;
+    return (
+      <View style={styles.liveBox} accessible accessibilityRole="text">
+        <FontAwesome5 name="dot-circle" size={15} color={colors.success} style={{ marginTop: 3 }} />
+        <View style={{ flex: 1, gap: 3 }}>
+          <Text style={styles.liveBoxKicker}>Acontecendo agora</Text>
+          {liveNow.map((schedule) => {
+            const fim = liveEndOf(schedule);
+            return (
+              <Text key={schedule.id} style={styles.liveBoxText}>
+                {fixedTitleOf(schedule)} · {fim ? `${schedule.time}–${fim}` : `desde ${schedule.time}`}
+              </Text>
+            );
+          })}
+        </View>
+      </View>
+    );
+  };
 
   const renderSuspendedToday = () => {
     if (todaySuspended.length === 0) return null;
@@ -502,7 +642,10 @@ export default function HomeScreen() {
             const motivo = motivoCurto(reason);
             return (
               <Text key={schedule.id} style={styles.suspendedText}>
-                Hoje não haverá a Missa das {schedule.time}
+                {schedule.type === 'CONFESSION'
+                  ? 'Hoje não haverá o atendimento de Confissão das '
+                  : 'Hoje não haverá a Missa das '}
+                {schedule.time}
                 {schedule.notes ? ` (${schedule.notes})` : ''}
                 {motivo ? ` — ${motivo}` : ''}
               </Text>
@@ -519,11 +662,22 @@ export default function HomeScreen() {
     }
 
     if (!nextCelebration) {
-      if (upcomingEventsError) {
-        return <Text style={styles.errorText}>Não foi possível carregar os eventos. Verifique sua conexão.</Text>;
+      // Só falha DOS HORÁRIOS vira aviso aqui (com "tentar de novo"). Eventos
+      // fora do plano ou com erro não tiram a próxima celebração do fiel.
+      if (massSchedulesError) {
+        return (
+          <TouchableOpacity
+            onPress={() => setMassReloadKey((key) => key + 1)}
+            accessibilityRole="button"
+            accessibilityLabel="Tentar carregar os horários de novo"
+          >
+            <Text style={styles.errorText}>Não foi possível carregar os horários — toque para tentar de novo.</Text>
+          </TouchableOpacity>
+        );
       }
       return (
         <>
+          {renderLiveNow()}
           {renderSuspendedToday()}
           <Text style={styles.infoText}>Nenhuma missa programada para sua comunidade.</Text>
         </>
@@ -538,6 +692,7 @@ export default function HomeScreen() {
 
     return (
       <>
+      {renderLiveNow()}
       {renderSuspendedToday()}
       <TouchableOpacity
         style={styles.nextMassCard}
@@ -592,17 +747,50 @@ export default function HomeScreen() {
     }
 
     if (massSchedulesError) {
-      return <Text style={styles.errorText}>Não foi possível carregar os horários. Verifique sua conexão.</Text>;
+      return (
+        <TouchableOpacity
+          onPress={() => setMassReloadKey((key) => key + 1)}
+          accessibilityRole="button"
+          accessibilityLabel="Tentar carregar os horários de novo"
+        >
+          <Text style={styles.errorText}>Não foi possível carregar os horários — toque para tentar de novo.</Text>
+        </TouchableOpacity>
+      );
     }
 
-    if (massSchedules.length === 0) {
+    if (massSchedules.length === 0 && confessionSchedules.length === 0) {
       return <Text style={styles.infoText}>Nenhum horário fixo cadastrado.</Text>;
     }
 
     return (
       <View style={styles.massScheduleList}>
-        {massSchedules.map((schedule) => {
+        {confessionSchedules.length > 0 && massSchedules.length > 0 ? (
+          <View style={styles.fixedTabs} accessibilityRole="tablist">
+            {([
+              { key: 'MASS', label: 'Missas' },
+              { key: 'CONFESSION', label: 'Confissões' },
+            ] as const).map((tab) => {
+              const active = activeFixedTab === tab.key;
+              const hasLive = (tab.key === 'CONFESSION' ? confessionSchedules : massSchedules).some(isLiveNow);
+              return (
+                <Pressable
+                  key={tab.key}
+                  style={[styles.fixedTab, active && styles.fixedTabActive]}
+                  onPress={() => setFixedTab(tab.key)}
+                  accessibilityRole="tab"
+                  accessibilityState={{ selected: active }}
+                  accessibilityLabel={hasLive ? `${tab.label}, acontecendo agora` : tab.label}
+                >
+                  {hasLive ? <View style={styles.fixedTabDot} /> : null}
+                  <Text style={[styles.fixedTabText, active && styles.fixedTabTextActive]}>{tab.label}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        ) : null}
+        {visibleFixedSchedules.map((schedule) => {
           const isFavorite = favoriteMassScheduleSet.has(schedule.id);
+          const live = isLiveNow(schedule);
           return (
             <View key={schedule.id} style={[styles.massItem, isFavorite && styles.massItemFav]}>
               <View style={styles.massTimeBlock}>
@@ -611,12 +799,23 @@ export default function HomeScreen() {
               </View>
               <View style={styles.massItemInfo}>
                 <Text style={styles.massItemTitle} numberOfLines={2}>
-                  {schedule.notes || 'Santa Missa'}
+                  {fixedTitleOf(schedule)}
                 </Text>
                 <Text style={styles.massItemDay}>
                   {descreverRecorrencia(schedule)}
+                  {intervalo(schedule.time, schedule.endTime) !== schedule.time
+                    ? ` · ${intervalo(schedule.time, schedule.endTime)}`
+                    : ''}
                   {ehMensal(schedule) ? ' · uma vez por mês' : ''}
                 </Text>
+                {live ? (
+                  <View style={styles.liveBadge} accessible accessibilityLabel="Acontecendo agora">
+                    <View style={styles.liveDot} />
+                    <Text style={styles.liveBadgeText}>
+                      Acontecendo agora{liveEndOf(schedule) ? ` · até ${liveEndOf(schedule)}` : ''}
+                    </Text>
+                  </View>
+                ) : null}
                 {schedule.isSpecial && schedule.specialDate ? (
                   <Text style={styles.massScheduleSpecial}>
                     Especial: {formatarDataCivil(schedule.specialDate)}
@@ -1245,8 +1444,30 @@ export default function HomeScreen() {
         </TouchableOpacity>
         )}
 
+        {/* HORÁRIOS DA SEMANA — grátis: a equipe avisa que um horário (missa, confissão) não vai acontecer */}
+        {canManageScheduleCancellations(user?.role) && (
+          <TouchableOpacity
+            style={styles.nearbyBanner}
+            activeOpacity={0.9}
+            onPress={() => router.push('/horarios-da-semana' as never)}
+            accessibilityRole="button"
+            accessibilityLabel="Horários da semana. Avise quando uma missa ou um atendimento não vai acontecer"
+          >
+            <View style={styles.nearbyIcon}>
+              <FontAwesome5 name="calendar-times" size={18} color={colors.primary} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.nearbyTitle}>Horários da semana</Text>
+              <Text style={styles.nearbySub} numberOfLines={1}>
+                Avise quando uma missa ou confissão não vai acontecer
+              </Text>
+            </View>
+            <FontAwesome5 name="chevron-right" size={14} color={colors.textTertiary} />
+          </TouchableOpacity>
+        )}
+
         {/* PENDÊNCIAS DA COORDENAÇÃO (Onda 4) */}
-        {overview && overview.total > 0 && (
+        {overview && overview.total > 0 && !dashboardLocked && (
           <View style={styles.pendCard}>
             <View style={styles.pendHead}>
               <Text style={styles.pendTitle}>Pendências da coordenação</Text>
@@ -1292,7 +1513,7 @@ export default function HomeScreen() {
         )}
 
         {/* DÍZIMO E OFERTAS */}
-        {feat('tithe') && (
+        {feat('tithe') && !titheLocked && (
         <TouchableOpacity
           style={styles.nearbyBanner}
           activeOpacity={0.9}
@@ -1312,7 +1533,7 @@ export default function HomeScreen() {
         )}
 
         {/* MURAL DE ORAÇÃO */}
-        {feat('prayer-wall') && (
+        {feat('prayer-wall') && !prayerLocked && (
         <TouchableOpacity
           style={styles.nearbyBanner}
           activeOpacity={0.9}
@@ -1332,7 +1553,7 @@ export default function HomeScreen() {
         )}
 
         {/* CATEQUESE — inscrição aberta a todos; turmas/chamada para catequistas */}
-        {feat('catechesis') && (
+        {feat('catechesis') && (!catechesisLocked || catechesisClassCount > 0 || consentPendingCount > 0) && (
           <TouchableOpacity
             style={styles.nearbyBanner}
             activeOpacity={0.9}
@@ -1369,7 +1590,7 @@ export default function HomeScreen() {
         )}
 
         {/* PALAVRA PASTORAL */}
-        {feat('pastoral-word') && (
+        {feat('pastoral-word') && !clergyLocked && (
         <View style={styles.section}>
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
             <Text style={styles.sectionTitle}>📜 Palavra Pastoral</Text>
@@ -1382,7 +1603,7 @@ export default function HomeScreen() {
         )}
 
         {/* PRÓXIMOS EVENTOS */}
-        {feat('upcoming-events') && (
+        {feat('upcoming-events') && !eventsLocked && (
         <View style={styles.section}>
           <View style={styles.sectionHeaderRow}>
             <Text style={styles.sectionTitle}>Próximos eventos</Text>
@@ -1398,8 +1619,14 @@ export default function HomeScreen() {
         {feat('mass-schedules') && (
         <View style={styles.section}>
           <View style={styles.sectionHeaderRow}>
-            <Text style={styles.sectionTitle}>Missas fixas</Text>
-            {massSchedules.length > 0 ? (
+            <Text style={styles.sectionTitle}>
+              {confessionSchedules.length > 0
+                ? massSchedules.length > 0
+                  ? 'Missas e confissões'
+                  : 'Confissões'
+                : 'Missas fixas'}
+            </Text>
+            {visibleFixedSchedules.length > 0 ? (
               <TouchableOpacity onPress={handleToggleAllMassSchedules}>
                 <Text style={styles.sectionLink}>
                   {allMassSchedulesFavorited ? 'Remover todas' : '★ Favoritar todas'}
@@ -1927,6 +2154,48 @@ const createStyles = (colors: ReturnType<typeof useColors>) =>
       borderColor: colors.error + '55',
     },
     suspendedText: { fontSize: 15, fontWeight: '700', color: colors.text, lineHeight: 21 },
+    // ===== ACONTECENDO AGORA (verde + texto) =====
+    liveBox: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      gap: 10,
+      padding: 12,
+      marginBottom: 10,
+      borderRadius: 12,
+      backgroundColor: colors.success + '14',
+      borderWidth: 1,
+      borderColor: colors.success + '55',
+    },
+    liveBoxKicker: { fontSize: 12.5, fontWeight: '800', color: colors.success, textTransform: 'uppercase' },
+    liveBoxText: { fontSize: 15, fontWeight: '700', color: colors.text, lineHeight: 21 },
+    liveBadge: {
+      alignSelf: 'flex-start',
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      marginTop: 5,
+      paddingHorizontal: 8,
+      paddingVertical: 3,
+      borderRadius: 6,
+      backgroundColor: colors.success + '1F',
+    },
+    liveDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: colors.success },
+    liveBadgeText: { fontSize: 12.5, fontWeight: '800', color: colors.success },
+    fixedTabs: { flexDirection: 'row', gap: 8, marginBottom: 10 },
+    fixedTab: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      paddingHorizontal: 14,
+      paddingVertical: 7,
+      borderRadius: 999,
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    fixedTabActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+    fixedTabDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: colors.success },
+    fixedTabText: { fontSize: 13.5, fontWeight: '700', color: colors.textSecondary },
+    fixedTabTextActive: { color: '#fff' },
     massScheduleItem: {
       flexDirection: 'row',
       alignItems: 'center',

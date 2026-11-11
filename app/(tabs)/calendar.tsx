@@ -20,6 +20,9 @@ import { Calendar, DateData, LocaleConfig, Timeline } from 'react-native-calenda
 import * as ExpoCalendar from 'expo-calendar';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
+import { usePlanLock } from '../../src/context/EntitlementsContext';
+import { isPlanRequiredError } from '../../src/utils/planErrors';
+import { horaDe } from '../../src/utils/aoVivo';
 import { parseISO, format, differenceInCalendarDays, addDays, isToday, isTomorrow, startOfDay } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { useAuth } from '../../src/context/AuthContext';
@@ -208,6 +211,16 @@ export default function CalendarScreen() {
   const { activeCommunityId } = useCommunity();
   const communityId = activeCommunityId ?? user?.communityId;
 
+  // Eventos são do plano da comunidade; a agenda fixa (missa, confissão…) é
+  // grátis e aparece sempre. Bloqueado = aviso discreto, sem Alert de erro.
+  const reloadOnRecheck = React.useRef<() => void>(() => undefined);
+  const { locked: eventsLocked, track: trackEventsPlan } = usePlanLock('events', {
+    communityId,
+    onRecheck: () => reloadOnRecheck.current(),
+  });
+  // Falha (rede/servidor) só dos eventos: a agenda fixa continua na tela
+  const [eventsError, setEventsError] = useState(false);
+
 
 
   // 1. Carregar Eventos
@@ -231,22 +244,35 @@ export default function CalendarScreen() {
         const to = new Date();
         to.setDate(to.getDate() + 180);
 
-        const [data, fixed] = await Promise.all([
+        // Cada consulta por conta própria: eventos fora do plano (ou com
+        // erro) não escondem a missa e a confissão da agenda fixa
+        const [eventsResult, fixedResult] = await Promise.allSettled([
           getCommunityEvents(communityId, { onlyMyPastorals }),
           getFixedOccurrences(communityId, from, to),
         ]);
-        setEvents(data);
-        setFixedEvents(fixed);
+        if (fixedResult.status === 'fulfilled') setFixedEvents(fixedResult.value);
+        if (eventsResult.status === 'fulfilled') {
+          setEvents(eventsResult.value);
+          setEventsError(false);
+          trackEventsPlan(null);
+        } else if (trackEventsPlan(eventsResult.reason)) {
+          setEvents([]);
+          setEventsError(false);
+        } else {
+          console.error(eventsResult.reason);
+          setEventsError(true);
+        }
       } catch (error) {
-        Alert.alert('Erro', 'Não foi possível carregar os eventos.');
         console.error(error);
+        setEventsError(true);
       } finally {
         setIsLoading(false);
         setIsRefreshing(false);
       }
     },
-    [communityId, onlyMyPastorals],
+    [communityId, onlyMyPastorals, trackEventsPlan],
   );
+  reloadOnRecheck.current = () => void loadEvents(true);
 
   useFocusEffect(
     useCallback(() => {
@@ -264,7 +290,8 @@ export default function CalendarScreen() {
         const favorites = await getFavoriteEvents();
         setFavoriteIds(favorites.map((event) => event.id));
       } catch (error) {
-        console.error('Erro ao carregar favoritos:', error);
+        if (isPlanRequiredError(error)) setFavoriteIds([]);
+        else console.error('Erro ao carregar favoritos:', error);
       }
     };
 
@@ -597,6 +624,14 @@ export default function CalendarScreen() {
               {event.isFixed ? 'Agenda fixa' : event.location || 'A definir'}
             </Text>
           )}
+          {event.isFixed && event.happeningNow && !event.cancelled ? (
+            <View style={styles.liveBadge} accessible accessibilityLabel="Acontecendo agora">
+              <View style={styles.liveDot} />
+              <Text style={styles.liveBadgeText}>
+                Acontecendo agora{horaDe(event.endDate) ? ` · até ${horaDe(event.endDate)}` : ''}
+              </Text>
+            </View>
+          ) : null}
         </View>
         {!event.isFixed && (
           <Pressable
@@ -903,6 +938,7 @@ export default function CalendarScreen() {
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={styles.typeFilters}
           >
+            {!eventsLocked && (
             <Pressable
               onPress={() => setOnlyMyPastorals((prev) => !prev)}
               style={[styles.typeChip, onlyMyPastorals && styles.typeChipActive]}
@@ -923,6 +959,7 @@ export default function CalendarScreen() {
                 Minhas pastorais
               </Text>
             </Pressable>
+            )}
 
             {/* Toggle da agenda fixa (Missa/Confissão/Adoração/Terço) */}
             <Pressable
@@ -966,6 +1003,28 @@ export default function CalendarScreen() {
             })}
           </ScrollView>
         </View>
+
+        {eventsLocked ? (
+          <View style={styles.planNotice} accessible accessibilityRole="text">
+            <Ionicons name="leaf-outline" size={15} color={colors.textSecondary} />
+            <Text style={styles.planNoticeText}>
+              Os eventos não estão ativos nesta comunidade. Missas, confissões e os demais horários fixos aparecem
+              normalmente.
+            </Text>
+          </View>
+        ) : eventsError ? (
+          <Pressable
+            style={styles.planNotice}
+            onPress={() => loadEvents(true)}
+            accessibilityRole="button"
+            accessibilityLabel="Não foi possível carregar os eventos. Tentar de novo"
+          >
+            <Ionicons name="cloud-offline-outline" size={15} color={colors.textSecondary} />
+            <Text style={styles.planNoticeText}>
+              Não foi possível carregar os eventos — toque para tentar de novo. Os horários fixos continuam abaixo.
+            </Text>
+          </Pressable>
+        ) : null}
 
         {viewMode === 'calendar' ? (
           <>
@@ -1511,6 +1570,36 @@ const createStyles = (colors: ReturnType<typeof useColors>) =>
     },
     eventTitleOff: { textDecorationLine: 'line-through', color: colors.textTertiary },
     eventOffText: { color: colors.error, fontWeight: '700' },
+    // "Acontecendo agora": verde + texto (nunca só a cor)
+    liveBadge: {
+      alignSelf: 'flex-start',
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      marginTop: 4,
+      paddingHorizontal: 8,
+      paddingVertical: 3,
+      borderRadius: 6,
+      backgroundColor: colors.success + '1F',
+    },
+    liveDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: colors.success },
+    liveBadgeText: { fontSize: 12.5, fontWeight: '800', color: colors.success },
+    // Aviso discreto: eventos fora do plano da comunidade (ou sem conexão)
+    planNotice: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      gap: 8,
+      marginHorizontal: 16,
+      marginTop: 8,
+      marginBottom: 4,
+      paddingHorizontal: 12,
+      paddingVertical: 9,
+      borderRadius: 10,
+      backgroundColor: colors.card,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.border,
+    },
+    planNoticeText: { flex: 1, fontSize: 13, lineHeight: 18, color: colors.textSecondary },
     eventLocation: {
       fontSize: 14,
       color: colors.textSecondary,

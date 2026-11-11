@@ -540,6 +540,43 @@ export const cancelAllNotifications = async (): Promise<void> => {
   }
 };
 
+/** Tipos (`content.data.type`) dos lembretes locais que o app agenda. */
+export type LocalReminderType = 'event_reminder' | 'mass_schedule_reminder' | 'roster_reminder';
+
+/**
+ * Cancela só os lembretes locais dos tipos pedidos. O reagendamento usa isto
+ * no lugar do "cancelar tudo": quando a consulta de eventos falha (ou o
+ * recurso não está ativo na comunidade), os lembretes dos horários fixos
+ * favoritos continuam de pé — e vice-versa. Devolve false se não conseguiu
+ * listar (aí nada foi cancelado e quem chamou não deve reagendar em dobro).
+ */
+export const cancelNotificationsByType = async (types: LocalReminderType[]): Promise<boolean> => {
+  let scheduled: Notifications.NotificationRequest[];
+  try {
+    scheduled = await Notifications.getAllScheduledNotificationsAsync();
+  } catch (error) {
+    console.error('Erro ao listar notificações para cancelar:', error);
+    return false;
+  }
+  const wanted = new Set<string>(types);
+  let ok = true;
+  for (const request of scheduled) {
+    const type = (request.content?.data as { type?: unknown } | undefined)?.type;
+    if (typeof type !== 'string' || !wanted.has(type)) continue;
+    try {
+      await Notifications.cancelScheduledNotificationAsync(request.identifier);
+    } catch (error) {
+      ok = false;
+      console.error('Erro ao cancelar notificação:', error);
+    }
+  }
+  if (wanted.has('event_reminder')) {
+    // Referências guardadas só dos lembretes de evento/escala
+    await AsyncStorage.removeItem(SCHEDULED_NOTIFICATIONS_KEY).catch(() => undefined);
+  }
+  return ok;
+};
+
 /**
  * Lista todas as notificações agendadas
  */
